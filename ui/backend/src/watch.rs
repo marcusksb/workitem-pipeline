@@ -2,7 +2,7 @@
 //! has items. The backend only schedules it and hands over the context; what it does (move,
 //! delete, create) is the script's business, through `workitem-move` and the workitem files.
 //! Costs no tokens. The script is a file run directly, never through a shell.
-use std::{collections::HashMap, fs, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use tokio::{io::AsyncWriteExt, process::Command};
 
@@ -138,7 +138,7 @@ impl Job {
     async fn run(self) -> Result<(), String> {
         let mut command = Command::new(&self.script);
         command.args(&self.args).current_dir(&self.repo).envs(self.env.iter().map(|(k, v)| (*k, v))).stdin(Stdio::piped()).kill_on_drop(true);
-        let mut child = command.spawn().map_err(|e| format!("cannot start {}: {e}", self.script.display()))?;
+        let mut child = command.spawn().map_err(|e| start_error(&self.script, e))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(self.items.as_bytes()).await;
         }
@@ -147,5 +147,29 @@ impl Job {
             .map_err(|_| format!("{} ran longer than {}s and was killed", self.script.display(), TIMEOUT.as_secs()))?
             .map_err(|e| e.to_string())?;
         if status.success() { Ok(()) } else { Err(format!("{} exited with {status}", self.script.display())) }
+    }
+}
+
+/// Why a script did not start, with the fix when it only lacks the execute bit.
+fn start_error(script: &Path, e: io::Error) -> String {
+    let executable = fs::metadata(script).is_ok_and(|m| m.permissions().mode() & 0o111 != 0);
+    if e.kind() == io::ErrorKind::PermissionDenied && !executable {
+        return format!("{} is not executable, run: chmod +x {}", script.display(), script.display());
+    }
+    format!("cannot start {}: {e}", script.display())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_script_without_the_execute_bit_says_how_to_fix_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("check");
+        fs::write(&script, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
+        let job = Job { script: script.clone(), args: vec![], repo: dir.path().to_path_buf(), env: vec![], items: "[]".into() };
+        assert_eq!(job.run().await.unwrap_err(), format!("{} is not executable, run: chmod +x {}", script.display(), script.display()));
     }
 }
