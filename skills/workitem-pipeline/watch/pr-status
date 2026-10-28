@@ -1,0 +1,3 @@
+#!/bin/sh
+# Column watcher that only keeps the PR status chips of a column up to date; starts nothing.
+exec "$(dirname "$0")/pr-review" --status-only "$@"

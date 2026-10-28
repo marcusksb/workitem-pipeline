@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Move the workitems of the current repo from .claude/workitems to .workitems.
+
+  workitem-migrate
+
+Run it with no agent sessions open: their prompts name the old path.
+Exit code 1 means nothing was moved.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+if root.returncode:
+    sys.exit("refused: not inside a git repo")
+old, new = Path(root.stdout.strip(), ".claude/workitems"), Path(root.stdout.strip(), ".workitems")
+if not old.is_dir():
+    sys.exit(f"refused: {old} does not exist")
+if new.exists():
+    sys.exit(f"refused: {new} already exists")
+old.rename(new)
+print(f"moved {old} -> {new}")

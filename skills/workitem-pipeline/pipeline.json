@@ -1,0 +1,52 @@
+{
+  "brief_sections": ["Findings", "Plan", "Risk", "Size", "Test plan", "Assumptions", "Links"],
+  "entry": "backlog",
+  "stages": [
+    {
+      "name": "backlog",
+      "handler": "workitem-triage",
+      "auto": true,
+      "watch": { "every": "5s", "command": "run-items" },
+      "next": ["analyze"]
+    },
+    {
+      "name": "analyze",
+      "handler": "workitem-analyze",
+      "auto": true,
+      "watch": { "every": "5s", "command": "run-items" },
+      "next": ["ready_for_development", "backlog"],
+      "on_enter": { "approved": "false" }
+    },
+    {
+      "name": "ready_for_development",
+      "handler": null,
+      "auto": false,
+      "next": ["in_development", "analyze"],
+      "on_enter": { "approved": "false" },
+      "require": { "issue": "linked", "brief": "complete" },
+      "gate": { "label": "Approve", "approve_to": "in_development", "reject_to": "analyze" }
+    },
+    {
+      "name": "in_development",
+      "handler": "workitem-start",
+      "auto": true,
+      "watch": { "every": "5s", "command": "run-items" },
+      "next": ["in_review"],
+      "require": { "approved": "true" }
+    },
+    {
+      "name": "in_review",
+      "handler": null,
+      "auto": true,
+      "watch": { "every": "1m", "command": "pr-review" },
+      "next": ["done"],
+      "on_merge": "done"
+    },
+    {
+      "name": "done",
+      "handler": null,
+      "auto": false,
+      "next": []
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Column watcher for a stage with a handler: start the handler for each idle item.
+
+  run-items [--max-attempts 3] [--max-running N]
+
+An item gets its handler when its agent_status is ok, it has no session (WORKITEM_BUSY lists the
+items that do), and the stage's `when` values (WORKITEM_WHEN, JSON) match its frontmatter. With
+WORKITEM_ONCE=1 it starts at most once per entry into the stage. After --max-attempts starts the
+item is set to blocked. The handler itself is started by workitem-run-item. The attempts are kept
+in the item's frontmatter as handler_attempts, and workitem-move clears them when the item changes
+stage, so an item that comes back starts over. With --max-running N it starts nothing while N
+items of the stage are `working` with a live session.
+"""
+import json, os, re, subprocess, sys
+
+def set_field(path, key, value):
+    with open(path) as f:
+        text = f.read()
+    line = f"{key}: {value}"
+    if re.search(rf"^{key}:.*$", text.split("\n---", 2)[0], re.M):
+        text = re.sub(rf"^{key}:.*$", lambda _: line, text, count=1, flags=re.M)
+    else:
+        head, sep, rest = text.partition("\n---")
+        text = head + "\n" + line + sep + rest if sep else text
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def set_status(path, value):
+    set_field(path, "agent_status", value)
+
+
+def frontmatter(path):
+    with open(path) as f:
+        text = f.read()
+    head = text[4:].split("\n---", 1)[0] if text.startswith("---\n") else ""
+    return {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in head.splitlines()) if _}
+
+def main(argv):
+    opts = dict(zip(argv[::2], argv[1::2]))
+    max_attempts = int(opts.get("--max-attempts", 3))
+    max_running = int(opts["--max-running"]) if "--max-running" in opts else None
+    stage = os.environ["WORKITEM_STAGE"]
+    once = os.environ.get("WORKITEM_ONCE") == "1"
+    when = json.loads(os.environ.get("WORKITEM_WHEN") or "{}")
+    busy = set(filter(None, os.environ.get("WORKITEM_BUSY", "").split(",")))
+    root = os.environ["WORKITEM_DIR_ROOT"]
+    run_item = os.path.join(os.path.dirname(os.environ["WORKITEM_MOVE"]), "workitem-run-item")
+
+    items = json.load(sys.stdin)
+    running = sum(1 for i in items if i["agent_status"] == "working" and i["dir"] in busy)
+
+    for item in items:
+        if max_running is not None and running >= max_running:
+            break
+        name = item["dir"]
+        path = os.path.join(root, name, "workitem.md")
+        fields = frontmatter(path)
+        attempts = int(fields.get("handler_attempts") or 0)
+        if item["agent_status"] != "ok" or name in busy or (once and attempts > 0):
+            continue
+        if any(fields.get(key) != wanted for key, wanted in when.items()):
+            continue
+        if attempts >= max_attempts:
+            set_status(path, f"blocked: max attempts reached in stage {stage}")
+            continue
+        set_field(path, "handler_attempts", attempts + 1)
+        result = subprocess.run([run_item, name], capture_output=True, text=True, env=os.environ)
+        if result.returncode == 0:
+            running += 1
+        elif result.returncode == 2:
+            set_status(path, f"blocked: {result.stderr.strip().removeprefix(name + ': ')}")
+
+
+main(sys.argv[1:])

@@ -1,0 +1,26 @@
+[package]
+name = "workitem-ui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "workload"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "sync", "fs", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+portable-pty = "0.9"
+rand = "0.9"
+rust-embed = "8"
+mime_guess = "2"
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio-tungstenite = "0.29"

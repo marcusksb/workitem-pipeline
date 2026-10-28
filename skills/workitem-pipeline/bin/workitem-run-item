@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Start a session on one workitem, as the dispatcher would.
+
+  workitem-run-item <dir>                  start the stage handler
+  workitem-run-item <dir> --fix <kind>     start the PR fixer: ci, conflict, changes or comments
+
+For column watcher scripts. It asks the running backend (workitem-ui) to start the session in
+the item's `wi-<dir>` tmux session. Exits 1 with the backend's reason when the item is not idle
+or the stage has no handler, and 2 when the handler itself cannot be used (not found), which the
+caller should treat as a reason to block the item. Policy (when to run, attempt caps) is the
+caller's. Uses WORKITEM_PROJECT, WORKITEM_UI_PORT and WORKITEM_UI_CONFIG, which the backend
+sets for a watcher.
+"""
+import sys
+
+from workitem_api import item_path, request
+
+
+def main(argv):
+    if len(argv) == 1:
+        path, body = item_path(argv[0], "run"), None
+    elif len(argv) == 3 and argv[1] == "--fix":
+        path, body = item_path(argv[0], "fix"), {"kind": argv[2]}
+    else:
+        sys.exit("usage: workitem-run-item <dir> [--fix ci|conflict|changes|comments]")
+    status, text = request("POST", path, body)
+    if status >= 300:
+        print(f"{argv[0]}: {text}", file=sys.stderr)
+        sys.exit(2 if status == 422 else 1)
+    print(text)
+
+
+main(sys.argv[1:])

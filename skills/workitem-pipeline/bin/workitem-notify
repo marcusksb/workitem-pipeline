@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Notification hook for workitem tmux sessions.
+
+Runs when a `wi-*` session waits for input (question, permission or trust
+prompt). If the workitem is still `working`, marks it blocked; the UI
+alerts the browser. Does nothing outside such a session or when the agent
+already set a status itself. Needs WORKITEM and WORKITEM_REPO in the env.
+"""
+import os
+import re
+import sys
+
+sys.dont_write_bytecode = True
+from workitem_paths import workitems_dir
+
+name, repo = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_REPO")
+if not name or not repo:
+    sys.exit(0)
+
+path = workitems_dir(repo) / name / "workitem.md"
+try:
+    text = path.read_text()
+except OSError:
+    sys.exit(0)
+
+status = re.search(r"^agent_status:\s*(.*)$", text, re.M)
+if not status or status.group(1).strip() != "working":
+    sys.exit(0)
+
+reason = f"blocked: waiting for input, tmux attach -t wi-{name}"
+path.write_text(text[:status.start()] + f"agent_status: {reason}" + text[status.end():])

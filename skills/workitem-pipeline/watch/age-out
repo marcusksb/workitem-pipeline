@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Column watcher: act on items that have been around longer than --older-than.
+
+  age-out --older-than 30d --delete
+  age-out --older-than 3d --to analyze
+
+Runs with the context the backend sets (WORKITEM_REPO, WORKITEM_DIR_ROOT, WORKITEM_MOVE) and the
+items of the column as a JSON array on stdin. Age is the item's `created` date. An item with an
+open PR (`pr:` set) is never deleted.
+"""
+import json, os, shutil, subprocess, sys
+from datetime import datetime, timedelta, timezone
+
+def interval(text):
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return timedelta(seconds=int(text[:-1]) * units[text[-1]])
+
+def main(argv):
+    older, to, delete = None, None, False
+    while argv:
+        flag = argv.pop(0)
+        if flag == "--older-than":
+            older = interval(argv.pop(0))
+        elif flag == "--to":
+            to = argv.pop(0)
+        elif flag == "--delete":
+            delete = True
+        else:
+            sys.exit(f"unknown option {flag}")
+    if older is None or delete == (to is not None):
+        sys.exit("usage: age-out --older-than <30d> (--delete | --to <stage>)")
+    root = os.environ["WORKITEM_DIR_ROOT"]
+    cutoff = datetime.now(timezone.utc) - older
+    for item in json.load(sys.stdin):
+        try:
+            created = datetime.fromisoformat(item["created"].replace("Z", "+00:00"))
+        except ValueError:
+            continue  # no usable date: leave it alone
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created > cutoff:
+            continue
+        folder = os.path.join(root, item["dir"])
+        if to:
+            subprocess.run([sys.executable, os.environ["WORKITEM_MOVE"], os.path.join(folder, "workitem.md"), to])
+        elif item["pr"].startswith("http"):
+            print(f"keeping {item['dir']}: it has a PR")
+        else:
+            shutil.rmtree(folder)
+            print(f"deleted {item['dir']}")
+
+main(sys.argv[1:])

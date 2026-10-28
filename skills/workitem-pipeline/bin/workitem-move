@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Move a workitem between pipeline stages, or list workitems.
+
+  workitem-move <workitem-dir|workitem.md> <stage>
+  workitem-move <workitem-dir|workitem.md> --board <name>   # put it on that board's entry stage
+  workitem-move --list [--auto]          # workitems of the current repo
+
+Rules come from the item's board: <workitems dir>/pipeline.json for `default` (or ../pipeline.json
+when the repo has none), <workitems dir>/boards/<name>.json for the others; `board: <name>` in the
+item's frontmatter picks one. Exit code 1 means the move was refused.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+from workitem_paths import workitems_dir
+
+BUNDLED = Path(__file__).resolve().parent.parent / "pipeline.json"
+BOARD_NAME = re.compile(r"[A-Za-z0-9_-]+")
+FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
+def fail(message):
+    print(f"refused: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def problems(config):
+    """Why `config` cannot be used as a board, as a list of messages (empty when it can)."""
+    stages = config.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(s, dict) for s in stages):
+        return ["'stages' must be a list of objects"]
+    names = [s.get("name") for s in stages]
+    found = []
+    if not all(isinstance(n, str) and n for n in names):
+        found.append("every stage needs a 'name'")
+    if len(set(names)) != len(names):
+        found.append("stage names must be unique")
+    if config.get("entry") not in names:
+        found.append(f"'entry' ({config.get('entry')!r}) is not a stage")
+    for stage in stages:
+        for target in stage.get("next", []):
+            if target not in names:
+                found.append(f"'{stage.get('name')}' has next '{target}', which is not a stage")
+    if not isinstance(config.get("brief_sections"), list):
+        found.append("'brief_sections' must be a list")
+    return found
+
+
+def board_file(workitems_dir, name):
+    """The file of board `name` for the items in `workitems_dir`, or None when there is none."""
+    if not BOARD_NAME.fullmatch(name):
+        return None
+    if name == "default":
+        # The project's own default board: boards/default.json, else pipeline.json, else the bundled one.
+        for local in (Path(workitems_dir, "boards", "default.json"), Path(workitems_dir, "pipeline.json")):
+            if local.is_file():
+                return local
+        return BUNDLED
+    own = Path(workitems_dir, "boards", f"{name}.json")
+    return own if own.is_file() else None
+
+
+def load_board(workitems_dir, name="default"):
+    """The stage table of board `name`, with `entry` and `brief_sections`; refuses a missing or invalid file."""
+    source = board_file(workitems_dir, name)
+    if not source:
+        fail(f"board '{name}' has no file in {workitems_dir}")
+    try:
+        config = json.loads(source.read_text())
+    except ValueError as error:
+        fail(f"{source} is not valid JSON: {error}")
+    found = problems(config)
+    if found:
+        fail(f"{source} is invalid: {'; '.join(found)}")
+    config["stages"] = {stage["name"]: stage for stage in config["stages"]}
+    return config
+
+
+def read(path):
+    text = path.read_text()
+    match = FRONTMATTER.match(text)
+    if not match:
+        fail(f"{path} has no frontmatter")
+    fields = {}
+    for line in match.group(1).splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    return text, match, fields
+
+
+def set_field(frontmatter, key, value):
+    line = f"{key}: {value}"
+    pattern = re.compile(rf"^{re.escape(key)}:.*$", re.M)
+    if pattern.search(frontmatter):
+        return pattern.sub(line, frontmatter, count=1)
+    return f"{frontmatter}\n{line}"
+
+
+def drop_field(frontmatter, key):
+    return re.sub(rf"^{re.escape(key)}:.*\n?", "", frontmatter, count=1, flags=re.M).rstrip("\n")
+
+
+def brief_problems(text, sections):
+    match = re.search(r"^## Review brief\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    if not match:
+        return ["missing '## Review brief' section"]
+    body = match.group(1)
+    problems = []
+    for section in sections:
+        part = re.search(rf"^### {re.escape(section)}\s*$(.*?)(?=^### |\Z)", body, re.M | re.S)
+        if not part or not part.group(1).strip():
+            problems.append(f"review brief section '### {section}' is missing or empty")
+    return problems
+
+
+def requirement_problem(key, wanted, fields, text, sections):
+    """Why `require: {key: wanted}` is not met, or None. `issue: linked` and `brief: complete`
+    are checks; anything else compares a frontmatter value."""
+    if (key, wanted) == ("issue", "linked"):
+        if fields.get("issue", "none").lower() in ("", "none"):
+            return "a linked issue (issue: is 'none')"
+    elif (key, wanted) == ("brief", "complete"):
+        missing = brief_problems(text, sections)
+        if missing:
+            return "a complete review brief: " + "; ".join(missing)
+    elif fields.get(key) != wanted:
+        return f"{key}: {wanted} (is '{fields.get(key)}')"
+    return None
+
+
+def resolve(target):
+    path = Path(target)
+    if not path.exists() and "/" not in target:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+        if root.returncode == 0:
+            path = workitems_dir(root.stdout.strip()) / target
+    return path / "workitem.md" if path.is_dir() else path
+
+
+def move(target, stage):
+    path = resolve(target)
+    text, match, fields = read(path)
+    board = load_board(path.parent.parent, fields.get("board", "default"))
+    stages = board["stages"]
+    current = fields.get("stage")
+    if stage not in stages:
+        fail(f"unknown stage '{stage}'")
+    if current in stages:
+        if stage not in stages[current].get("next", []):
+            fail(f"'{current}' -> '{stage}' is not allowed (allowed: {', '.join(stages[current].get('next', [])) or 'none'})")
+    elif stage != board["entry"]:
+        fail(f"current stage '{current}' is not on this board; it can only move to '{board['entry']}'")
+    enter(path, text, match, fields, board, stage)
+    print(f"{path.parent.name}: {current} -> {stage}")
+
+
+def holding(path, board, stage):
+    """How many other items of `board` are in `stage`, among the siblings of `path`."""
+    count = 0
+    for other in path.parent.parent.glob("*/workitem.md"):
+        if other != path:
+            _, _, fields = read(other)
+            count += fields.get("stage") == stage and fields.get("board", "default") == board
+    return count
+
+def enter(path, text, match, fields, board, stage, extra=None):
+    """Checks `require` for `stage`, then writes the stage, `ok`, `on_enter` and any `extra` fields."""
+    stages = board["stages"]
+    limit = stages[stage].get("limit")
+    if limit is not None and fields.get("stage") != stage:
+        name = fields.get("board", "default") if "board" not in (extra or {}) else extra["board"]
+        if holding(path, name, stage) >= limit:
+            fail(f"'{stage}' is full (limit {limit})")
+    for key, wanted in stages[stage].get("require", {}).items():
+        unmet = requirement_problem(key, wanted, fields, text, board["brief_sections"])
+        if unmet:
+            fail(f"'{stage}' requires {unmet}")
+    frontmatter = match.group(1)
+    frontmatter = set_field(frontmatter, "stage", stage)
+    frontmatter = set_field(frontmatter, "agent_status", "ok")
+    # A new stage starts its handler's attempts over (see watch/run-items).
+    frontmatter = drop_field(frontmatter, "handler_attempts")
+    for key, value in {**stages[stage].get("on_enter", {}), **(extra or {})}.items():
+        frontmatter = set_field(frontmatter, key, value)
+    path.write_text(f"---\n{frontmatter}\n---\n{text[match.end():]}")
+
+
+def has_session(name):
+    command = ["tmux"]
+    if os.environ.get("WORKITEM_UI_TMUX_SOCKET"):
+        command += ["-L", os.environ["WORKITEM_UI_TMUX_SOCKET"]]
+    try:
+        return subprocess.run([*command, "has-session", "-t", f"={name}"], capture_output=True).returncode == 0
+    except FileNotFoundError:  # no tmux, so no session
+        return False
+
+
+def switch(target, name):
+    """Puts the item on board `name`, at that board's entry stage."""
+    path = resolve(target)
+    text, match, fields = read(path)
+    if has_session(f"wi-{path.parent.name}"):
+        fail(f"{path.parent.name} has a running session (wi-{path.parent.name}); end it first")
+    board = load_board(path.parent.parent, name)
+    enter(path, text, match, fields, board, board["entry"], {"board": name})
+    print(f"{path.parent.name}: board {fields.get('board', 'default')} -> {name}, stage {board['entry']}")
+
+
+def list_items(auto_only):
+    root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if root.returncode:
+        fail("not inside a git repo")
+    directory = workitems_dir(root.stdout.strip())
+    boards = {}
+    for path in sorted(directory.glob("*/workitem.md")):
+        _, _, fields = read(path)
+        name = fields.get("board", "default")
+        if name not in boards:
+            boards[name] = load_board(directory, name)["stages"] if board_file(directory, name) else {}
+        stage = fields.get("stage")
+        config = boards[name].get(stage)
+        if not config or (auto_only and not (config.get("auto") and config.get("handler"))):
+            continue
+        print("\t".join([path.parent.name, stage, config.get("handler") or "-", fields.get("agent_status", "-")]))
+
+
+args = sys.argv[1:]
+if args[:1] == ["--list"]:
+    list_items("--auto" in args)
+elif len(args) == 3 and args[1] == "--board":
+    switch(args[0], args[2])
+elif len(args) == 2:
+    move(*args)
+else:
+    print(__doc__, file=sys.stderr)
+    sys.exit(2)

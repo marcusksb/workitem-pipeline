@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""Column watcher for the PR stage: read each item's PR with gh, show its status, and react.
+
+  pr-review [--max-attempts 3] [--ignore dockerized,e2e,playwright] [--status-only]
+
+For every item in the column that has a PR link it
+  - pushes approval, merge and CI status to the backend, for the board's chips;
+  - moves the item to WORKITEM_ON_MERGE when the PR is merged, and blocks it when the PR was
+    closed without a merge;
+  - starts a fixer session (workitem-run-item --fix) for red CI (up to --max-attempts per red
+    streak), a merge conflict (once per PR head, then it blocks the item), a changes-requested
+    review (once per review) and new comments or commented reviews that ask for a change (once
+    per comment).
+CI fixers only look at checks whose name does not contain one of the --ignore words. With
+--status-only only the first point runs (see pr-status). What it has already handled lives in the
+workitem's own frontmatter: pr_fix_attempts, pr_conflict_head, pr_handled_review and
+pr_seen_comments (a comma separated list of comment ids).
+"""
+import json, os, re, subprocess, sys, time
+
+sys.dont_write_bytecode = True
+# The helpers sit next to workitem-move, which the backend names.
+sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
+                else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
+from workitem_api import item_path, request  # noqa: E402
+
+FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+PENDING = ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED", "EXPECTED")
+VIEW_FIELDS = "state,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
+UNKNOWN_RETRIES = 3
+UNKNOWN_RETRY_WAIT = 2
+
+
+def check_name(check):
+    return check.get("name") or check.get("context") or ""
+
+
+def result_of(check):
+    for key in ("conclusion", "state", "status"):
+        if check.get(key):
+            return check[key]
+    return ""
+
+
+def ci_of(checks, ignore=()):
+    """passing, failing, pending or none. Pending wins, so a fixer never races running checks."""
+    seen = pending = failing = False
+    for check in checks or []:
+        if any(word in check_name(check).lower() for word in ignore):
+            continue
+        seen = True
+        result = result_of(check)
+        if result in PENDING:
+            pending = True
+        elif result in FAILED:
+            failing = True
+    if not seen:
+        return "none"
+    return "pending" if pending else "failing" if failing else "passing"
+
+
+def failed_checks(checks):
+    failed = {}
+    for check in checks or []:
+        if result_of(check) in FAILED and check_name(check) not in failed:
+            failed[check_name(check)] = check.get("detailsUrl") or check.get("targetUrl") or ""
+    return [{"name": name, "url": url} for name, url in failed.items()]
+
+
+def login_of(entry):
+    return ((entry or {}).get("login")) or ""
+
+
+def approved_by(raw, me):
+    """The latest verdict by `me` is an approval; plain comments do not change a verdict."""
+    verdicts = [r["state"] for r in raw.get("reviews") or [] if login_of(r.get("author")) == me
+                and r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")]
+    return bool(verdicts) and verdicts[-1] == "APPROVED"
+
+
+def status_of(raw, me, ignore):
+    checks = raw.get("statusCheckRollup")
+    approval = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes_requested", "REVIEW_REQUIRED": "review_required"}
+    merge = {"MERGEABLE": "mergeable", "CONFLICTING": "conflicting"}
+    return {
+        "approval": approval.get(raw.get("reviewDecision"), "none"),
+        "approved_by_me": approved_by(raw, me),
+        "merge": merge.get(raw.get("mergeable"), "unknown"),
+        "ci": ci_of(checks),
+        "failed": failed_checks(checks),
+        "head": raw.get("headRefOid"),
+    }, ci_of(checks, ignore)
+
+
+def changes_review(raw):
+    """The newest review that asks for changes, so one review starts one fixer."""
+    ids = [r["id"] for r in raw.get("reviews") or [] if r["state"] == "CHANGES_REQUESTED"]
+    return ids[-1] if ids else None
+
+
+def asks_for_change(author, body, me, inline, reply):
+    """My own comment with @change or as a new inline thread (a reply is conversation); anyone
+    else's if it is inline or carries a suggestion block."""
+    if author == me:
+        return "@change" in body or (inline and not reply)
+    return inline or "```suggestion" in body
+
+
+def review_comments(raw, me):
+    """Ids of review bodies that ask for a change: anyone else's commented review with text (a QA
+    report, say), or my own with @change. Changes-requested reviews have their own fixer."""
+    ids = []
+    for r in raw.get("reviews") or []:
+        author, body = login_of(r.get("author")), (r.get("body") or "").strip()
+        if author and body and r.get("state") == "COMMENTED" and (author != me or "@change" in body):
+            ids.append(f"review-{r['id']}")
+    return ids
+
+
+def gh(args):
+    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
+    return json.loads(result.stdout)
+
+
+def fetch(pr):
+    """GitHub says UNKNOWN while it computes mergeability; asking again a moment later helps."""
+    raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
+    for _ in range(UNKNOWN_RETRIES):
+        if raw.get("mergeable") != "UNKNOWN":
+            break
+        time.sleep(UNKNOWN_RETRY_WAIT)
+        raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
+    return raw
+
+
+def change_comments(pr, raw, me):
+    """Ids of the comments on the PR that ask for a change."""
+    number = pr.rstrip("/").rsplit("/", 1)[-1]
+    pages = gh(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/comments", "--paginate", "--slurp"])
+    ids = []
+    for page in pages:
+        for c in page:
+            author = login_of(c.get("user"))
+            if author and asks_for_change(author, c.get("body") or "", me, True, c.get("in_reply_to_id") is not None):
+                ids.append(f"inline-{c['id']}")
+    for c in raw.get("comments") or []:
+        author = login_of(c.get("author"))
+        if author and asks_for_change(author, c.get("body") or "", me, False, False):
+            ids.append(c["id"])
+    return ids + review_comments(raw, me)
+
+
+def read_fields(path):
+    with open(path) as f:
+        text = f.read()
+    head = text[4:].split("\n---", 1)[0] if text.startswith("---\n") else ""
+    return {k.strip(): v.strip() for k, sep, v in (line.partition(":") for line in head.splitlines()) if sep}
+
+
+def set_fields(path, updates):
+    """Sets keys in the frontmatter, appending the ones that are not there yet."""
+    if not updates:
+        return
+    with open(path) as f:
+        text = f.read()
+    end = text.index("\n---", 4) if text.startswith("---\n") and "\n---" in text[4:] else None
+    if end is None:
+        return
+    head, rest = text[:end], text[end:]
+    for key, value in updates.items():
+        line = f"{key}: {value}".rstrip()
+        if re.search(rf"^{re.escape(key)}:.*$", head, re.M):
+            head = re.sub(rf"^{re.escape(key)}:.*$", lambda _: line, head, count=1, flags=re.M)
+        else:
+            head += "\n" + line
+    with open(path, "w") as f:
+        f.write(head + rest)
+
+
+def set_status(path, value):
+    set_fields(path, {"agent_status": value})
+
+
+STATE_KEYS = {
+    "attempts": "pr_fix_attempts",
+    "conflict_head": "pr_conflict_head",
+    "handled_review": "pr_handled_review",
+    "seen_comments": "pr_seen_comments",
+}
+
+
+def read_entry(path):
+    """What was already handled for this item. `seen_comments` is None until the first reading."""
+    fields = read_fields(path)
+    seen = fields.get(STATE_KEYS["seen_comments"])
+    return {
+        "attempts": int(fields.get(STATE_KEYS["attempts"]) or 0),
+        "conflict_head": fields.get(STATE_KEYS["conflict_head"], ""),
+        "handled_review": fields.get(STATE_KEYS["handled_review"], ""),
+        "seen_comments": None if seen is None else [c for c in seen.split(",") if c],
+    }
+
+
+def write_entry(path, before, after):
+    """Writes the keys that changed; an item that was never touched keeps a clean file."""
+    updates = {}
+    for key, name in STATE_KEYS.items():
+        if after[key] != before[key]:
+            updates[name] = ",".join(after[key]) if key == "seen_comments" else after[key]
+    set_fields(path, updates)
+
+
+class Watcher:
+    def __init__(self, options):
+        self.max_attempts = options["max_attempts"]
+        self.ignore = options["ignore"]
+        self.status_only = options["status_only"]
+        self.on_merge = os.environ.get("WORKITEM_ON_MERGE", "")
+        self.busy = set(filter(None, os.environ.get("WORKITEM_BUSY", "").split(",")))
+        self.root = os.environ["WORKITEM_DIR_ROOT"]
+        self.move = os.environ["WORKITEM_MOVE"]
+        self.run_item = os.path.join(os.path.dirname(self.move), "workitem-run-item")
+        self._me = None
+
+    def me(self):
+        if self._me is None:
+            try:
+                self._me = gh(["api", "user"])["login"]
+            except (RuntimeError, KeyError, ValueError):
+                self._me = ""
+        return self._me
+
+    def fixer(self, name, kind):
+        """Starts the fixer; False when the backend refused (no session, item not idle, ...)."""
+        result = subprocess.run([self.run_item, name, "--fix", kind], capture_output=True, text=True, env=os.environ)
+        if result.returncode != 0:
+            print(f"cannot start the {kind} fixer of {name}: {result.stderr.strip()}", file=sys.stderr)
+        return result.returncode == 0
+
+    def check(self, item):
+        path = os.path.join(self.root, item["dir"], "workitem.md")
+        before = read_entry(path)
+        entry = {**before, "seen_comments": None if before["seen_comments"] is None else list(before["seen_comments"])}
+        try:
+            self.react(item, path, entry)
+        finally:
+            write_entry(path, before, entry)
+
+    def react(self, item, path, entry):
+        name, pr = item["dir"], item["pr"]
+        try:
+            raw = fetch(pr)
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+            print(f"cannot read the PR of {name}: {e}", file=sys.stderr)
+            return
+        status = item["agent_status"]
+        busy = name in self.busy
+
+        if raw["state"] in ("MERGED", "CLOSED"):
+            request("DELETE", item_path(name, "review"))
+            if self.status_only:
+                return
+            if raw["state"] == "MERGED":
+                if self.on_merge:
+                    subprocess.run([sys.executable, self.move, path, self.on_merge], capture_output=True)
+            elif not status.startswith("blocked") and not busy:
+                set_status(path, "blocked: PR was closed without merge")
+            return
+        if raw["state"] != "OPEN":
+            return
+
+        shown, fix_ci = status_of(raw, self.me(), self.ignore)
+        request("PUT", item_path(name, "review"), shown)
+        if self.status_only:
+            return
+        merge, head = shown["merge"], raw.get("headRefOid")
+
+        # A conflicting PR gets no merge ref, so its checks come back cancelled or stale; the
+        # conflict fixer below goes first and a CI fixer would only burn attempts.
+        if fix_ci in ("passing", "none"):
+            entry["attempts"] = 0
+        elif fix_ci == "failing" and status == "ok" and not busy and merge != "conflicting":
+            if entry["attempts"] >= self.max_attempts:
+                set_status(path, f"blocked: CI still failing after {self.max_attempts} fix attempts")
+                return
+            entry["attempts"] += 1
+            if self.fixer(name, "ci"):
+                status = "working"
+            else:
+                entry["attempts"] -= 1
+
+        # A conflict comes before review comments: fixing them on a stale base would conflict
+        # again. Once per PR head. A fixer that ended without a push and without blocking (it
+        # crashed, or said ok) would leave the item ok and never looked at again, so that blocks.
+        # While blocked the head is forgotten, so clearing the block tries the fixer again.
+        if merge == "conflicting" and head and status.startswith("blocked"):
+            entry["conflict_head"] = ""
+        elif merge == "conflicting" and head and status == "ok" and not busy:
+            if entry["conflict_head"] == head:
+                set_status(path, "blocked: merge conflict still open after the conflict fixer; rebase by hand, or clear to retry")
+                entry["conflict_head"] = ""
+                return
+            if self.fixer(name, "conflict"):
+                entry["conflict_head"] = head
+                entry["attempts"] = 0  # the rebase starts a new CI streak
+                return
+
+        # Once per review: comments never leave a PR, so the review id says "already handled".
+        review = changes_review(raw)
+        if shown["approval"] == "changes_requested" and review and status == "ok" and not busy and entry["handled_review"] != review:
+            if self.fixer(name, "changes"):
+                entry["handled_review"] = review
+                status = "working"
+
+        # New comments that ask for a change come last. Ids, not times: comments can share a
+        # timestamp. The first reading of an item only records what is already there.
+        can_launch = status == "ok" and not busy
+        if entry["seen_comments"] is None or can_launch:
+            try:
+                comments = change_comments(pr, raw, self.me())
+            except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+                print(f"cannot read the comments of {name}: {e}", file=sys.stderr)
+                return
+            seen = entry["seen_comments"] if entry["seen_comments"] is not None else list(comments)
+            new = [c for c in comments if c not in seen]
+            if not new:
+                entry["seen_comments"] = seen
+            elif can_launch and self.fixer(name, "comments"):
+                entry["seen_comments"] = seen + new
+
+
+def options_of(argv):
+    options = {"max_attempts": 3, "ignore": ["dockerized", "e2e", "playwright"], "status_only": False}
+    while argv:
+        flag = argv.pop(0)
+        if flag == "--max-attempts":
+            options["max_attempts"] = int(argv.pop(0))
+        elif flag == "--ignore":
+            options["ignore"] = [w for w in argv.pop(0).lower().split(",") if w]
+        elif flag == "--status-only":
+            options["status_only"] = True
+        else:
+            sys.exit(f"unknown option {flag}")
+    return options
+
+
+def main(argv):
+    watcher = Watcher(options_of(list(argv)))
+    for item in json.load(sys.stdin):
+        if item["pr"].startswith("http"):
+            watcher.check(item)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

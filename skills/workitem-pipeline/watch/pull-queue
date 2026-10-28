@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Column watcher for a queue: move idle items to the stage's first `next`, oldest first.
+
+  pull-queue
+
+An item is idle when its agent_status is ok and it has no session (WORKITEM_BUSY lists the
+items that do) and its title does not contain "cdn release" (any case). Moves go through workitem-move, so a full target stage (`limit`) simply refuses;
+the script stops at the first refusal and tries again on the next run.
+
+When the backlog of the `pr-review` board is empty, it starts `claude -p /pr-review-intake` in the
+background to fill it, at most once per INTAKE_EVERY. The intake runs detached, so the watcher's
+timeout does not kill it; its output goes to INTAKE_LOG.
+"""
+import json, os, subprocess, sys, time
+
+INTAKE_EVERY = 600
+INTAKE_STAMP = os.path.expanduser("~/.cache/workitem-pipeline/{project}-pr-review-intake.stamp")
+INTAKE_LOG = os.path.expanduser("~/.cache/workitem-pipeline/{project}-pr-review-intake.log")
+
+def start_intake():
+    project = os.environ["WORKITEM_PROJECT"]
+    stamp = INTAKE_STAMP.format(project=project)
+    if os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < INTAKE_EVERY:
+        return
+    os.makedirs(os.path.dirname(stamp), exist_ok=True)
+    open(stamp, "w").close()
+    with open(INTAKE_LOG.format(project=project), "a") as log:
+        subprocess.Popen(["claude", "-p", "/pr-review-intake", "--permission-mode", "bypassPermissions"],
+                         cwd=os.environ["WORKITEM_REPO"], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True)
+
+def main():
+    items = json.load(sys.stdin)
+    if not items and os.environ.get("WORKITEM_BOARD") == "pr-review" and os.environ.get("WORKITEM_STAGE") == "backlog":
+        start_intake()
+    target = os.environ["WORKITEM_NEXT"].split(",")[0]
+    if not target:
+        return
+    busy = set(filter(None, os.environ.get("WORKITEM_BUSY", "").split(",")))
+    root = os.environ["WORKITEM_DIR_ROOT"]
+    idle = [i for i in items if i["agent_status"] == "ok" and i["dir"] not in busy
+            and "cdn release" not in i["title"].lower() 
+            and "chore(main): release" not in i["title"].lower()]
+    for item in sorted(idle, key=lambda i: (i["created"], i["dir"])):
+        path = os.path.join(root, item["dir"], "workitem.md")
+        if subprocess.run([sys.executable, os.environ["WORKITEM_MOVE"], path, target], capture_output=True).returncode != 0:
+            break
+
+main()
