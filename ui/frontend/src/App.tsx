@@ -46,6 +46,13 @@ export function useSession() {
   return { state, error, login, expire: () => setState("out") };
 }
 
+/** A click on the board that hits no card, control or dialog, and selects no text; it closes the open item. */
+function isBackground(target: EventTarget): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(".card, button, a, input, select, textarea, label, .dialog-overlay")) return false;
+  return window.getSelection()?.isCollapsed ?? true;
+}
+
 function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [route, setRoute] = useState<Route>(readRoute);
   const project = route.project ?? null;
@@ -126,7 +133,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
       <AgentSessions sessions={sessions.data ?? []} />
       {projects.data?.length === 0 && <p className="empty">No projects yet. Add a repo directory to see its workitems.</p>}
       <main className={selected ? "with-detail" : ""}>
-        <div className="left">
+        <div className="left" onClick={(event) => selected && isBackground(event.target) && navigate({})}>
           <Board items={shown} pipelines={pipelines.data} projects={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={(item) => navigate({ item })} showProject={!project} onChanged={() => void items.reload()} />
         </div>
         {selected && (

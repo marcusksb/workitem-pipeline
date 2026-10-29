@@ -149,6 +149,10 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
 
   await page.goto(`${base.split("#")[0]}#demo/T-1-demo/terminal`);
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
+
+  // A click on the board outside any card closes the item like the Close button.
+  await page.locator(".column h2").first().click({ position: { x: 2, y: 2 } });
+  await expect(page.locator(".detail")).toHaveCount(0);
 });
 
 test("a project's boards are tabs and the chosen board stays in the URL", async ({ page }) => {
