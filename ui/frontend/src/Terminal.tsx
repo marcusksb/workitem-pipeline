@@ -8,7 +8,8 @@ import { terminalUrl } from "./api";
 type Scrollback = { history: number; position: number };
 
 /** xterm.js attached to the item's tmux session. Unmounting detaches; the agent keeps running.
- *  tmux repaints in place, so xterm has no scrollback; the scrollbar drives tmux's history instead. */
+ *  tmux repaints in place, so xterm has no scrollback; the scrollbar drives tmux's history instead,
+ *  unless the program in the pane takes the mouse. */
 export function Terminal({ path }: { path: string }) {
   const container = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -66,6 +67,9 @@ export function Terminal({ path }: { path: string }) {
     };
     const lineHeight = () => container.current!.clientHeight / term.rows;
     term.attachCustomWheelEventHandler((event) => {
+      // A full-screen program that tracks the mouse (Claude Code does) scrolls itself and leaves
+      // tmux no history, so xterm passes the wheel through tmux to it.
+      if (term.modes.mouseTrackingMode !== "none") return true;
       const lines = event.deltaMode === 0 ? event.deltaY / lineHeight() : event.deltaMode === 1 ? event.deltaY : event.deltaY * term.rows;
       scrollTo.current(exact - lines);
       return false;
