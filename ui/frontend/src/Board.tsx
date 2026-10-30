@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isBlocked, isWorking, itemKey, KIND_ICONS, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isBlocked, isWorking, itemKey, KIND_ICONS, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
-import { IconInfo, IconTrash } from "./icons";
+import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import { Item, Pipelines } from "./types";
 import { useRun } from "./useRun";
@@ -20,7 +20,7 @@ type Props = {
   selected: string | null;
   onSelect: (item: Item) => void;
   showProject: boolean;
-  /** Called after items were removed. */
+  /** Called after items were removed or a column was paused. */
   onChanged: () => void;
 };
 
@@ -55,6 +55,27 @@ function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
       >
         <IconTrash />
         Clear
+      </button>
+      {error && <p className="error clear-error">{error}</p>}
+    </>
+  );
+}
+
+/** Pauses or resumes the watchers of a column in every project that has them. Running scripts and sessions go on. */
+function PauseColumn({ projects, board, stage, label, paused, onDone }: { projects: string[]; board: string; stage: string; label: string; paused: boolean; onDone: () => void }) {
+  const { busy, error, run } = useRun(onDone);
+  const toggle = () => run(paused ? "Resume" : "Pause", () => Promise.all(projects.map((project) => api.pauseStage(project, board, stage, !paused))));
+  return (
+    <>
+      {paused && <span className="chip paused">Paused</span>}
+      <button
+        className="link pause"
+        disabled={busy}
+        title={paused ? "Resume this column's watchers" : "Pause this column's watchers: nothing new starts here until you resume"}
+        aria-label={`${paused ? "Resume" : "Pause"} ${label}`}
+        onClick={toggle}
+      >
+        {paused ? <IconPlay /> : <IconPause />}
       </button>
       {error && <p className="error clear-error">{error}</p>}
     </>
@@ -159,8 +180,9 @@ export function Board({ items, pipelines, projects, board, onBoard, selected, on
       <div className={`board${view === "list" ? " list" : ""}`}>
         {shown.map(({ name, label, final }) => {
           const inColumn = columns[name] ?? [];
+          const pause = pauseState(pipelines, projects, active, name);
           return (
-            <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}`} data-stage={name} key={name}>
+            <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}${pause.paused ? " paused" : ""}`} data-stage={name} key={name}>
               <h2>
                 {label} <span className="count">{inColumn.length}</span>
                 {name !== UNKNOWN_STAGE && (
@@ -168,6 +190,7 @@ export function Board({ items, pipelines, projects, board, onBoard, selected, on
                     <IconInfo />
                   </button>
                 )}
+                {pause.projects.length > 0 && <PauseColumn projects={pause.projects} board={active} stage={name} label={label} paused={pause.paused} onDone={onChanged} />}
                 {final && inColumn.length > 0 && <ClearColumn items={inColumn} onDone={onChanged} />}
               </h2>
               <div className="cards">{treeOrder(inColumn).map(({ item, depth }) => card(item, depth))}</div>

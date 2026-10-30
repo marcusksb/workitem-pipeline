@@ -44,6 +44,8 @@ pub struct AppState {
     pub watching: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Wakes the dispatcher ahead of its tick.
     pub wake: tokio::sync::Notify,
+    /// Stages (`project/board/stage`) whose watchers do not start; see `watch::set_paused`.
+    pub paused: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl AppState {
@@ -52,7 +54,6 @@ impl AppState {
         let env = |name: &str| std::env::var(name).ok();
         let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
         AppState {
-            store,
             tmux_socket: env("WORKITEM_UI_TMUX_SOCKET"),
             port,
             skills_dir: env("WORKITEM_UI_SKILLS").map(PathBuf::from).unwrap_or_else(|| home.join(".claude/skills")),
@@ -63,6 +64,8 @@ impl AppState {
             busy: Default::default(),
             watching: Default::default(),
             wake: Default::default(),
+            paused: std::sync::Mutex::new(watch::load_paused(&store)),
+            store,
         }
     }
 }
@@ -77,6 +80,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/projects/{name}", delete(api::remove_project))
         .route("/api/pipelines", get(api::pipelines))
         .route("/api/projects/{project}/boards/{board}/stages/{stage}/source", get(api::stage_source))
+        .route("/api/projects/{project}/boards/{board}/stages/{stage}/paused", put(api::pause_stage))
         .route("/api/workitems", get(api::list_items))
         .route("/api/workitems/{project}/{dir}", get(api::item))
         .route("/api/workitems/{project}/{dir}/pr", get(api::pr_conversation))

@@ -32,6 +32,8 @@ export const api = {
   pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
   stageSource: (project: string, board: string, stage: string) =>
     request<StageSource>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
+  pauseStage: (project: string, board: string, stage: string, paused: boolean) =>
+    request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/paused`, { paused }),
   items: () => request<Item[]>("GET", "/api/workitems"),
   detail: (project: string, dir: string) =>
     request<Detail>("GET", `/api/workitems/${segment(project)}/${segment(dir)}`),

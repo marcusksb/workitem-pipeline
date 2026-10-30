@@ -227,3 +227,15 @@ test("the Files tab lists the workitem folder and previews a file", async ({ pag
   const raw = await page.request.get(base.split("#")[0].replace(/\/$/, "") + "/api/workitems/demo/T-2-gate/files/notes/findings.md");
   expect(await raw.text()).toContain("the cache is stale");
 });
+
+test("pausing a column marks it until it is resumed, and only watched columns can pause", async ({ page }) => {
+  await page.goto(base);
+  const analyze = page.locator('.column[data-stage="analyze"]');
+  await analyze.getByRole("button", { name: "Pause analyze" }).click();
+  await expect(analyze.getByText("Paused", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(analyze.getByText("Paused", { exact: true })).toBeVisible();
+  await analyze.getByRole("button", { name: "Resume analyze" }).click();
+  await expect(analyze.getByText("Paused", { exact: true })).toHaveCount(0);
+  await expect(page.locator('.column[data-stage="done"]').getByRole("button", { name: /^Pause/ })).toHaveCount(0);
+});
