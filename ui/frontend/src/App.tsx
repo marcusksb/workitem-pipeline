@@ -134,7 +134,10 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
       {projects.data?.length === 0 && <p className="empty">No projects yet. Add a repo directory to see its workitems.</p>}
       <main className={selected ? "with-detail" : ""}>
         <div className="left" onClick={(event) => selected && isBackground(event.target) && navigate({})}>
-          <Board items={shown} pipelines={pipelines.data} projects={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={(item) => navigate({ item })} showProject={!project} onChanged={() => void items.reload()} />
+          <Board items={shown} pipelines={pipelines.data} projects={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={(item) => navigate({ item })} showProject={!project} onChanged={() => {
+            void items.reload();
+            void pipelines.reload();
+          }} />
         </div>
         {selected && (
           <DetailPanel

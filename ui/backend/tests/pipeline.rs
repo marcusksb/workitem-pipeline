@@ -1168,6 +1168,40 @@ async fn a_column_watcher_runs_its_script_once_per_interval_with_the_column_as_c
 }
 
 #[tokio::test]
+async fn a_paused_column_starts_no_watcher_until_it_is_resumed() {
+    let w = world();
+    write_item(&w.repo, "T-33-in", "queue", "");
+    write_watch_script(&w.repo, "record", "echo ran >> .watch-log");
+    fs::write(
+        w.repo.join(".claude/workitems/pipeline.json"),
+        board(r#"[{"name":"queue","next":["other"],"watch":{"every":"1d","command":"record"}},{"name":"other"}]"#).replace(r#""entry": "qa""#, r#""entry": "queue""#),
+    )
+    .unwrap();
+    let pause = |paused: bool| {
+        let request = Request::put("/api/projects/app/boards/default/stages/queue/paused")
+            .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+            .header(header::COOKIE, format!("wi_session={}", w.token))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(format!(r#"{{"paused":{paused}}}"#)))
+            .unwrap();
+        router(w.state.clone()).oneshot(request)
+    };
+
+    assert_eq!(pause(true).await.unwrap().status(), StatusCode::NO_CONTENT);
+    settle(&w).await;
+    assert!(!w.repo.join(".watch-log").exists(), "a paused watcher does not run");
+    let boards = get(&w, "/api/pipelines").await;
+    assert!(boards.contains(r#""watched":["queue"]"#) && boards.contains(r#""paused":["queue"]"#), "{boards}");
+    let stored = fs::read_to_string(w.state.store.sibling("paused.json")).unwrap();
+    assert!(stored.contains("app/default/queue"), "the pause survives a restart: {stored}");
+
+    assert_eq!(pause(false).await.unwrap().status(), StatusCode::NO_CONTENT);
+    settle(&w).await;
+    eventually("the resumed watcher ran", || w.repo.join(".watch-log").exists()).await;
+    assert!(get(&w, "/api/pipelines").await.contains(r#""paused":[]"#));
+}
+
+#[tokio::test]
 async fn a_watcher_with_a_missing_script_does_nothing_and_does_not_stop_the_dispatcher() {
     let w = world();
     write_item(&w.repo, "T-32-qa", "qa", "");

@@ -13,8 +13,11 @@ export type StageConfig = {
 
 export type Pipeline = { entry: string; stages: StageConfig[] };
 
-/** A board of a project: `pipeline` is the newest valid file; `error` says why the file on disk is not in use. */
-export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null };
+/**
+ * A board of a project: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.
+ * `watched` are the stages with a watcher, `paused` the ones whose watchers are paused.
+ */
+export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[] };
 
 /** Boards of every project, by project name; `default` comes first. */
 export type Pipelines = Record<string, BoardInfo[]>;

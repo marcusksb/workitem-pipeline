@@ -22,6 +22,18 @@ export type Column = { name: string; label: string; final: boolean };
 const boardOfProject = (pipelines: Pipelines | undefined, project: string, board: string) =>
   pipelines?.[project]?.find((b) => b.name === board);
 
+/**
+ * The projects among `projects` where stage `stage` of board `board` has a watcher, and whether
+ * all of them have paused it. A column shows these projects merged, so it pauses them together.
+ */
+export function pauseState(pipelines: Pipelines | undefined, projects: string[], board: string, stage: string): { projects: string[]; paused: boolean } {
+  const watching = projects.flatMap((project) => {
+    const found = boardOfProject(pipelines, project, board);
+    return found?.watched.includes(stage) ? [{ project, paused: found.paused.includes(stage) }] : [];
+  });
+  return { projects: watching.map((w) => w.project), paused: watching.length > 0 && watching.every((w) => w.paused) };
+}
+
 /** Board names of `projects`, `default` first, then by name. */
 export function boardNames(pipelines: Pipelines | undefined, projects: string[]): string[] {
   const names = new Set<string>();

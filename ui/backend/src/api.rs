@@ -86,6 +86,10 @@ pub async fn remove_project(State(state): State<Shared>, Path(name): Path<String
 #[derive(Serialize)]
 pub struct BoardInfo {
     name: String,
+    /// Stages with at least one watcher, which can be paused.
+    watched: Vec<String>,
+    /// Stages whose watchers are paused.
+    paused: Vec<String>,
     #[serde(flatten)]
     resolved: Resolved,
 }
@@ -93,7 +97,13 @@ pub struct BoardInfo {
 /// The boards of every project, keyed by project name; `default` comes first.
 pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
     let boards = |project: &Project| {
-        state.board_names(project).into_iter().map(|name| BoardInfo { resolved: state.pipeline(project, &name), name }).collect()
+        let info = |name: String| {
+            let resolved = state.pipeline(project, &name);
+            let stages = resolved.pipeline.iter().flat_map(|p| &p.stages);
+            let watched = stages.filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
+            BoardInfo { watched, paused: crate::watch::paused_stages(&state, project, &name), resolved, name }
+        };
+        state.board_names(project).into_iter().map(info).collect()
     };
     Json(state.store.projects().iter().map(|project| (project.name.clone(), boards(project))).collect())
 }
@@ -300,4 +310,26 @@ pub async fn stage_source(
         (None, None) => None,
     };
     Ok(Json(StageSource { scripts, prose }))
+}
+
+#[derive(Deserialize)]
+pub struct Pause {
+    paused: bool,
+}
+
+/// Pauses or resumes the watchers of a stage. Resuming wakes the dispatcher, so a watcher that came
+/// due meanwhile runs at once.
+pub async fn pause_stage(
+    State(state): State<Shared>,
+    Path((project, board, stage)): Path<(String, String, String)>,
+    Json(body): Json<Pause>,
+) -> Result<StatusCode, ApiError> {
+    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
+    let pipeline = state.pipeline(&project, &board).pipeline.ok_or(ApiError::not_found("board"))?;
+    let stage = pipeline.stage(&stage).ok_or(ApiError::not_found("stage"))?;
+    crate::watch::set_paused(&state, &project, &board, &stage.name, body.paused).map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !body.paused {
+        state.wake.notify_one();
+    }
+    Ok(StatusCode::NO_CONTENT)
 }

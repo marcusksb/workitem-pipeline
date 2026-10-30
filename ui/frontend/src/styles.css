@@ -407,6 +407,9 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .source-path code { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .source pre { margin: 0; padding: 10px; max-height: 55vh; overflow: auto; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; white-space: pre; }
 .column h2 .info { padding: 2px; margin-left: 2px; color: var(--muted); }
+.column h2 .pause { padding: 2px; color: var(--muted); }
+.column h2 .chip.paused { font-weight: 500; color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.column.paused .cards { opacity: 0.55; }
 
 .info { margin: 0; display: grid; }
 .info > div { display: grid; grid-template-columns: minmax(110px, 160px) 1fr; gap: 12px; align-items: baseline; padding: 6px 0; }

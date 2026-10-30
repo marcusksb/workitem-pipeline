@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, newlyBlocked, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, newlyBlocked, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Item, Pipelines } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
@@ -37,11 +37,21 @@ describe("newlyBlocked", () => {
 });
 
 const stage = (name: string, label: string | null = null) => ({ name, label, handler: null, auto: false, next: [], gate: null, on_merge: null });
-const board = (name: string, ...stages: string[]) => ({ name, pipeline: { entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null });
+const board = (name: string, ...stages: string[]) => ({ name, pipeline: { entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [] });
 const pipelines: Pipelines = {
   app: [board("default", "todo", "doing", "done"), board("research", "idea", "done")],
   lib: [board("default", "todo", "review", "done")],
 };
+
+describe("pauseState", () => {
+  const watched = (paused: string[]) => ({ ...board("default", "todo", "doing"), watched: ["doing"], paused });
+  it("names the projects that watch the stage and is paused only when all of them are", () => {
+    const some: Pipelines = { app: [watched(["doing"])], lib: [watched([])], doc: [board("default", "doing")] };
+    expect(pauseState(some, ["app", "lib", "doc"], "default", "doing")).toEqual({ projects: ["app", "lib"], paused: false });
+    expect(pauseState(some, ["app", "doc"], "default", "doing")).toEqual({ projects: ["app"], paused: true });
+    expect(pauseState(some, ["app", "lib"], "default", "todo")).toEqual({ projects: [], paused: false });
+  });
+});
 
 describe("boardNames", () => {
   it("puts default first and merges the boards of several projects", () => {
@@ -61,8 +71,8 @@ describe("columnsFor", () => {
 
   it("uses the label, else the name with spaces, and skips projects without a valid file", () => {
     const labelled: Pipelines = {
-      app: [{ name: "default", pipeline: { entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null }],
-      bad: [{ name: "default", pipeline: null, error: "broken" }],
+      app: [{ name: "default", pipeline: { entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null, watched: [], paused: [] }],
+      bad: [{ name: "default", pipeline: null, error: "broken", watched: [], paused: [] }],
     };
     expect(columnsFor(labelled, ["app", "bad", "missing"], "default")).toEqual([
       { name: "a_b", label: "a b", final: true },
@@ -73,8 +83,8 @@ describe("columnsFor", () => {
 
   it("marks a column final only when no project has a next stage for it", () => {
     const flow: Pipelines = {
-      app: [{ name: "default", pipeline: { entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null }],
-      lib: [{ name: "default", pipeline: { entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null }],
+      app: [{ name: "default", pipeline: { entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null, watched: [], paused: [] }],
+      lib: [{ name: "default", pipeline: { entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null, watched: [], paused: [] }],
     };
     expect(columnsFor(flow, ["app"], "default").map((c) => c.final)).toEqual([false, true]);
     expect(columnsFor(flow, ["app", "lib"], "default").map((c) => c.final)).toEqual([false, false, true]);

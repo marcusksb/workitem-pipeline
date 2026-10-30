@@ -53,6 +53,7 @@ export const IconMessage = make(
   <path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12z" />,
 );
 export const IconPlay = make(<path d="M7 4.5v15l13-7.5z" />);
+export const IconPause = make(<path d="M8 5v14M16 5v14" />);
 export const IconBot = make(
   <>
     <rect x="4" y="8" width="16" height="12" rx="3" />

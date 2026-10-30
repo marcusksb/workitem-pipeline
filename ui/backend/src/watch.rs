@@ -2,12 +2,12 @@
 //! has items. The backend only schedules it and hands over the context; what it does (move,
 //! delete, create) is the script's business, through `workitem-move` and the workitem files.
 //! Costs no tokens. The script is a file run directly, never through a shell.
-use std::{collections::HashMap, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use tokio::{io::AsyncWriteExt, process::Command};
 
 use crate::{
-    config::Project,
+    config::{Project, Store},
     locate::{self, Found},
     pipeline::{Stage, Watch},
     tmux,
@@ -53,19 +53,49 @@ pub fn forget(state: &AppState, project: &Project, board: &str, stage: &str) {
     }
 }
 
+fn paused_key(project: &Project, board: &str, stage: &str) -> String {
+    format!("{}/{board}/{stage}", project.name)
+}
+
+/// The paused stages kept next to the config, so a pause survives a restart.
+pub fn load_paused(store: &Store) -> HashSet<String> {
+    fs::read_to_string(store.sibling("paused.json")).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+}
+
+/// Pauses or resumes every watcher of a stage. A paused one is not started; a script that is
+/// already running finishes.
+pub fn set_paused(state: &AppState, project: &Project, board: &str, stage: &str, paused: bool) -> io::Result<()> {
+    let mut stages = state.paused.lock().unwrap();
+    let key = paused_key(project, board, stage);
+    if paused { stages.insert(key) } else { stages.remove(&key) };
+    let mut sorted: Vec<&String> = stages.iter().collect();
+    sorted.sort();
+    fs::write(state.store.sibling("paused.json"), serde_json::to_string_pretty(&sorted)?)
+}
+
+/// The stages of a board whose watchers are paused.
+pub fn paused_stages(state: &AppState, project: &Project, board: &str) -> Vec<String> {
+    let prefix = paused_key(project, board, "");
+    let mut stages: Vec<String> = state.paused.lock().unwrap().iter().filter_map(|key| key.strip_prefix(&prefix).map(String::from)).collect();
+    stages.sort();
+    stages
+}
+
 /// Starts every watcher that is due and not still running. Returns at once: a script runs in a
 /// task of its own, so a slow one never holds up the dispatcher.
 pub async fn pass(state: &AppState) {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let mut runs = last_runs(state);
     let mut started = false;
+    let paused = state.paused.lock().unwrap().clone();
     for project in state.store.projects() {
         let items = workitem::list(&project);
         for board in state.board_names(&project) {
             let Some(pipeline) = state.pipeline(&project, &board).pipeline else {
                 continue;
             };
-            for (stage, index, watch) in pipeline.stages.iter().flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (s, i, w))) {
+            let stages = pipeline.stages.iter().filter(|s| !paused.contains(&paused_key(&project, &board, &s.name)));
+            for (stage, index, watch) in stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (s, i, w))) {
                 let key = format!("{}/{board}/{}/{index}", project.name, stage.name);
                 if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
                     continue;
