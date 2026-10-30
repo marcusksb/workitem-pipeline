@@ -46,6 +46,13 @@ test.beforeAll(async () => {
     join(research, "workitem.md"),
     "---\ntitle: Research item\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nissue: T-4\n---\n\n# Research\n",
   );
+  const tasks = join(repo, ".claude/workitems/T-5-tasks");
+  mkdirSync(tasks, { recursive: true });
+  const findings = Array.from({ length: 6 }, (_, i) => `- [ ] **Finding ${i}**\\\n  What is wrong and how to fix it.\n`).join("\n");
+  writeFileSync(
+    join(tasks, "workitem.md"),
+    `---\ntitle: Task list\ntype: review\nstage: done\nagent_status: ok\nissue: T-5\n---\n\n# Review\n\n${"A paragraph.\n\n".repeat(30)}${findings}`,
+  );
   execFileSync("tmux", [
     "-L", socket, "new-session", "-d", "-s", "wi-T-1-demo", "-c", repo,
     "echo 'agent: which db do you want?'; read a; echo got:$a; sleep 600",
@@ -238,4 +245,19 @@ test("pausing a column marks it until it is resumed, and only watched columns ca
   await analyze.getByRole("button", { name: "Resume analyze" }).click();
   await expect(analyze.getByText("Paused", { exact: true })).toHaveCount(0);
   await expect(page.locator('.column[data-stage="done"]').getByRole("button", { name: /^Pause/ })).toHaveCount(0);
+});
+
+test("ticking a task in the brief keeps the brief scrolled", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Task list");
+  await page.goto(`${base.split("#")[0]}#demo/T-5-tasks/brief`);
+  const box = page.locator(".brief input[type=checkbox]").last();
+  await box.scrollIntoViewIfNeeded();
+  const brief = page.locator(".detail .brief");
+  const top = await brief.evaluate((e) => e.scrollTop);
+  expect(top).toBeGreaterThan(0);
+  await box.click();
+  await expect(box).toBeChecked();
+  expect(await brief.evaluate((e) => e.scrollTop)).toBe(top);
 });

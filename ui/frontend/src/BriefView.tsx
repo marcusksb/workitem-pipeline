@@ -1,5 +1,5 @@
-import { useState } from "react";
-import Markdown from "react-markdown";
+import { useMemo, useRef, useState } from "react";
+import Markdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { toggleTask } from "./boardState";
@@ -28,28 +28,34 @@ export function BriefView({ item, body, onSaved }: Props) {
     }
   };
 
+  // The components must keep their identity across renders: new ones remount every list item,
+  // and Chromium then scrolls the brief up. They read the current state from here.
+  const current = useRef({ busy, toggle });
+  current.current = { busy, toggle };
+  const components = useMemo<Components>(
+    () => ({
+      li: ({ node, ...props }) => <li {...props} data-offset={node?.position?.start.offset} />,
+      input: ({ node, ...props }) =>
+        props.type === "checkbox" ? (
+          <input
+            {...props}
+            disabled={current.current.busy}
+            onChange={(e) => {
+              const offset = e.currentTarget.closest("li")?.dataset.offset;
+              if (offset !== undefined) void current.current.toggle(Number(offset));
+            }}
+          />
+        ) : (
+          <input {...props} />
+        ),
+    }),
+    [],
+  );
+
   return (
     <>
       {error && <p className="error">{error}</p>}
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          li: ({ node, ...props }) => <li {...props} data-offset={node?.position?.start.offset} />,
-          input: ({ node, ...props }) =>
-            props.type === "checkbox" ? (
-              <input
-                {...props}
-                disabled={busy}
-                onChange={(e) => {
-                  const offset = e.currentTarget.closest("li")?.dataset.offset;
-                  if (offset !== undefined) void toggle(Number(offset));
-                }}
-              />
-            ) : (
-              <input {...props} />
-            ),
-        }}
-      >
+      <Markdown remarkPlugins={[remarkGfm]} components={components}>
         {body}
       </Markdown>
     </>
