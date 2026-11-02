@@ -475,6 +475,12 @@ async fn items_report_unpushed_commits_of_their_worktree() {
     git(&["reset", "-q", "--hard", "HEAD~1"], &worktree);
     git(&["commit", "-q", "--allow-empty", "-m", "b"], &worktree);
     assert_eq!(unpushed(&w, "T-12-wt").await, 0, "same patch on the remote under another hash");
+
+    // An upstream on another branch (a worktree added from origin/<base>) is not where the branch is pushed.
+    git(&["push", "-q", "origin", "HEAD~2:refs/heads/base"], &worktree);
+    git(&["fetch", "-q", "origin"], &worktree);
+    git(&["branch", "-q", "--set-upstream-to", "origin/base"], &worktree);
+    assert_eq!(unpushed(&w, "T-12-wt").await, 0, "upstream is the base branch, origin/wt has every commit");
 }
 
 #[tokio::test]

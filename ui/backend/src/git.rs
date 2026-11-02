@@ -27,15 +27,18 @@ async fn git_out(cwd: &Path, args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Commits of the checked-out branch that its remote head lacks: the upstream if one is set,
-/// else `origin/<branch>`. Commits are matched by patch, not hash, so a branch that was
+/// Commits of the checked-out branch that its remote head lacks: the upstream if it tracks a
+/// branch of the same name, else `origin/<branch>`. An upstream on another branch (a worktree
+/// added from `origin/master`, or a stacked branch on its parent) is the base, not where the
+/// branch is pushed. Commits are matched by patch, not hash, so a branch that was
 /// rebased and force-pushed (for example by GitHub's update-branch) does not count as unpushed. A branch with neither was never pushed, so its commits that no
 /// remote-tracking ref has count. Reads local refs only, so it is as fresh as the last fetch.
 pub async fn unpushed(worktree: &Path) -> Option<u32> {
-    let remote = match git_out(worktree, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]).await {
+    let branch = git_out(worktree, &["symbolic-ref", "--short", "HEAD"]).await?;
+    let upstream = git_out(worktree, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]).await;
+    let remote = match upstream.filter(|u| u.ends_with(&format!("/{branch}"))) {
         Some(upstream) => Some(upstream),
         None => {
-            let branch = git_out(worktree, &["symbolic-ref", "--short", "HEAD"]).await?;
             let candidate = format!("origin/{branch}");
             git_out(worktree, &["rev-parse", "--verify", "--quiet", &format!("refs/remotes/{candidate}")]).await.map(|_| candidate)
         }
