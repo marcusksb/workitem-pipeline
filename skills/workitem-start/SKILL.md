@@ -117,6 +117,8 @@ Follow the workitem's `## Description` and the project's own conventions already
 - `docs` / `style` / `test` / `build` / `ci` / `chore` / `revert` → implement per the description and the project's conventions; keep the change limited to that type's scope.
 - `analysis` → no code changes; research and write the findings/decision into the workitem file itself, under a new `## Findings` section.
 
+If something has to happen after the item is done (a deploy step, a cleanup after a rollout, telling someone), add it as a `- [ ]` line under `## Follow-ups`, the last section of the workitem; create the section if it is missing. Do not work on follow-ups. Only append: never delete, reword or untick a line, and skip one that is already listed.
+
 Run `rubocop -a` and the relevant `bin/rspec` target before treating the change as done, per the repo's "Before Committing" rule.
 
 Then review your own diff (`git diff origin/master...`) against the repo's CLAUDE.md/AGENTS.md before committing: reread the sections that cover the kinds of files you changed (for specs, the test rules) and fix every violation. The rules were loaded at startup but are easy to drift from during a long implementation.

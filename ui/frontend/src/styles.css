@@ -193,6 +193,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .chip { font-size: 12px; border-radius: 999px; padding: 2px 8px; width: fit-content; }
 .chip.unpushed { color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .chip.pr-moved { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.chip.follow-ups { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); }
+button.chip.follow-ups { border: none; font: inherit; font-size: 12px; cursor: pointer; }
 .chip.blocked { color: var(--blocked); background: color-mix(in srgb, var(--blocked) 10%, transparent); }
 @property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes card-spin { to { --card-angle: 360deg; } }

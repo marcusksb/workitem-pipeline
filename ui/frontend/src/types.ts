@@ -56,6 +56,8 @@ export type Item = {
   unpushed: number | null;
   /** The PR head moved past `head_sha`. */
   pr_moved: boolean;
+  /** Open `- [ ]` items under `## Follow-ups`. */
+  follow_ups: string[];
 };
 
 export type Detail = Item & { content: string };

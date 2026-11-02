@@ -10,6 +10,7 @@ import { BriefView } from "./BriefView";
 import { PrActions } from "./PrActions";
 import { PrConversation } from "./PrConversation";
 import { Files } from "./Files";
+import { FollowUpsChip } from "./FollowUpsChip";
 import { Info } from "./Info";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
@@ -41,7 +42,14 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
   /** The body the editor started from; set while the brief is being edited. */
   const [editing, setEditing] = useState<string>();
   useEffect(() => setEditing(undefined), [key]);
+  /** Set by the follow-ups chip; the brief scrolls to its `## Follow-ups` once it is shown. */
+  const [jump, setJump] = useState(false);
   const tab = routeTab ?? (live.session || isBlocked(live) ?"terminal" : "brief");
+  useEffect(() => {
+    if (!jump || tab !== "brief" || editing !== undefined || !detail) return;
+    setJump(false);
+    document.getElementById("follow-ups")?.scrollIntoView({ block: "start" });
+  }, [jump, tab, editing, detail]);
   const path = itemTerminal(item.project, item.dir);
   const popOut = `/?terminal=${encodeURIComponent(path)}`;
   const kindIcon = KIND_ICONS[live.kind.trim().toLowerCase()];
@@ -64,6 +72,13 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
             {isBlocked(live) && <span className="chip blocked">blocked</span>}
             {!!live.unpushed && <span className="chip unpushed" title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</span>}
             {live.pr_moved && <span className="chip pr-moved" title="The PR has commits this workitem has not seen">new commits</span>}
+            <FollowUpsChip
+              followUps={live.follow_ups}
+              onClick={() => {
+                setJump(true);
+                onTab("brief");
+              }}
+            />
           </div>
           {(parent || children.length > 0) && (
             <div className="meta family">

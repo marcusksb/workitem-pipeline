@@ -26,6 +26,8 @@ pub struct Workitem {
     pub created: String,
     /// PR head commit the item last looked at, or empty.
     pub head_sha: String,
+    /// Open `- [ ]` items under `## Follow-ups`: work left for after the item is done.
+    pub follow_ups: Vec<String>,
 }
 
 /// Flat `key: value` frontmatter, as written by `workitem-create` and edited by `workitem-move`.
@@ -85,7 +87,22 @@ fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
         parent: field("parent", ""),
         created: field("created", ""),
         head_sha: field("head_sha", ""),
+        follow_ups: follow_ups(text),
     }
+}
+
+/// Texts of the unticked task list items between `## Follow-ups` and the next `##` heading.
+fn follow_ups(text: &str) -> Vec<String> {
+    text.lines()
+        .skip_while(|line| line.trim_end() != "## Follow-ups")
+        .skip(1)
+        .take_while(|line| !line.starts_with("## "))
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let rest = ["- [ ]", "* [ ]", "+ [ ]"].iter().find_map(|box_| line.strip_prefix(box_))?;
+            Some(rest.trim().to_string())
+        })
+        .collect()
 }
 
 pub fn list(project: &Project) -> Vec<Workitem> {
@@ -188,6 +205,13 @@ mod tests {
         assert_eq!(workitems_dir(repo.path()), repo.path().join(".claude/workitems"));
         fs::create_dir_all(repo.path().join(".workitems")).unwrap();
         assert_eq!(workitems_dir(repo.path()), repo.path().join(".workitems"));
+    }
+
+    #[test]
+    fn follow_ups_are_the_open_tasks_of_their_section() {
+        let text = "---\nstage: done\n---\n## Review brief\n- [ ] not a follow-up\n\n## Follow-ups\n\n- [ ] Deploy to prod\n- [x] Tell support\n  * [ ] Nested one\n- plain bullet\n\n## Notes\n- [ ] after the section\n";
+        assert_eq!(follow_ups(text), ["Deploy to prod", "Nested one"]);
+        assert!(follow_ups("---\n---\n- [ ] no section\n").is_empty());
     }
 
     #[test]

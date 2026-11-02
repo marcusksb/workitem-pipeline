@@ -23,6 +23,7 @@ const item = (over: Partial<Item>): Item => ({
   unpushed: null,
   pr_moved: false,
   head_sha: "",
+  follow_ups: [],
   ...over,
 });
 

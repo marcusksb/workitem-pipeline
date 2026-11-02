@@ -16,7 +16,7 @@ Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only)
    - **`validate`** — the item already has a plan. Check every file, class and method it names against the current code. Fix small errors in the plan. Find risks the plan missed.
    - **`root_cause`** — find why it fails. For `source: system_error`, fetch the issue with the Sentry tools (stack trace, first/last seen, count). Follow the code path. Name the exact file and line. State how you know (code evidence), not how it might be.
    - **`clarify`** — list every open question about the feature. Answer each one you can from the code, the Jira ticket or the ADRs. For the rest, see step 4.
-3. Write `## Review brief` at the end of the workitem (replace it if it exists). It MUST have these `###` sections, all non-empty, because `workitem-move` checks them:
+3. Write `## Review brief` at the end of the workitem, before `## Follow-ups` if that exists. If the brief exists, replace only that section, up to the next `##` heading. It MUST have these `###` sections, all non-empty, because `workitem-move` checks them:
    - `### Findings` — root cause (bug/Sentry), or the decisions and resolved questions (feature/validate).
    - `### Plan` — numbered steps, with files and layers touched. Follow the layer rules in the repo's `AGENTS.md`.
    - `### Risk` — migrations, auth or policy changes, base-class changes, API contract changes. Write `None found` if there are none.
@@ -36,4 +36,5 @@ Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only)
 - Prove claims with code you read. Label anything else as an assumption.
 - If the item is not actionable at all (wrong repo, duplicate, already fixed), move it back with `workitem-move <dir> <earlier stage>` (the other allowed next stage that sends it back, `backlog` on the bundled board) and set `agent_status: blocked: <reason>`.
 - Never remove the user's own text from the workitem.
+- If something has to happen after the item is done (a deploy step, a cleanup after a rollout, telling someone), add it as a `- [ ]` line under `## Follow-ups`, the last section of the file; create the section if it is missing. Do not work on follow-ups. Only append: never delete, reword or untick a line, and skip one that is already listed.
 - To split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir>` (plus `--repo` and `--issue` as needed). Do not write child `workitem.md` files by hand.

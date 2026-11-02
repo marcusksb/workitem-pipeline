@@ -20,6 +20,7 @@ Move a workitem (feature request, implementation task, bug report, Sentry error)
 8. **Approval:** `/workitem-approve <dir>` prints the brief, asks to confirm, sets `approved: true` and `approved_at`. Reject with a comment moves the item back to `analyze`. After approval it offers to start development.
 9. **Intake:** manual. `workitem-create` accepts a Jira key, text, or a Sentry issue URL. New field `source: issue | system_error | text`.
 10. **Existing skills:** `workitem-start` is the `in_development` handler and ends by moving to `in_review`. `workitem-watch` also moves an item to `done` when its PR is merged. Old `status` values migrate: `pending` → `ready_for_development` + `approved: true`, `in_progress` → `in_development`, `in-review` → `in_review`.
+11. **Follow-ups:** work left for after the item is done goes in a `## Follow-ups` section, last in `workitem.md` (after `## Review brief`), one `- [ ]` line each. Agents never work on a follow-up. `analyze` and the development handler add one only when something has to happen after the item is done (a deploy step, a cleanup after a flag rollout, telling someone). Humans add and tick them by hand. Skills only append: they never delete, reword or untick a line, and skip one that is already listed. An open follow-up is an unticked line between `## Follow-ups` and the next `##` heading.
 
 ## Stage table
 

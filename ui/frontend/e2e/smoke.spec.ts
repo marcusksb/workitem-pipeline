@@ -53,6 +53,12 @@ test.beforeAll(async () => {
     join(tasks, "workitem.md"),
     `---\ntitle: Task list\ntype: review\nstage: done\nagent_status: ok\nissue: T-5\n---\n\n# Review\n\n${"A paragraph.\n\n".repeat(30)}${findings}`,
   );
+  const followUps = join(repo, ".claude/workitems/T-6-follow-ups");
+  mkdirSync(followUps, { recursive: true });
+  writeFileSync(
+    join(followUps, "workitem.md"),
+    `---\ntitle: Merged with follow-ups\ntype: feature\nstage: done\nagent_status: ok\nissue: T-6\n---\n\n# Done\n\n${"A paragraph.\n\n".repeat(40)}## Follow-ups\n\n- [ ] Deploy to prod\n- [x] Tell support\n- [ ] Remove the flag\n`,
+  );
   execFileSync("tmux", [
     "-L", socket, "new-session", "-d", "-s", "wi-T-1-demo", "-c", repo,
     "echo 'agent: which db do you want?'; read a; echo got:$a; sleep 600",
@@ -260,4 +266,17 @@ test("ticking a task in the brief keeps the brief scrolled", async ({ page }) =>
   await box.click();
   await expect(box).toBeChecked();
   expect(await brief.evaluate((e) => e.scrollTop)).toBe(top);
+});
+
+test("open follow-ups show on the card and the detail chip jumps to them", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 500 });
+  await page.goto(base);
+  const card = page.locator(".card", { hasText: "Merged with follow-ups" });
+  const chip = card.locator(".chip.follow-ups");
+  await expect(chip).toHaveText("2 follow-ups");
+  await expect(chip).toHaveAttribute("title", "• Deploy to prod\n• Remove the flag");
+
+  await page.goto(`${base.split("#")[0]}#demo/T-6-follow-ups/info`);
+  await page.locator(".detail header .chip.follow-ups").click();
+  await expect(page.locator("#follow-ups")).toBeInViewport();
 });

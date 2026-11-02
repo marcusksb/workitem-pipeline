@@ -34,6 +34,7 @@ export function BriefView({ item, body, onSaved }: Props) {
   current.current = { busy, toggle };
   const components = useMemo<Components>(
     () => ({
+      h2: ({ node, ...props }) => <h2 {...props} id={props.children === "Follow-ups" ? "follow-ups" : undefined} />,
       li: ({ node, ...props }) => <li {...props} data-offset={node?.position?.start.offset} />,
       input: ({ node, ...props }) =>
         props.type === "checkbox" ? (

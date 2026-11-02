@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { api } from "./api";
 import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isBlocked, isWorking, itemKey, KIND_ICONS, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
@@ -104,13 +105,14 @@ function Card({ item, selected, onSelect, showProject, depth = 0 }: { item: Item
         <span className="badge">{item.kind}</span>
         <LinkBadges item={item} />
       </div>
-      {(item.review || isBlocked(item) || icon || !!item.unpushed || item.pr_moved) && (
+      {(item.review || isBlocked(item) || icon || !!item.unpushed || item.pr_moved || item.follow_ups.length > 0) && (
         <div className="card-foot">
           <div className="foot-left">
             <ReviewStrip review={item.review} />
             {isBlocked(item) && <div className="chip blocked">blocked</div>}
             {!!item.unpushed && <div className="chip unpushed" title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</div>}
             {item.pr_moved && <div className="chip pr-moved" title="The PR has commits this workitem has not seen">new commits</div>}
+            <FollowUpsChip followUps={item.follow_ups} />
           </div>
           {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}
         </div>
