@@ -68,10 +68,7 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
             <span className="badge">{stageLabel(live.stage)}</span>
             <span className="badge">{kindIcon && `${kindIcon} `}{live.kind}</span>
             <LinkBadges item={live} />
-            <ReviewStrip review={live.review} />
             {isBlocked(live) && <span className="chip blocked">blocked</span>}
-            {!!live.unpushed && <span className="chip unpushed" title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</span>}
-            {live.pr_moved && <span className="chip pr-moved" title="The PR has commits this workitem has not seen">new commits</span>}
             <FollowUpsChip
               followUps={live.follow_ups}
               onClick={() => {
@@ -79,6 +76,9 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
                 onTab("brief");
               }}
             />
+            <ReviewStrip review={live.review} />
+            {!!live.unpushed && <span className="chip unpushed" title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</span>}
+            {live.pr_moved && <span className="chip pr-moved" title="The PR has commits this workitem has not seen">new commits</span>}
           </div>
           {(parent || children.length > 0) && (
             <div className="meta family">
