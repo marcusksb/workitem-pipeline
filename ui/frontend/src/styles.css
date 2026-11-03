@@ -196,6 +196,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .chip.follow-ups { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); }
 button.chip.follow-ups { border: none; font: inherit; font-size: 12px; cursor: pointer; }
 .chip.blocked { color: var(--blocked); background: color-mix(in srgb, var(--blocked) 10%, transparent); }
+.chip.waiting { color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); }
+span.chip.waiting { display: inline-flex; align-items: center; gap: 4px; }
 @property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes card-spin { to { --card-angle: 360deg; } }
 .card.working { position: relative; }

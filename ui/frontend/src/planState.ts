@@ -16,8 +16,11 @@ export function groupPlans(plans: Plan[], projects: string[]) {
   return { open: shown.filter((plan) => !isDone(plan)), done: shown.filter(isDone) };
 }
 
-/** One line for the collapsed bar: `3 · 1 waiting`. */
+/** How a status reads: a plan record's `waiting` means it waits for you, unlike a workitem's. */
+export const planLabel = (status: PlanStatus) => (status === "waiting" ? "needs input" : status);
+
+/** One line for the collapsed bar: `3 · 1 needs input`. */
 export function planCounts(open: Plan[]): string {
   const waiting = open.filter((plan) => planStatus(plan) === "waiting").length;
-  return [String(open.length), ...(waiting ? [`${waiting} waiting`] : [])].join(" · ");
+  return [String(open.length), ...(waiting ? [`${waiting} ${planLabel("waiting")}`] : [])].join(" · ");
 }

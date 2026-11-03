@@ -17,7 +17,7 @@ function Value({ name, value }: { name: string; value: string }) {
         {value} ↗
       </a>
     );
-  if (name === "agent_status") return <span className={`chip ${value.startsWith("blocked") ? "blocked" : "pr-moved"}`}>{value}</span>;
+  if (name === "agent_status") return <span className={`chip ${value.startsWith("blocked") ? "blocked" : value.startsWith("waiting") ? "waiting" : "pr-moved"}`}>{value}</span>;
   if (name === "stage") return <span className="badge">{value}</span>;
   return <>{value}</>;
 }

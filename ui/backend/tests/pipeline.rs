@@ -15,7 +15,7 @@ use workitem_ui::{config::Store, dispatch, router, AppState, Shared};
 mod common;
 use common::{eventually, Tmux};
 
-/// Behaviour per stage comes from `<repo>/.stub-<stage>`: `advance`, `block`, `done`, `crash`, or idle.
+/// Behaviour per stage comes from `<repo>/.stub-<stage>`: `advance`, `block`, `wait`, `done`, `crash`, or idle.
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$repo/.claude/workitems/$WORKITEM/workitem.md"
@@ -27,6 +27,7 @@ if [ -n "$WORKITEM" ]; then
   case "$mode" in
     advance) python3 "$SKILLS/workitem-pipeline/bin/workitem-move" "$file" analyze ;;
     block) perl -pi -e 's/^agent_status:.*/agent_status: blocked: need input/' "$file" ;;
+    wait) perl -pi -e 's/^agent_status:.*/agent_status: waiting: CI/' "$file" ;;
     done) perl -pi -e 's/^agent_status:.*/agent_status: ok/' "$file" ;;
     crash) exit 0 ;;
   esac
@@ -299,6 +300,24 @@ async fn edit_frontmatter_sets_existing_fields_but_never_stage() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(field(&w.repo, "T-31-info", "title"), "New title");
     assert_eq!(field(&w.repo, "T-31-info", "stage"), "analyze");
+}
+
+#[tokio::test]
+async fn dispatcher_keeps_a_waiting_session_and_frees_the_item_once_it_is_gone() {
+    let w = world();
+    write_item(&w.repo, "T-40-wait", "analyze", "");
+    fs::write(w.repo.join(".stub-analyze"), "wait").unwrap();
+    settle(&w).await;
+    eventually("the handler waits", || field(&w.repo, "T-40-wait", "agent_status") == "waiting: CI").await;
+
+    settle(&w).await;
+    assert!(w.tmux.has("wi-T-40-wait"), "a waiting session is kept");
+    assert_eq!(field(&w.repo, "T-40-wait", "agent_status"), "waiting: CI");
+
+    w.tmux.run(&["kill-session", "-t", "=wi-T-40-wait"]);
+    fs::remove_file(w.repo.join(".stub-analyze")).unwrap();
+    settle(&w).await;
+    eventually("the item is idle and starts again", || stub_log(&w.repo).len() == 2).await;
 }
 
 #[tokio::test]

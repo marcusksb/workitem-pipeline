@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { agentTerminal, api } from "./api";
 import { Dialog } from "./Dialog";
-import { groupPlans, planCounts, planStatus } from "./planState";
+import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
 import { AgentSession, Plan } from "./types";
 
 const COLLAPSED_KEY = "workload.plans.collapsed";
@@ -53,7 +53,7 @@ export function Plans({ plans, sessions, projects, showProject, selected, onSele
     return (
       <button key={`${plan.project}/${plan.id}`} className={`plan-card ${status}${isSelected ? " selected" : ""}`} onClick={() => onSelect(plan)}>
         <span className="plan-topic">
-          <span className={`plan-dot ${status}`} title={status} />
+          <span className={`plan-dot ${status}`} title={planLabel(status)} />
           {plan.topic || plan.id}
         </span>
         <span className="plan-summary">{plan.summary || (status === "ended" ? "No summary" : "Starting…")}</span>

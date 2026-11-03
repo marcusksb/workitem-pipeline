@@ -4,6 +4,12 @@ export const isBlocked = (item: Item) => item.agent_status.startsWith("blocked")
 
 export const isWorking = (item: Item) => item.agent_status === "working";
 
+/** `waiting: <what>`: the agent idles on purpose (CI, a deploy) and needs nobody. */
+export const isWaiting = (item: Item) => item.agent_status.startsWith("waiting");
+
+/** What a waiting agent waits for, from `waiting: <what>`. */
+export const waitingFor = (item: Item) => item.agent_status.replace(/^waiting:?\s*/, "");
+
 export const blockedKey = (item: Item) => `${itemKey(item)}|${item.agent_status}`;
 
 /** Blocked items that were not blocked with the same reason in `seen` (keys from `blockedKey`). */

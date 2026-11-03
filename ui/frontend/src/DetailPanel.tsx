@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, itemTerminal } from "./api";
-import { isBlocked, KIND_ICONS, stageLabel, stripFrontmatter } from "./boardState";
+import { isBlocked, isWaiting, KIND_ICONS, stageLabel, stripFrontmatter } from "./boardState";
 import { Item } from "./types";
 import { Actions } from "./Actions";
 import { AgentActions } from "./AgentActions";
@@ -17,6 +17,7 @@ import { ReviewStrip } from "./ReviewStrip";
 import { Tab } from "./url";
 import { Terminal } from "./Terminal";
 import { usePolling } from "./usePolling";
+import { WaitingChip } from "./WaitingChip";
 import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
 
 type Props = {
@@ -69,6 +70,7 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
             <span className="badge">{kindIcon && `${kindIcon} `}{live.kind}</span>
             <LinkBadges item={live} />
             {isBlocked(live) && <span className="chip blocked">blocked</span>}
+            {isWaiting(live) && <WaitingChip item={live} />}
             <FollowUpsChip
               followUps={live.follow_ups}
               onClick={() => {

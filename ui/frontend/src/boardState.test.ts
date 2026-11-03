@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, newlyBlocked, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, isWaiting, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Item, Pipelines } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
@@ -205,5 +205,15 @@ describe("searchItems", () => {
 
   it("returns nothing for an empty query", () => {
     expect(dirs("  ")).toEqual([]);
+  });
+});
+
+describe("waiting", () => {
+  it("is its own state, not blocked", () => {
+    const waiting = item({ agent_status: "waiting: CI on PR #12" });
+    expect(isWaiting(waiting)).toBe(true);
+    expect(isBlocked(waiting)).toBe(false);
+    expect(waitingFor(waiting)).toBe("CI on PR #12");
+    expect(isWaiting(item({ agent_status: "working" }))).toBe(false);
   });
 });

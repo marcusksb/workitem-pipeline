@@ -57,8 +57,8 @@ pub async fn pass(state: &AppState) {
 }
 
 /// Session housekeeping. `ok` means the handler is done, so its session goes; a dead pane that
-/// never said so crashed, so the item is idle again; a `working` item with no session is idle
-/// too. Starting handlers and reacting to PRs is the column watchers' job.
+/// never said so crashed, so the item is idle again; a `working` or `waiting: <what>` item with no
+/// session is idle too. Starting handlers and reacting to PRs is the column watchers' job.
 async fn reap(state: &AppState, project: &Project, item: &Workitem, session: Option<&str>, dead: &std::collections::HashSet<String>) {
     let Some(path) = workitem::path(project, &item.dir) else {
         return;
@@ -71,7 +71,7 @@ async fn reap(state: &AppState, project: &Project, item: &Workitem, session: Opt
                 let _ = set_status(&path, "ok");
             }
         }
-        None if status == "working" => {
+        None if status == "working" || status.starts_with("waiting") => {
             let _ = set_status(&path, "ok");
         }
         _ => {}

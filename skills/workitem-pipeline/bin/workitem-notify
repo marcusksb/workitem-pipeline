@@ -3,11 +3,14 @@
 
 Runs when a `wi-*` session waits for input (question, permission or trust
 prompt). If the workitem is still `working`, marks it blocked; the UI
-alerts the browser. Does nothing outside such a session or when the agent
-already set a status itself. Needs WORKITEM and WORKITEM_REPO in the env.
+alerts the browser. An agent that set `waiting: <what>` idles on purpose, so
+only a prompt that needs a human (permission, elicitation) blocks it. Does
+nothing outside such a session or when the agent set another status itself.
+Needs WORKITEM and WORKITEM_REPO in the env.
 In a planning session (WORKITEM_PLAN, the plan record) it sets the
 record's `status: working` to `waiting` instead.
 """
+import json
 import os
 import re
 import sys
@@ -17,25 +20,31 @@ sys.dont_write_bytecode = True
 from workitem_paths import workitems_dir
 
 
-def replace_status(path, key, current, new):
+def replace_status(path, key, matches, new):
     try:
         text = path.read_text()
     except OSError:
         return
     status = re.search(rf"^{key}:\s*(.*)$", text, re.M)
-    if not status or status.group(1).strip() != current:
+    if not status or not matches(status.group(1).strip()):
         return
     path.write_text(text[:status.start()] + f"{key}: {new}" + text[status.end():])
 
 
 plan = os.environ.get("WORKITEM_PLAN")
 if plan:
-    replace_status(Path(plan), "status", "working", "waiting")
+    replace_status(Path(plan), "status", lambda s: s == "working", "waiting")
     sys.exit(0)
 
 name, repo = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_REPO")
 if not name or not repo:
     sys.exit(0)
 
+try:
+    kind = json.load(sys.stdin).get("notification_type", "")
+except (ValueError, AttributeError):
+    kind = ""
+needs_human = kind in ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
 path = workitems_dir(repo) / name / "workitem.md"
-replace_status(path, "agent_status", "working", f"blocked: waiting for input, tmux attach -t wi-{name}")
+replace_status(path, "agent_status", lambda s: s == "working" or (needs_human and s.startswith("waiting")),
+               f"blocked: waiting for input, tmux attach -t wi-{name}")

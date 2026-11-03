@@ -40,7 +40,7 @@ describe("groupPlans", () => {
 
 describe("planCounts", () => {
   it("adds the waiting count only when there is one", () => {
-    expect(planCounts([plan({}), plan({ status: "waiting" })])).toBe("2 · 1 waiting");
+    expect(planCounts([plan({}), plan({ status: "waiting" })])).toBe("2 · 1 needs input");
     expect(planCounts([plan({})])).toBe("1");
   });
 });

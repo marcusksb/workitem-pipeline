@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, planTerminal } from "./api";
 import { IconExternal, IconFileText, IconTerminalSquare, IconX } from "./icons";
-import { planStatus } from "./planState";
+import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
 import { Plan } from "./types";
 import { usePolling } from "./usePolling";
@@ -62,7 +62,7 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
           <h2>{live.topic || live.id}</h2>
           <div className="meta">
             <span className="badge">{live.project}</span>
-            <span className={`chip plan-status ${status}`}>{status}</span>
+            <span className={`chip plan-status ${status}`}>{planLabel(status)}</span>
             {live.workitem && (
               <button className="link" onClick={() => onWorkitem(live.project, live.workitem)}>
                 → {live.workitem}

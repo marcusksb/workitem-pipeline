@@ -1,10 +1,11 @@
 import { useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isBlocked, isWorking, itemKey, KIND_ICONS, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
+import { WaitingChip } from "./WaitingChip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import { Item, Pipelines } from "./types";
@@ -105,10 +106,11 @@ function Card({ item, selected, onSelect, showProject, depth = 0 }: { item: Item
         <span className="badge">{item.kind}</span>
         <LinkBadges item={item} />
       </div>
-      {(item.review || isBlocked(item) || icon || !!item.unpushed || item.pr_moved || item.follow_ups.length > 0) && (
+      {(item.review || isBlocked(item) || isWaiting(item) || icon || !!item.unpushed || item.pr_moved || item.follow_ups.length > 0) && (
         <div className="card-foot">
           <div className="foot-left">
             {isBlocked(item) && <div className="chip blocked">blocked</div>}
+            {isWaiting(item) && <WaitingChip item={item} />}
             <FollowUpsChip followUps={item.follow_ups} />
             <ReviewStrip review={item.review} />
             {!!item.unpushed && <div className="chip unpushed" title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</div>}

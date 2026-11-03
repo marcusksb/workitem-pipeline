@@ -103,7 +103,9 @@ const PROTOCOL: &str = "agent_status is the agent_status: line in the frontmatte
 There is no tool for it: set it by editing that line in the file.\n\
 A human may attach to this tmux session ({session}). If you need input,\n\
 set agent_status: blocked: <reason>, ask the question here and wait.\n\
-After the answer, set agent_status: working and continue.\n";
+After the answer, set agent_status: working and continue.\n\
+Before you idle on something that needs no human (CI, a deploy), set\n\
+agent_status: waiting: <what>. When it is done, set agent_status: working and continue.\n";
 
 fn protocol(session: &str) -> String {
     PROTOCOL.replace("{session}", session)

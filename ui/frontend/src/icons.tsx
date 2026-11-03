@@ -54,6 +54,8 @@ export const IconMessage = make(
 );
 export const IconPlay = make(<path d="M7 4.5v15l13-7.5z" />);
 export const IconPause = make(<path d="M8 5v14M16 5v14" />);
+/** "Zz": snoozing. */
+export const IconSnooze = make(<path d="M3 10h8l-8 10h8M14 3h7l-7 8h7" />);
 export const IconBot = make(
   <>
     <rect x="4" y="8" width="16" height="12" rx="3" />

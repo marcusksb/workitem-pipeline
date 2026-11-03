@@ -63,7 +63,7 @@ Each project can define its own boards: the columns, and what each column's watc
 
 Kanban, one column per stage, project filter in the header (with add and remove project, and "New workitem").
 
-- **Card:** title, project badge, `agent_status` chip (blocked in red with reason, working with spinner), terminal icon when a session is alive. In `in_review`: approval, merge and CI pills.
+- **Card:** title, project badge, `agent_status` chip (blocked in red with reason, working with spinner, waiting as a calm 💤 chip with the reason in its tooltip and no alert), terminal icon when a session is alive. In `in_review`: approval, merge and CI pills.
 - **Detail panel** (right, on card click), tabs: *Brief* (rendered `workitem.md`; *Edit* swaps in a textarea for the body after the frontmatter, and the save is refused with 409 if the file changed since the editor opened), *Terminal* (xterm.js, can pop out to its own browser tab), *Actions* (approve/reject with comment, clear blocked, kill session, start, start agent session, remove; only those valid for the state are shown). The header has "New workitem".
 - **URL and history:** the selected item and its tab live in the hash (`#<project>/<dir>[/<tab>]`). Card clicks, tab switches and Close push a history entry, Back/Forward walk them, and a pasted deep link opens the item on that tab.
 - No drag-and-drop. Moves happen only through the rule-checked actions.

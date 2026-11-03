@@ -7,7 +7,7 @@ Move a workitem (feature request, implementation task, bug report, Sentry error)
 ## Decisions
 
 1. **State:** `stage:` in `workitem.md` frontmatter is the source of truth. Jira mirroring is a later add-on.
-2. **Stages:** `backlog → analyze → ready_for_development → in_development → in_review → done`. "Blocked" is `agent_status: blocked: <reason>`, not a stage.
+2. **Stages:** `backlog → analyze → ready_for_development → in_development → in_review → done`. "Blocked" is `agent_status: blocked: <reason>`, not a stage. `waiting: <what>` is an agent that idles on purpose (CI, a deploy) and needs nobody; its session is kept, and the notify hook only blocks it on a permission or elicitation prompt.
 3. **Registry:** one `pipeline.json` in `~/.claude/skills/workitem-pipeline/`. It lists each stage with `handler`, `next` (allowed transitions) and `auto`.
 4. **Transitions:** only `bin/workitem-move <workitem-dir> <stage>` changes `stage`. It checks the registry and the brief rule.
 5. **Runner:** `/workitem-run`, one per repo, meant for `/loop 10m /workitem-run`. It only runs stages with `auto: true` (`backlog`, `analyze`, `in_development`). Pattern from `workitem-watch`: lock file `workitem-<dir>.running`, stale after 20 min, max 3 attempts, then `agent_status: blocked` and a push notification.
@@ -43,7 +43,7 @@ approved: false
 analyze_mode: validate | root_cause | clarify   # set by triage
 source: issue | system_error | text
 parent: <dir of the workitem this was split from>   # optional, set by workitem-create --parent
-agent_status: working | ok | blocked: <reason>
+agent_status: working | waiting: <what> | ok | blocked: <reason>
 ```
 
 ## Configurable boards (planned)
