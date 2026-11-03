@@ -12,7 +12,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::{api::ApiError, config::Project, tmux, workitem, AppState, Shared};
+use crate::{api::ApiError, config::Project, plans, tmux, workitem, AppState, Shared};
 
 #[derive(Deserialize)]
 pub struct Size {
@@ -109,7 +109,7 @@ pub async fn attach_item(
     attach(upgrade, &state, &project, &format!("wi-{dir}"), requested).await
 }
 
-/// Browser terminal for a session without a workitem: `wi-new-<id>`.
+/// Browser terminal for a session without a workitem: `wi-new-<id>` or a plan's `wi-plan-<id>`.
 pub async fn attach_agent(
     upgrade: WebSocketUpgrade,
     State(state): State<Shared>,
@@ -117,7 +117,7 @@ pub async fn attach_agent(
     Query(requested): Query<Size>,
 ) -> Result<Response, ApiError> {
     let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    if !tmux::is_agent_session(&name) {
+    if !tmux::is_agent_session(&name) && !plans::is_session(&name) {
         return Err(ApiError::not_found("session"));
     }
     attach(upgrade, &state, &project, &name, requested).await

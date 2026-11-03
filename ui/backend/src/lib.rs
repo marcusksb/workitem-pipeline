@@ -8,6 +8,7 @@ pub mod git;
 pub mod launch;
 pub mod locate;
 pub mod pipeline;
+pub mod plans;
 pub mod review;
 pub mod static_files;
 pub mod terminal;
@@ -104,6 +105,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workitems/{project}/{dir}/remove", post(actions::remove))
         .route("/api/projects/{project}/create", post(actions::create))
         .route("/api/sessions", get(api::list_sessions))
+        .route("/api/plans", get(plans::list_plans))
+        .route("/api/plans/{project}/{id}", get(plans::plan).delete(plans::delete))
+        .route("/api/plans/{project}/{id}/resume", post(plans::resume))
+        .route("/api/projects/{project}/plans", post(plans::create))
         .route("/ws/terminal/{project}/{dir}", get(terminal::attach_item))
         .route("/ws/session/{project}/{name}", get(terminal::attach_agent))
         .fallback(static_files::serve)

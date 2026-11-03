@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
-"""Notification hook for workitem tmux sessions.
+"""Notification hook for workitem and planning tmux sessions.
 
 Runs when a `wi-*` session waits for input (question, permission or trust
 prompt). If the workitem is still `working`, marks it blocked; the UI
 alerts the browser. Does nothing outside such a session or when the agent
 already set a status itself. Needs WORKITEM and WORKITEM_REPO in the env.
+In a planning session (WORKITEM_PLAN, the plan record) it sets the
+record's `status: working` to `waiting` instead.
 """
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.dont_write_bytecode = True
 from workitem_paths import workitems_dir
+
+
+def replace_status(path, key, current, new):
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+    status = re.search(rf"^{key}:\s*(.*)$", text, re.M)
+    if not status or status.group(1).strip() != current:
+        return
+    path.write_text(text[:status.start()] + f"{key}: {new}" + text[status.end():])
+
+
+plan = os.environ.get("WORKITEM_PLAN")
+if plan:
+    replace_status(Path(plan), "status", "working", "waiting")
+    sys.exit(0)
 
 name, repo = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_REPO")
 if not name or not repo:
     sys.exit(0)
 
 path = workitems_dir(repo) / name / "workitem.md"
-try:
-    text = path.read_text()
-except OSError:
-    sys.exit(0)
-
-status = re.search(r"^agent_status:\s*(.*)$", text, re.M)
-if not status or status.group(1).strip() != "working":
-    sys.exit(0)
-
-reason = f"blocked: waiting for input, tmux attach -t wi-{name}"
-path.write_text(text[:status.start()] + f"agent_status: {reason}" + text[status.end():])
+replace_status(path, "agent_status", "working", f"blocked: waiting for input, tmux attach -t wi-{name}")

@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Updates the record of the planning session this runs in.
+
+  workitem-plan-note "<one line summary>"    what the session is about right now
+  workitem-plan-note --status working        also: waiting, ended
+  workitem-plan-note --plan < plan.md        saves the plan as the record's ## Plan
+  workitem-plan-note --workitem <dir>        links the workitem made from this session
+
+Options combine. The record is the file in WORKITEM_PLAN, which the backend sets when it starts
+a `wi-plan-*` session; the UI's Plans bar reads it.
+"""
+import argparse
+import os
+import re
+import sys
+
+STATUSES = ("working", "waiting", "ended")
+SUMMARY_MAX = 160
+
+
+def set_field(frontmatter, key, value):
+    line = f"{key}: {value}"
+    pattern = re.compile(rf"^{re.escape(key)}:.*$", re.M)
+    if pattern.search(frontmatter):
+        return pattern.sub(lambda _: line, frontmatter, count=1)
+    return f"{frontmatter}\n{line}"
+
+
+def one_line(text):
+    text = " ".join(text.split())
+    return text if len(text) <= SUMMARY_MAX else text[: SUMMARY_MAX - 1] + "…"
+
+
+def set_plan(body, plan):
+    """Replaces the `## Plan` section (or appends one); `## Prompt` and anything else stay."""
+    section = f"## Plan\n\n{plan.strip()}\n"
+    match = re.search(r"^## Plan\s*$.*?(?=^## |\Z)", body, re.M | re.S)
+    if match:
+        rest = body[match.end():]
+        return body[: match.start()] + section + ("\n" + rest if rest else "")
+    return body.rstrip("\n") + "\n\n" + section
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog="workitem-plan-note")
+    parser.add_argument("summary", nargs="?")
+    parser.add_argument("--status", choices=STATUSES)
+    parser.add_argument("--plan", action="store_true", help="read the plan from stdin")
+    parser.add_argument("--workitem")
+    args = parser.parse_args(argv)
+    record = os.environ.get("WORKITEM_PLAN")
+    if not record:
+        sys.exit("workitem-plan-note: WORKITEM_PLAN is not set; this only works inside a planning session")
+    try:
+        text = open(record).read()
+    except OSError as e:
+        sys.exit(f"workitem-plan-note: {e}")
+    match = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    if not match:
+        sys.exit(f"workitem-plan-note: {record} has no frontmatter")
+    frontmatter, body = match.group(1), text[match.end():]
+    if args.summary is not None:
+        frontmatter = set_field(frontmatter, "summary", one_line(args.summary))
+    if args.status:
+        frontmatter = set_field(frontmatter, "status", args.status)
+    if args.workitem:
+        frontmatter = set_field(frontmatter, "workitem", one_line(args.workitem))
+    if args.plan:
+        plan = sys.stdin.read()
+        if not plan.strip():
+            sys.exit("workitem-plan-note: --plan got an empty plan on stdin")
+        body = set_plan(body, plan)
+    with open(record, "w") as f:
+        f.write(f"---\n{frontmatter}\n---\n{body}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

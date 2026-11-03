@@ -1,7 +1,8 @@
-/** Hash routes: `#<project>/<dir>[/<tab>]` for the detail panel, `?project=<name>&board=<name>` for the project filter and the board shown. */
+/** Hash routes: `#<project>/<dir>[/<tab>]` for the detail panel, `?project=<name>&board=<name>` for the project filter and the board shown,
+ * `?plan=<project>/<id>` for an open planning session (instead of an item). */
 
 export type Tab = "brief" | "info" | "files" | "pr" | "terminal" | "actions";
-export type Route = { item?: { project: string; dir: string }; tab?: Tab; project?: string; board?: string };
+export type Route = { item?: { project: string; dir: string }; tab?: Tab; project?: string; board?: string; plan?: { project: string; id: string } };
 
 const TABS: Tab[] = ["brief", "info", "files", "pr", "terminal", "actions"];
 
@@ -14,6 +15,9 @@ export function readRoute(hash: string = location.hash): Route {
   if (project) route.project = project;
   const board = params.get("board");
   if (board) route.board = board;
+  const plan = params.get("plan");
+  const slash = plan?.lastIndexOf("/") ?? -1;
+  if (plan && slash > 0 && slash < plan.length - 1) route.plan = { project: plan.slice(0, slash), id: plan.slice(slash + 1) };
   const parts = path
     .split("/")
     .map(decodeURIComponent)
@@ -32,6 +36,7 @@ export function routeHash(route: Route): string {
   const params = [
     ...(route.project ? [`project=${encodeURIComponent(route.project)}`] : []),
     ...(route.board ? [`board=${encodeURIComponent(route.board)}`] : []),
+    ...(route.plan ? [`plan=${encodeURIComponent(`${route.plan.project}/${route.plan.id}`)}`] : []),
   ];
   const query = params.length ? `?${params.join("&")}` : "";
   return path || query ? `#${path}${query}` : "";

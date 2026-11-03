@@ -1,4 +1,4 @@
-import { AgentSession, Detail, FileEntry, Item, Pipelines, PrConversation, Project, StageSource } from "./types";
+import { AgentSession, Detail, FileEntry, Item, Pipelines, Plan, PlanDetail, PrConversation, Project, StageSource } from "./types";
 
 type Launched = { session: string };
 
@@ -22,6 +22,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 const segment = encodeURIComponent;
 const itemUrl = (item: Item) => `/api/workitems/${segment(item.project)}/${segment(item.dir)}`;
+const planUrl = (project: string, id: string) => `/api/plans/${segment(project)}/${segment(id)}`;
 
 export const api = {
   login: (token: string) => request<void>("POST", "/api/login", { token }),
@@ -56,14 +57,21 @@ export const api = {
   remove: (item: Item) => request<{ worktree_left: string | null }>("POST", `${itemUrl(item)}/remove`),
   create: (project: string, input: string, board: string) =>
     request<Launched>("POST", `/api/projects/${segment(project)}/create`, { input, board }),
+  plans: () => request<Plan[]>("GET", "/api/plans"),
+  plan: (project: string, id: string) => request<PlanDetail>("GET", planUrl(project, id)),
+  createPlan: (project: string, input: string) =>
+    request<{ id: string }>("POST", `/api/projects/${segment(project)}/plans`, { input }),
+  resumePlan: (plan: Plan) => request<void>("POST", `${planUrl(plan.project, plan.id)}/resume`),
+  deletePlan: (plan: Plan) => request<void>("DELETE", planUrl(plan.project, plan.id)),
 };
 
 /** URL of one file in a workitem folder; `path` is relative and `/`-separated. */
 export const fileUrl = (item: Item, path: string) => `${itemUrl(item)}/files/${path.split("/").map(segment).join("/")}`;
 
-/** Path of a terminal socket: a workitem's session, or a `wi-new-*` agent session. */
+/** Path of a terminal socket: a workitem's session, or a `wi-new-*` or `wi-plan-*` session. */
 export const itemTerminal = (project: string, dir: string) => `terminal/${segment(project)}/${segment(dir)}`;
 export const agentTerminal = (project: string, name: string) => `session/${segment(project)}/${segment(name)}`;
+export const planTerminal = (plan: Plan) => agentTerminal(plan.project, `wi-plan-${plan.id}`);
 
 export const terminalUrl = (path: string, cols: number, rows: number) => {
   const scheme = location.protocol === "https:" ? "wss" : "ws";

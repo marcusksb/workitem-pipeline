@@ -56,4 +56,11 @@ describe("routeHash", () => {
     const route = { item: { project: "a b", dir: "x-1" }, project: "a b", board: "research" };
     expect(readRoute(routeHash(route))).toEqual(route);
   });
+
+  it("keeps an open plan, even when its project name has a slash", () => {
+    const route = { project: "app", plan: { project: "team/app", id: "0a1b2c" } };
+    expect(readRoute(routeHash(route))).toEqual(route);
+    expect(readRoute("#?plan=app%2F")).toEqual({});
+    expect(readRoute("#?plan=abc")).toEqual({});
+  });
 });

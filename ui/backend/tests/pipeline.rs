@@ -1383,3 +1383,71 @@ async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
 }
+
+fn stub_logs(w: &World) -> Vec<String> {
+    let mut logs: Vec<_> = fs::read_dir(w.dir.path().join("logs")).unwrap().filter_map(Result::ok).map(|e| e.path()).collect();
+    logs.sort();
+    logs.iter().map(|path| fs::read_to_string(path).unwrap()).collect()
+}
+
+#[tokio::test]
+async fn a_plan_runs_in_the_repo_ends_with_its_session_resumes_and_is_deleted() {
+    let w = world();
+    let (status, _) = post(&w, "/api/projects/app/plans", r#"{"input":"  "}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let pwn = w.dir.path().join("pwned");
+    let input = format!("How should we split auth?\n$(touch {})", pwn.display());
+    let (status, body) = post(&w, "/api/projects/app/plans", &serde_json::json!({ "input": input }).to_string()).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let started: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let (id, session) = (started["id"].as_str().unwrap().to_string(), started["session"].as_str().unwrap().to_string());
+    assert_eq!(session, format!("wi-plan-{id}"));
+    assert!(w.tmux.has(&session));
+
+    let record = w.repo.join(".workitems/plans").join(format!("{id}.md"));
+    let text = fs::read_to_string(&record).unwrap();
+    assert!(text.contains("topic: How should we split auth?\n"), "{text}");
+    assert!(text.contains("status: working\n"));
+    assert!(text.contains(&format!("## Prompt\n\n{input}\n")));
+    let uuid = text.lines().find_map(|l| l.strip_prefix("claude_session: ")).unwrap().to_string();
+
+    eventually("stub recorded the plan prompt", || stub_logs(&w).iter().any(|t| t.contains("planning session"))).await;
+    let log = stub_logs(&w).into_iter().find(|t| t.contains("planning session")).unwrap();
+    assert!(log.starts_with("argc=5\n"), "--settings, json, --session-id, uuid, prompt: {log}");
+    assert!(log.contains(&input), "prompt keeps the text verbatim");
+    assert!(!pwn.exists(), "text must never reach a shell");
+
+    let plans = get(&w, "/api/plans").await;
+    assert!(plans.contains(r#""status":"working""#) && plans.contains(r#""live":true"#), "{plans}");
+    assert!(get(&w, "/api/sessions").await == "[]", "plan sessions are not create sessions");
+
+    // The agent saves a plan; the detail endpoint returns it apart from the prompt.
+    fs::write(&record, format!("{text}\n## Plan\n\n1. Do it\n")).unwrap();
+    let detail = get(&w, &format!("/api/plans/app/{id}")).await;
+    assert!(detail.contains(r#""text":"1. Do it""#) && detail.contains(r#""has_plan":true"#), "{detail}");
+
+    settle(&w).await;
+    assert!(w.tmux.has(&session), "a running plan session survives the dispatcher");
+    w.tmux.run(&["kill-session", "-t", &format!("={session}")]);
+    settle(&w).await;
+    assert!(fs::read_to_string(&record).unwrap().contains("status: ended\n"));
+
+    let (status, _) = post(&w, &format!("/api/plans/app/{id}/resume"), "").await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(w.tmux.has(&session));
+    assert!(fs::read_to_string(&record).unwrap().contains("status: working\n"));
+    eventually("stub was resumed", || stub_logs(&w).iter().any(|t| t.contains(&format!("last={uuid}")))).await;
+    let (status, _) = post(&w, &format!("/api/plans/app/{id}/resume"), "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "already running");
+
+    let request = Request::delete(format!("/api/plans/app/{id}"))
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(router(w.state.clone()).oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert!(!record.exists());
+    assert!(!w.tmux.has(&session));
+    assert_eq!(get(&w, "/api/plans").await, "[]");
+}

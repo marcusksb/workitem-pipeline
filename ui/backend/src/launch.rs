@@ -1,4 +1,6 @@
-use std::{fs, path::Path};
+use std::{ffi::OsString, fs, path::Path};
+
+use serde_json::json;
 
 use crate::{
     config::Project,
@@ -23,27 +25,68 @@ pub async fn spawn(
     workitem: Option<&str>,
     prompt: &str,
 ) -> Result<(), String> {
-    let existing = tmux::sessions(state.tmux_socket.as_deref()).await;
-    if let Some(other) = existing.iter().find(|s| s.name == session) {
-        return Err(format!("session {session} already exists (repo {})", other.repo.display()));
-    }
-    let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
-    let mut command = tmux::command(state.tmux_socket.as_deref());
     let worktree = match workitem {
         Some(dir) => git::worktree_for(&git::worktrees(repo).await, repo, dir).cloned(),
         None => None,
     };
-    command.args(["new-session", "-d", "-s", session, "-c"]).arg(worktree.as_deref().unwrap_or(repo));
+    let mut env = vec![];
     if let Some(dir) = workitem {
-        command.arg("-e").arg(format!("WORKITEM={dir}"));
-        command.arg("-e").arg(format!("WORKITEM_REPO={}", repo.display()));
+        env.push(format!("WORKITEM={dir}"));
+        env.push(format!("WORKITEM_REPO={}", repo.display()));
     }
-    command.arg("--").arg(&state.claude);
+    let mut args: Vec<OsString> = vec![];
     if worktree.is_some() {
         // `--add-dir` takes several values, so `--settings` must follow it to end the list.
-        command.arg("--add-dir").arg(repo);
+        args.extend(["--add-dir".into(), repo.into()]);
     }
-    command.arg("--settings").arg(hooks).arg(prompt);
+    let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
+    args.extend(["--settings".into(), hooks.into(), prompt.into()]);
+    start(state, session, repo, worktree.as_deref().unwrap_or(repo), &env, &args).await
+}
+
+/// Starts a planning session (decision 36) in the repo root: `claude` with the planning settings
+/// and `claude_args` (`--session-id <uuid> <prompt>`, or `--resume <uuid>`). `record` is its plan
+/// record, which the hooks and `workitem-plan-note` update.
+pub async fn spawn_plan(state: &AppState, session: &str, repo: &Path, record: &Path, claude_args: &[&str]) -> Result<(), String> {
+    let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_REPO={}", repo.display())];
+    let mut args: Vec<OsString> = vec!["--settings".into(), plan_settings(state).into()];
+    args.extend(claude_args.iter().map(OsString::from));
+    start(state, session, repo, repo, &env, &args).await
+}
+
+/// Inline `--settings` of a planning session: the helper and file edits run without asking, and
+/// the guard hook refuses every edit outside the workitems folder.
+fn plan_settings(state: &AppState) -> String {
+    let bin = state.skills_dir.join("workitem-pipeline/bin");
+    let script = |name: &str| bin.join(name).display().to_string();
+    let hook = |name: &str, args: &str| json!([{ "hooks": [{ "type": "command", "command": format!("python3 {}{args}", shell_quote(&script(name))) }] }]);
+    json!({
+        "permissions": { "allow": [format!("Bash(python3 {}:*)", script("workitem-plan-note")), "Edit", "Write"] },
+        "hooks": {
+            "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": format!("python3 {}", shell_quote(&script("workitem-plan-guard"))) }] }],
+            "Notification": hook("workitem-notify", ""),
+            "UserPromptSubmit": hook("workitem-plan-note", " --status working"),
+        }
+    })
+    .to_string()
+}
+
+/// Hook commands run through a shell.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+async fn start(state: &AppState, session: &str, repo: &Path, cwd: &Path, env: &[String], args: &[OsString]) -> Result<(), String> {
+    let existing = tmux::sessions(state.tmux_socket.as_deref()).await;
+    if let Some(other) = existing.iter().find(|s| s.name == session) {
+        return Err(format!("session {session} already exists (repo {})", other.repo.display()));
+    }
+    let mut command = tmux::command(state.tmux_socket.as_deref());
+    command.args(["new-session", "-d", "-s", session, "-c"]).arg(cwd);
+    for var in env {
+        command.arg("-e").arg(var);
+    }
+    command.arg("--").arg(&state.claude).args(args);
     command.args([";", "set-option", tmux::REPO_OPTION]).arg(repo);
     let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"))?;
     if !output.status.success() {

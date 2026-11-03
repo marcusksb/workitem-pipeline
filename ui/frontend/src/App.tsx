@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { AgentSessions } from "./AgentSessions";
 import { Board } from "./Board";
 import { itemKey, shownBoard } from "./boardState";
 import { DetailPanel } from "./DetailPanel";
 import { Login } from "./Login";
+import { PlanPanel } from "./PlanPanel";
+import { Plans } from "./Plans";
 import { Projects } from "./Projects";
 import { QuickSearch } from "./QuickSearch";
 import { Terminal } from "./Terminal";
@@ -60,6 +61,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
   const pipelines = usePolling(api.pipelines, 3000, "pipelines", onUnauthorized);
   const items = usePolling(api.items, 3000, "items", onUnauthorized);
   const sessions = usePolling(api.sessions, 3000, "sessions", onUnauthorized);
+  const plans = usePolling(api.plans, 3000, "plans", onUnauthorized);
   useBlockedAlerts(items.data);
 
   useEffect(() => {
@@ -94,6 +96,10 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
   const selected = route.item
     ? (items.data ?? []).find((i) => i.project === route.item!.project && i.dir === route.item!.dir) ?? null
     : null;
+  const selectedPlan = route.plan
+    ? (plans.data ?? []).find((p) => p.project === route.plan!.project && p.id === route.plan!.id) ?? null
+    : null;
+  const detailOpen = !!(selected || selectedPlan);
   const shown = (items.data ?? []).filter((item) => !project || item.project === project);
   const error = projects.error ?? items.error ?? pipelines.error;
   const inView = project ? [project] : (projects.data ?? []).map((p) => p.name);
@@ -130,10 +136,21 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
         </button>
         {error && <span className="error">{error}</span>}
       </header>
-      <AgentSessions sessions={sessions.data ?? []} />
+      <Plans
+        plans={plans.data ?? []}
+        sessions={sessions.data ?? []}
+        projects={inView}
+        showProject={!project}
+        selected={selectedPlan}
+        onSelect={(plan) => navigate({ plan: { project: plan.project, id: plan.id } })}
+        onStarted={(planProject, id) => {
+          void plans.reload();
+          navigate({ plan: { project: planProject, id } });
+        }}
+      />
       {projects.data?.length === 0 && <p className="empty">No projects yet. Add a repo directory to see its workitems.</p>}
-      <main className={selected ? "with-detail" : ""}>
-        <div className="left" onClick={(event) => selected && isBackground(event.target) && navigate({})}>
+      <main className={detailOpen ? "with-detail" : ""}>
+        <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
           <Board items={shown} pipelines={pipelines.data} projects={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={(item) => navigate({ item })} showProject={!project} onChanged={() => {
             void items.reload();
             void pipelines.reload();
@@ -147,6 +164,16 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
             tab={route.tab}
             onTab={onTab}
             onClose={() => navigate({})}
+            onUnauthorized={onUnauthorized}
+          />
+        )}
+        {selectedPlan && (
+          <PlanPanel
+            key={`${selectedPlan.project}/${selectedPlan.id}`}
+            plan={selectedPlan}
+            onWorkitem={(itemProject, dir) => navigate({ item: { project: itemProject, dir } })}
+            onClose={() => navigate({})}
+            onChanged={() => void plans.reload()}
             onUnauthorized={onUnauthorized}
           />
         )}

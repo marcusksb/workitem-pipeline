@@ -7,6 +7,7 @@ use crate::{
     config::Project,
     launch,
     pipeline::Stage,
+    plans,
     tmux, watch,
     workitem::{self, Workitem},
     AppState,
@@ -50,6 +51,7 @@ pub async fn pass(state: &AppState) {
             let session = tmux::session_for(&sessions, &project, &item.dir).map(|s| s.name.as_str());
             reap(state, &project, &item, session, &dead).await;
         }
+        plans::reap(state, &project, &sessions, &dead).await;
     }
     watch::pass(state).await;
 }

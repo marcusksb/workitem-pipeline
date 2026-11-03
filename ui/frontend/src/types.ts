@@ -77,6 +77,24 @@ export type Project = { name: string; repo: string };
 
 export type AgentSession = { project: string; name: string };
 
+/** A planning session's record (`<workitems dir>/plans/<id>.md`). `status` is what the record says;
+ * see `planStatus` for what to show. */
+export type Plan = {
+  project: string;
+  id: string;
+  topic: string;
+  summary: string;
+  status: "working" | "waiting" | "ended";
+  /** Directory of the workitem made from it, or "". */
+  workitem: string;
+  /** Epoch seconds. */
+  created: number;
+  has_plan: boolean;
+  live: boolean;
+};
+
+export type PlanDetail = Plan & { prompt: string; text: string | null };
+
 /** A script or skill a stage runs, or the inline prompt in its place. */
 export type Source = {
   name: string;
