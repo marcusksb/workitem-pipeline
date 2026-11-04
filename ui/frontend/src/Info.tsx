@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "./api";
 import { frontmatterFields } from "./boardState";
+import { IssueStatusChip } from "./IssueStatusChip";
 import { IconCheck, IconPencil, IconX } from "./icons";
 import { Item } from "./types";
 
@@ -9,7 +10,7 @@ const READ_ONLY = ["stage", "board"];
 
 const isUrl = (value: string) => /^https?:\/\/\S+$/.test(value);
 
-function Value({ name, value }: { name: string; value: string }) {
+function Value({ name, value, category }: { name: string; value: string; category: string }) {
   if (!value) return <span className="empty">empty</span>;
   if (isUrl(value))
     return (
@@ -18,6 +19,7 @@ function Value({ name, value }: { name: string; value: string }) {
       </a>
     );
   if (name === "agent_status") return <span className={`chip ${value.startsWith("blocked") ? "blocked" : value.startsWith("waiting") ? "waiting" : "pr-moved"}`}>{value}</span>;
+  if (name === "issue_status") return <IssueStatusChip status={value} category={category} />;
   if (name === "stage") return <span className="badge">{value}</span>;
   return <>{value}</>;
 }
@@ -26,6 +28,7 @@ function Value({ name, value }: { name: string; value: string }) {
  * the changed fields are saved, so an agent's edit to another field is never overwritten. */
 export function Info({ item, content, onSaved }: { item: Item; content: string; onSaved: () => void }) {
   const fields = frontmatterFields(content);
+  const category = fields.find(([name]) => name === "issue_status_category")?.[1] ?? "";
   const [draft, setDraft] = useState<Record<string, string>>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -84,7 +87,7 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
                   spellCheck={false}
                 />
               ) : (
-                <Value name={name} value={value} />
+                <Value name={name} value={value} category={category} />
               )}
             </dd>
           </div>

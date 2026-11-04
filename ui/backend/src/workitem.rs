@@ -20,6 +20,10 @@ pub struct Workitem {
     pub approved: bool,
     pub agent_status: String,
     pub issue: String,
+    /// Jira status name, as the project's watcher last saw it, or empty.
+    pub issue_status: String,
+    /// Jira status category key (`new`, `indeterminate`, `done`), or empty.
+    pub issue_status_category: String,
     pub pr: String,
     /// Directory name of the workitem this one was split from, or empty.
     pub parent: String,
@@ -86,6 +90,8 @@ fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
         approved: field("approved", "false") == "true",
         agent_status: field("agent_status", "ok"),
         issue: field("issue", "none"),
+        issue_status: field("issue_status", ""),
+        issue_status_category: field("issue_status_category", ""),
         pr: field("pr", ""),
         parent: field("parent", ""),
         created: field("created", ""),
@@ -257,6 +263,21 @@ mod tests {
         assert_eq!(items[0].title, "Fix: login");
         assert_eq!(items[0].stage, "analyze");
         assert_eq!(items[0].agent_status, "blocked: x");
+    }
+
+    #[test]
+    fn reads_the_jira_status_and_leaves_it_empty_when_missing() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().join(".workitems");
+        fs::create_dir_all(root.join("T-1-a")).unwrap();
+        fs::write(root.join("T-1-a/workitem.md"), "---\ntitle: A\nissue_status: Waiting for Deployment\nissue_status_category: done\n---\nbody").unwrap();
+        fs::create_dir_all(root.join("T-2-b")).unwrap();
+        fs::write(root.join("T-2-b/workitem.md"), "---\ntitle: B\n---\nbody").unwrap();
+        let items = list(&project(repo.path()));
+        assert_eq!(items[0].issue_status, "Waiting for Deployment");
+        assert_eq!(items[0].issue_status_category, "done");
+        assert_eq!(items[1].issue_status, "");
+        assert_eq!(items[1].issue_status_category, "");
     }
 
     #[test]

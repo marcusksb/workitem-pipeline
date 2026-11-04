@@ -41,6 +41,10 @@ export type Item = {
   approved: boolean;
   agent_status: string;
   issue: string;
+  /** Jira status name, or empty. */
+  issue_status: string;
+  /** Jira status category key: `new`, `indeterminate` or `done`; or empty. */
+  issue_status_category: string;
   pr: string;
   parent: string;
   created: string;

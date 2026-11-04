@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, isWaiting, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Item, Pipelines } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
@@ -12,6 +12,8 @@ const item = (over: Partial<Item>): Item => ({
   approved: false,
   agent_status: "ok",
   issue: "none",
+  issue_status: "",
+  issue_status_category: "",
   pr: "",
   parent: "",
   created: "",
@@ -215,5 +217,16 @@ describe("waiting", () => {
     expect(isBlocked(waiting)).toBe(false);
     expect(waitingFor(waiting)).toBe("CI on PR #12");
     expect(isWaiting(item({ agent_status: "working" }))).toBe(false);
+  });
+});
+
+describe("issueCategory", () => {
+  it("maps the Jira status category keys and nothing else", () => {
+    expect(issueCategory("new")).toBe("todo");
+    expect(issueCategory("indeterminate")).toBe("progress");
+    expect(issueCategory("done")).toBe("done");
+    expect(issueCategory("")).toBeUndefined();
+    expect(issueCategory("undefined")).toBeUndefined();
+    expect(issueCategory("toString")).toBeUndefined();
   });
 });

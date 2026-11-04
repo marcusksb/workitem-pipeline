@@ -308,6 +308,9 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .pr-note > :last-child { margin-bottom: 0; }
 .link-badge { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); text-decoration: none; }
 .link-badge:hover { text-decoration: underline; }
+.badge.issue-todo, .chip.issue-todo { color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.badge.issue-progress, .chip.issue-progress { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.badge.issue-done, .chip.issue-done { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
 .dialog-overlay {
   position: fixed;

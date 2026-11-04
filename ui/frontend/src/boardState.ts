@@ -126,6 +126,13 @@ export function ticket(issue: string): { key: string; url?: string } | null {
   return key ? { key, url } : { key: issue };
 }
 
+/** Colour group of a Jira status category key, or undefined for an unknown or missing one. */
+export function issueCategory(category: string): "todo" | "progress" | "done" | undefined {
+  if (category === "new") return "todo";
+  if (category === "indeterminate") return "progress";
+  if (category === "done") return "done";
+}
+
 /** Number of a GitHub PR URL, or undefined. */
 export const prNumber = (pr: string) => pr.match(/\/pull\/(\d+)/)?.[1];
 
