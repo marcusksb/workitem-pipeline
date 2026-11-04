@@ -99,9 +99,13 @@ pub async fn launch_handler(state: &AppState, project: &Project, item: &Workitem
 }
 
 /// What `workitem-run-item` does: starts the stage handler of an idle item, with the same
-/// instructions the dispatcher would use. Policy (when, how often, attempt caps) is the caller's.
-pub async fn run_handler(state: &AppState, project: &Project, item: &Workitem, path: &Path, stage: &Stage) -> Result<(), RunError> {
-    let source = source_of(stage).ok_or_else(|| RunError::Refused(format!("stage {} has no handler to run", stage.name)))?;
+/// instructions the dispatcher would use, or the named `handler` instead for this one run.
+/// Policy (when, how often, attempt caps) is the caller's.
+pub async fn run_handler(state: &AppState, project: &Project, item: &Workitem, path: &Path, stage: &Stage, handler: Option<&str>) -> Result<(), RunError> {
+    let source = match handler {
+        Some(name) => Source::Skill(name),
+        None => source_of(stage).ok_or_else(|| RunError::Refused(format!("stage {} has no handler to run", stage.name)))?,
+    };
     if item.agent_status != "ok" {
         return Err(RunError::Refused(format!("{} is {}, not ok", item.dir, item.agent_status)));
     }

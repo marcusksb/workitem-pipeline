@@ -212,19 +212,27 @@ pub async fn start(
     launch_item_session(&state, &project, &path, &item, &prompt).await
 }
 
-/// Starts the handler of the item's stage, as the dispatcher would. For `workitem-run-item`,
-/// which column watcher scripts use to decide for themselves when an item gets its handler.
+#[derive(Deserialize)]
+pub struct Run {
+    handler: Option<String>,
+}
+
+/// Starts the handler of the item's stage, as the dispatcher would, or the skill named in the
+/// body's `handler`. For `workitem-run-item`, which column watcher scripts use to decide for
+/// themselves when an item gets a handler.
 pub async fn run_handler(
     State(state): State<Shared>,
     UrlPath((project, dir)): UrlPath<(String, String)>,
+    body: Option<Json<Run>>,
 ) -> Result<(StatusCode, Json<Launched>)> {
+    let handler = body.and_then(|Json(run)| run.handler);
     let (project, path, item) = find(&state, &project, &dir)?;
     let stage = stage_of(&state, &project, &item)?;
     let _busy = state.busy.lock().await;
     if has_session(&state, &project, &dir).await {
         return Err(conflict(format!("{dir} already has a session")));
     }
-    crate::dispatch::run_handler(&state, &project, &item, &path, &stage).await.map_err(|e| match e {
+    crate::dispatch::run_handler(&state, &project, &item, &path, &stage, handler.as_deref()).await.map_err(|e| match e {
         // The handler itself is unusable: not a state that retrying fixes.
         RunError::Handler(message) => ApiError(StatusCode::UNPROCESSABLE_ENTITY, message),
         RunError::Refused(message) => conflict(message),

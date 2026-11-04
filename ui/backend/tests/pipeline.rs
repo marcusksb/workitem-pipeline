@@ -1299,6 +1299,39 @@ async fn run_starts_the_stage_handler_of_an_idle_item_for_a_script_with_the_toke
     assert!(body.contains("no handler"), "{body}");
 }
 
+async fn post_json_bearer(w: &World, uri: &str, body: &str) -> (StatusCode, String) {
+    let request = Request::post(uri)
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::AUTHORIZATION, format!("Bearer {}", w.token))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let response = router(w.state.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    (status, String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned())
+}
+
+#[tokio::test]
+async fn run_starts_a_named_handler_instead_of_the_stage_handler() {
+    let w = world();
+    write_item(&w.repo, "T-53-review", "shipped", "");
+    write_item(&w.repo, "T-54-review", "shipped", "");
+    fs::write(w.repo.join(".claude/workitems/pipeline.json"), board(r#"[{"name":"qa","next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
+    write_skill(&w.repo.join(".claude/workitems/skills"), "move-ticket", "TICKET STEPS\n");
+
+    let (status, body) = post_json_bearer(&w, "/api/workitems/app/T-53-review/run", r#"{"handler":"move-ticket"}"#).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    eventually("the named handler ran", || stub_log(&w.repo) == vec!["T-53-review shipped"]).await;
+    assert_eq!(field(&w.repo, "T-53-review", "agent_status"), "working");
+    assert!(args_log(&w).contains("TICKET STEPS"));
+
+    let (status, body) = post_json_bearer(&w, "/api/workitems/app/T-54-review/run", r#"{"handler":"missing"}"#).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "an unknown handler cannot be used");
+    assert!(body.contains("not found"), "{body}");
+    let (status, _) = post_json_bearer(&w, "/api/workitems/app/T-54-review/run", r#"{"handler":"../x"}"#).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "a handler name is not a path");
+}
+
 #[tokio::test]
 async fn the_default_board_can_live_in_the_boards_folder() {
     let w = world();
