@@ -3,6 +3,7 @@ import Markdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { toggleTask } from "./boardState";
+import { markdownLinks } from "./markdownLinks";
 import { Item } from "./types";
 
 type Props = { item: Item; body: string; onSaved: () => void };
@@ -34,6 +35,7 @@ export function BriefView({ item, body, onSaved }: Props) {
   current.current = { busy, toggle };
   const components = useMemo<Components>(
     () => ({
+      ...markdownLinks,
       h2: ({ node, ...props }) => <h2 {...props} id={props.children === "Follow-ups" ? "follow-ups" : undefined} />,
       li: ({ node, ...props }) => <li {...props} data-offset={node?.position?.start.offset} />,
       input: ({ node, ...props }) =>

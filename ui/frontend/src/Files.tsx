@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, fileUrl, Unauthorized } from "./api";
+import { markdownLinks } from "./markdownLinks";
 import { FileEntry, Item } from "./types";
 import { usePolling } from "./usePolling";
 import { IconExternal, IconFolder } from "./icons";
@@ -91,7 +92,7 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
         <p className="empty">Binary file; open it instead.</p>
       ) : MARKDOWN.test(file.path) ? (
         <div className="file-markdown">
-          <Markdown remarkPlugins={[remarkGfm]}>{text.text}</Markdown>
+          <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{text.text}</Markdown>
         </div>
       ) : (
         <pre>{text.text}</pre>
