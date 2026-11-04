@@ -114,7 +114,7 @@ test("add a project, find the blocked item, answer the agent in the browser term
 
   const board = page.locator(".board");
   await expect(board.getByText("Demo blocked item")).toBeVisible();
-  await expect(board.getByText("blocked", { exact: true })).toBeVisible();
+  await expect(board.locator(".card.blocked", { hasText: "Demo blocked item" })).toBeVisible();
   await board.getByText("Demo blocked item").click();
 
   const terminal = page.locator(".detail .xterm-rows");

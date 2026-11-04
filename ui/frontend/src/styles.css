@@ -27,6 +27,7 @@
   --accent: #2b59c3;
   --blocked: #c62828;
   --working: #b26a00;
+  --waiting: #eab308;
   --good: #2e7d32;
   color-scheme: light dark;
 }
@@ -40,6 +41,7 @@
     --accent: #7ea3f5;
     --blocked: #ff8a80;
     --working: #ffc266;
+    --waiting: #facc15;
     --good: #81c784;
   }
 }
@@ -161,8 +163,10 @@ main { flex: 1; min-height: 0; display: flex; }
 .card[style*="margin-left"] { width: auto; border-left: 3px solid var(--border); }
 .card:hover { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .card.selected { border-color: var(--accent); }
-.card.blocked { position: relative; border-color: var(--blocked); }
-.card.blocked::before {
+.card.blocked { --ring: var(--blocked); }
+.card.waiting { --ring: var(--waiting); }
+.card.blocked, .card.waiting { position: relative; border-color: var(--ring); }
+.card.blocked::before, .card.waiting::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -170,10 +174,10 @@ main { flex: 1; min-height: 0; display: flex; }
   padding: 1px;
   background: conic-gradient(
     from var(--card-angle),
-    color-mix(in srgb, var(--blocked) 45%, transparent),
-    var(--blocked),
-    color-mix(in srgb, var(--blocked) 45%, transparent),
-    var(--blocked)
+    color-mix(in srgb, var(--ring) 45%, transparent),
+    var(--ring),
+    color-mix(in srgb, var(--ring) 45%, transparent),
+    var(--ring)
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
@@ -185,7 +189,7 @@ main { flex: 1; min-height: 0; display: flex; }
 @media (prefers-color-scheme: dark) {
   .card { border-color: var(--border); }
   .card.selected { border-color: var(--accent); }
-  .card.blocked { border-color: var(--blocked); }
+  .card.blocked, .card.waiting { border-color: var(--ring); }
 }
 .card .title { font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere; }
 .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -217,7 +221,7 @@ span.chip.waiting { display: inline-flex; align-items: center; gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .card.working::before { animation: none; }
-  .card.blocked::before { animation: none; }
+  .card.blocked::before, .card.waiting::before { animation: none; }
 }
 .review-strip { display: flex; gap: 6px; align-items: center; }
 .card .chip, .card .review-strip { margin-top: 8px; }
