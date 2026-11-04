@@ -62,7 +62,8 @@ pub fn file(repo: &Path, dir: &str) -> PathBuf {
     workitems_dir(repo).join(dir).join("workitem.md")
 }
 
-/// Titles are written as YAML strings, so they often arrive wrapped in quotes.
+/// Values are written as YAML strings, so they can arrive wrapped in quotes (an agent quotes
+/// `agent_status: "blocked: x"` because of the colon).
 fn unquote(value: &str) -> &str {
     ["\"", "'"]
         .iter()
@@ -72,11 +73,13 @@ fn unquote(value: &str) -> &str {
 
 fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
     let fields = frontmatter(text);
-    let field = |key: &str, default: &str| fields.get(key).filter(|v| !v.is_empty()).cloned().unwrap_or(default.to_string());
+    let field = |key: &str, default: &str| {
+        fields.get(key).map(|v| unquote(v)).filter(|v| !v.is_empty()).unwrap_or(default).to_string()
+    };
     Workitem {
         project: project.name.clone(),
         dir: dir.to_string(),
-        title: unquote(&field("title", dir)).to_string(),
+        title: field("title", dir),
         kind: field("type", "-"),
         stage: field("stage", ""),
         board: field("board", crate::pipeline::DEFAULT_BOARD),
@@ -242,6 +245,18 @@ mod tests {
         assert_eq!(items[1].pr, "");
         assert_eq!(items[1].parent, "SHAPE-1-foo");
         assert_eq!(items[0].parent, "");
+    }
+
+    #[test]
+    fn unquotes_quoted_values() {
+        let repo = tempfile::tempdir().unwrap();
+        let dir = repo.path().join(".workitems/T-1-a");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("workitem.md"), "---\ntitle: 'Fix: login'\nstage: \"analyze\"\nagent_status: \"blocked: x\"\n---\nbody").unwrap();
+        let items = list(&project(repo.path()));
+        assert_eq!(items[0].title, "Fix: login");
+        assert_eq!(items[0].stage, "analyze");
+        assert_eq!(items[0].agent_status, "blocked: x");
     }
 
     #[test]

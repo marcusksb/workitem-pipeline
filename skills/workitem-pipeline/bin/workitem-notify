@@ -20,13 +20,20 @@ sys.dont_write_bytecode = True
 from workitem_paths import workitems_dir
 
 
+def unquote(value):
+    """An agent may quote a value (`"waiting: CI"`) because it holds a colon."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def replace_status(path, key, matches, new):
     try:
         text = path.read_text()
     except OSError:
         return
     status = re.search(rf"^{key}:\s*(.*)$", text, re.M)
-    if not status or not matches(status.group(1).strip()):
+    if not status or not matches(unquote(status.group(1).strip())):
         return
     path.write_text(text[:status.start()] + f"{key}: {new}" + text[status.end():])
 

@@ -35,6 +35,11 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(self.notify("waiting: CI on PR #1", "permission_prompt"), BLOCKED)
         self.assertEqual(self.notify("waiting: CI on PR #1", "elicitation_dialog"), BLOCKED)
 
+    def test_quoted_statuses_are_read_without_quotes(self):
+        self.assertEqual(self.notify('"waiting: CI on PR #1"', "permission_prompt"), BLOCKED)
+        self.assertEqual(self.notify('"working"', "idle_prompt"), BLOCKED)
+        self.assertEqual(self.notify('"blocked: why"', "permission_prompt"), '"blocked: why"')
+
     def test_other_statuses_are_left_alone(self):
         self.assertEqual(self.notify("ok", "permission_prompt"), "ok")
         self.assertEqual(self.notify("blocked: why", "permission_prompt"), "blocked: why")
