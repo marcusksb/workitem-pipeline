@@ -663,22 +663,24 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
     passes().await;
     assert_eq!(stub_log(&w.repo).len(), 1, "the same comment starts no second fixer");
 
-    // The reader's own replies and plain comments, and other people's plain PR comments, ask for nothing.
+    // The reader's own replies ask for nothing.
     let mut reply = inline("me", "will do", "2026-02-02T10:00:00Z");
     reply["in_reply_to_id"] = serde_json::json!(1);
     let seen = [old.clone(), inline("alice", "extract a method", "2026-02-01T10:00:00Z"), reply];
-    set_comments(serde_json::json!([plain("bob", "looks good", "2026-02-03T10:00:00Z")]), serde_json::json!(seen));
+    set_comments(serde_json::json!([]), serde_json::json!(seen));
     passes().await;
-    assert_eq!(stub_log(&w.repo).len(), 1, "chatter starts no fixer");
+    assert_eq!(stub_log(&w.repo).len(), 1, "the reader's own reply starts no fixer");
 
-    set_comments(serde_json::json!([plain("bob", "```suggestion\nfoo\n```", "2026-03-01T10:00:00Z")]), serde_json::json!(seen));
+    // Any PR comment by someone else does, a bot's included.
+    let bot = plain("github-actions[bot]", "Verdict: Requires Additional Work", "2026-03-01T10:00:00Z");
+    set_comments(serde_json::json!([bot.clone()]), serde_json::json!(seen));
     settle(&w).await;
-    eventually("a suggestion starts a fixer", || stub_log(&w.repo).len() == 2).await;
+    eventually("a bot's PR comment starts a fixer", || stub_log(&w.repo).len() == 2).await;
 
     // The reader's own new inline thread asks for a change, with no marker.
     let mut own = seen.to_vec();
     own.push(inline("me", "why not remove this method?", "2026-04-01T10:00:00Z"));
-    set_comments(serde_json::json!([plain("bob", "```suggestion\nfoo\n```", "2026-03-01T10:00:00Z")]), serde_json::json!(own));
+    set_comments(serde_json::json!([bot]), serde_json::json!(own));
     settle(&w).await;
     eventually("the reader's own inline thread starts a fixer", || stub_log(&w.repo).len() == 3).await;
 }

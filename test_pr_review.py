@@ -61,8 +61,8 @@ class StatusTest(unittest.TestCase):
 class CommentsTest(unittest.TestCase):
     def test_only_feedback_asks_for_a_change(self):
         self.assertTrue(pr.asks_for_change("alice", "rename", "me", True, False))
-        self.assertFalse(pr.asks_for_change("alice", "looks good", "me", False, False))
-        self.assertTrue(pr.asks_for_change("alice", "```suggestion\nx\n```", "me", False, False))
+        self.assertTrue(pr.asks_for_change("alice", "looks good", "me", False, False))
+        self.assertTrue(pr.asks_for_change("github-actions[bot]", "Verdict: Requires Additional Work", "me", False, False))
         self.assertTrue(pr.asks_for_change("me", "why not remove this?", "me", True, False))
         self.assertFalse(pr.asks_for_change("me", "will do", "me", True, True))
         self.assertFalse(pr.asks_for_change("me", "will do", "me", False, False))

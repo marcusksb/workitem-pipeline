@@ -10,7 +10,8 @@ For every item in the column that has a PR link it
   - starts a fixer session (workitem-run-item --fix) for red CI (up to --max-attempts per red
     streak), a merge conflict (once per PR head, then it blocks the item), a changes-requested
     review (once per review) and new comments or commented reviews that ask for a change (once
-    per comment).
+    per comment): any comment by someone else, bots included, and my own with @change or as a
+    new inline thread.
 CI fixers only look at checks whose name does not contain one of the --ignore words. With
 --status-only only the first point runs (see pr-status). What it has already handled lives in the
 workitem's own frontmatter: pr_fix_attempts, pr_conflict_head, pr_handled_review and
@@ -99,11 +100,12 @@ def changes_review(raw):
 
 
 def asks_for_change(author, body, me, inline, reply):
-    """My own comment with @change or as a new inline thread (a reply is conversation); anyone
-    else's if it is inline or carries a suggestion block."""
+    """My own comment with @change or as a new inline thread (a reply is conversation); any
+    comment by someone else, bots included (a review bot's findings are a top-level comment).
+    The fixer decides which of them need a change."""
     if author == me:
         return "@change" in body or (inline and not reply)
-    return inline or "```suggestion" in body
+    return True
 
 
 def review_comments(raw, me):
