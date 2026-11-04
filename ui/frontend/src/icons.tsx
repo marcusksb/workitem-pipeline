@@ -139,3 +139,9 @@ export const IconFolder = make(
   <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />,
 );
 export const IconPencil = make(<path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />);
+export const IconGitCommit = make(
+  <>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M3 12h6M15 12h6" />
+  </>,
+);
