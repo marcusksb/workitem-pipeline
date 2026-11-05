@@ -1223,26 +1223,6 @@ async fn a_pr_status_board_shows_the_pr_chips_and_starts_nothing() {
     assert_eq!(mine, true);
 }
 
-#[tokio::test]
-async fn an_item_whose_pr_head_moved_past_its_head_sha_is_flagged() {
-    let w = world();
-    queue_board(&w.repo);
-    let board = fs::read_to_string(w.repo.join(".claude/workitems/pipeline.json")).unwrap();
-    fs::write(w.repo.join(".claude/workitems/pipeline.json"), board.replace(r#""name": "post", "handler""#, r#""name": "post", "pr_status": true, "handler""#)).unwrap();
-    write_item(&w.repo, "T-40-seen", "post", &format!("{PR}head_sha: aaa\n"));
-    write_item(&w.repo, "T-41-moved", "post", &format!("{PR}head_sha: old\n"));
-    write_item(&w.repo, "T-42-no-sha", "post", PR);
-    let pr = serde_json::json!({ "state": "OPEN", "reviewDecision": "", "mergeable": "MERGEABLE", "headRefOid": "aaa", "statusCheckRollup": [] });
-    fs::write(w.dir.path().join("pr.json"), pr.to_string()).unwrap();
-
-    settle_pr(&w).await;
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
-    let moved = |dir: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["pr_moved"].clone();
-    assert_eq!(moved("T-40-seen"), false);
-    assert_eq!(moved("T-41-moved"), true);
-    assert_eq!(moved("T-42-no-sha"), false, "an item without head_sha never saw a head");
-}
-
 fn write_watch_script(repo: &Path, name: &str, body: &str) {
     let dir = repo.join(".claude/workitems/watch");
     fs::create_dir_all(&dir).unwrap();

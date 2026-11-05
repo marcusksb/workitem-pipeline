@@ -18,7 +18,7 @@ import { Tab } from "./url";
 import { Terminal } from "./Terminal";
 import { usePolling } from "./usePolling";
 import { WaitingChip } from "./WaitingChip";
-import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitCommit, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
+import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
 
 type Props = {
   item: Item;
@@ -79,7 +79,6 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
               }}
             />
             {!!live.unpushed && <span className="chip unpushed" title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</span>}
-            {live.pr_moved && <span className="chip pr-moved" role="img" aria-label="new commits" title="New commits: the PR has commits this workitem has not seen"><IconGitCommit /></span>}
             <ReviewStrip review={live.review} />
           </div>
           {(parent || children.length > 0) && (

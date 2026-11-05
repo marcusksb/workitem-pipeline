@@ -52,9 +52,6 @@ pub struct PrStatus {
     pub ci: Ci,
     /// Names of the red checks.
     pub failed: Vec<String>,
-    /// Commit the PR head points to.
-    #[serde(skip)]
-    pub head: Option<String>,
 }
 
 impl PrStatus {
@@ -89,7 +86,6 @@ impl PrStatus {
                 _ => Ci::None,
             },
             failed: get("pr_ci_failed").split(',').filter(|n| !n.is_empty()).map(String::from).collect(),
-            head: Some(get("pr_head")).filter(|h| !h.is_empty()).map(String::from),
         })
     }
 }
@@ -241,10 +237,9 @@ mod tests {
                 merge: Merge::Conflicting,
                 ci: Ci::Failing,
                 failed: vec!["lint".into(), "rspec".into()],
-                head: Some("abc".into()),
             }
         );
         let merged = PrStatus::from_fields(&fields(&[("pr_state", "merged"), ("pr_ci", "odd")])).unwrap();
-        assert_eq!((merged.state, merged.ci, merged.merge, merged.failed.len(), merged.head), (State::Merged, Ci::None, Merge::Unknown, 0, None));
+        assert_eq!((merged.state, merged.ci, merged.merge, merged.failed.len()), (State::Merged, Ci::None, Merge::Unknown, 0));
     }
 }

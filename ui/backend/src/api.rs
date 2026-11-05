@@ -154,13 +154,6 @@ pub struct Item {
     roles: Roles,
     /// Commits in the item's worktree that no remote has; `None` when it has no worktree.
     unpushed: Option<u32>,
-    /// The PR head moved past the item's `head_sha`.
-    pr_moved: bool,
-}
-
-fn pr_moved(item: &Workitem) -> bool {
-    let head = item.review.as_ref().and_then(|r| r.head.as_deref());
-    !item.head_sha.is_empty() && head.is_some_and(|head| head != item.head_sha)
 }
 
 async fn unpushed_of(project: &Project, item: &Workitem, worktrees: &[std::path::PathBuf]) -> Option<u32> {
@@ -184,8 +177,7 @@ pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
             let worktrees = &worktrees;
             futures_util::future::join_all(items.map(|(item, session, roles)| async move {
                 let unpushed = unpushed_of(project, &item, worktrees).await;
-                let pr_moved = pr_moved(&item);
-                Item { item, session, roles, unpushed, pr_moved }
+                Item { item, session, roles, unpushed }
             }))
             .await
         }
@@ -210,8 +202,7 @@ pub async fn item(
     let session = tmux::session_for(&sessions, &project, &dir).is_some();
     let roles = roles_of(state.pipeline(&project, &item.board).pipeline.as_ref(), &item);
     let unpushed = unpushed_of(&project, &item, &git::worktrees(&project.repo).await).await;
-    let pr_moved = pr_moved(&item);
-    Ok(Json(Detail { item: Item { item, session, roles, unpushed, pr_moved }, content }))
+    Ok(Json(Detail { item: Item { item, session, roles, unpushed }, content }))
 }
 
 /// The PR description and comments of a workitem, read live with `gh`.

@@ -28,8 +28,6 @@ pub struct Workitem {
     /// Directory name of the workitem this one was split from, or empty.
     pub parent: String,
     pub created: String,
-    /// PR head commit the item last looked at, or empty.
-    pub head_sha: String,
     /// Open `- [ ]` items under `## Follow-ups`: work left for after the item is done.
     pub follow_ups: Vec<String>,
     /// PR approval, merge and CI status as `pr-status` last read it; `None` before that.
@@ -97,7 +95,6 @@ fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
         pr: field("pr", ""),
         parent: field("parent", ""),
         created: field("created", ""),
-        head_sha: field("head_sha", ""),
         follow_ups: follow_ups(text),
         review: crate::review::PrStatus::from_fields(&fields),
     }

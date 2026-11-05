@@ -5,7 +5,7 @@ import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isWaiti
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
-import { IconGitCommit, IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
+import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import { Item, Pipelines } from "./types";
 import { useRun } from "./useRun";
@@ -106,12 +106,11 @@ function Card({ item, selected, onSelect, showProject, depth = 0 }: { item: Item
         <span className="badge">{item.kind}</span>
         <LinkBadges item={item} />
       </div>
-      {(item.review || icon || !!item.unpushed || item.pr_moved || item.follow_ups.length > 0) && (
+      {(item.review || icon || !!item.unpushed || item.follow_ups.length > 0) && (
         <div className="card-foot">
           <div className="foot-left">
             <FollowUpsChip followUps={item.follow_ups} />
             {!!item.unpushed && <div className="chip unpushed" title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</div>}
-            {item.pr_moved && <div className="chip pr-moved" role="img" aria-label="new commits" title="New commits: the PR has commits this workitem has not seen"><IconGitCommit /></div>}
             <ReviewStrip review={item.review} />
           </div>
           {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}

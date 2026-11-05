@@ -50,8 +50,6 @@ export type Item = {
   pr: string;
   parent: string;
   created: string;
-  /** PR head commit the item last looked at, or empty. */
-  head_sha: string;
   session: boolean;
   /** What the board allows in the item's current stage. */
   gate: Gate | null;
@@ -60,8 +58,6 @@ export type Item = {
   review: Review | null;
   /** Commits in the item's worktree that no remote has; null without a worktree. */
   unpushed: number | null;
-  /** The PR head moved past `head_sha`. */
-  pr_moved: boolean;
   /** Open `- [ ]` items under `## Follow-ups`. */
   follow_ups: string[];
 };
