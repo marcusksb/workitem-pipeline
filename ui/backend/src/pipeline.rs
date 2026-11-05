@@ -139,6 +139,9 @@ impl Stage {
 pub struct Pipeline {
     pub entry: String,
     pub stages: Vec<Stage>,
+    /// Scripts that run for the whole board on a timer, with every item of the board on stdin.
+    #[serde(default, skip_serializing, deserialize_with = "watchers")]
+    pub watch: Vec<Watch>,
     /// Required by `workitem-move`, so a file without it is invalid here too.
     #[serde(skip_serializing)]
     #[allow(dead_code)]
@@ -179,6 +182,9 @@ impl Pipeline {
         }
         if !names.contains(pipeline.entry.as_str()) {
             return Err(format!("entry '{}' is not a stage", pipeline.entry));
+        }
+        if let Some(watch) = pipeline.watch.iter().find(|w| !crate::watch::valid_name(&w.command)) {
+            return Err(format!("the board has watch command '{}', which is not a script name (lowercase letters, digits, . _ - only)", watch.command));
         }
         for stage in &pipeline.stages {
             if let Some(target) = stage.next.iter().find(|t| !names.contains(t.as_str())) {

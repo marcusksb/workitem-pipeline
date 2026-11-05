@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Board watcher: copy each item's Jira status into its frontmatter.
+
+  issue-status
+
+Writes `issue_status` (e.g. `Waiting for Deployment`) and `issue_status_category` (`new`,
+`indeterminate` or `done`). All items are read in one Jira search per 100 keys (`key in (...)`),
+whatever the projects of the keys. The file is only written when a
+value changed. Jira Cloud only.
+
+It uses the setup of jira-cli: `server` and `login` from its config (`JIRA_CONFIG_FILE`, else
+`~/.config/.jira/.config.yml`), and the API token from `JIRA_API_TOKEN`, else `~/.netrc`, else the
+OS keyring (service `jira-cli`). Without them it says so once per run and exits 0.
+"""
+import base64, json, netrc, os, re, subprocess, sys, urllib.parse, urllib.request
+
+sys.dont_write_bytecode = True
+KEY = re.compile(r"[A-Z][A-Z0-9]+-\d+")
+PAGE = 100
+
+def read_fields(path):
+    with open(path) as f:
+        text = f.read()
+    head = text[4:].split("\n---", 1)[0] if text.startswith("---\n") else ""
+    return {k.strip(): v.strip() for k, sep, v in (line.partition(":") for line in head.splitlines()) if sep}
+
+def set_fields(path, values):
+    with open(path) as f:
+        text = f.read()
+    if not text.startswith("---\n") or "\n---" not in text[4:]:
+        return
+    end = text.index("\n---", 4)
+    head, rest = text[:end], text[end:]
+    for key, value in values.items():
+        line = f"{key}: {value}".rstrip()
+        if re.search(rf"^{re.escape(key)}:.*$", head, re.M):
+            head = re.sub(rf"^{re.escape(key)}:.*$", lambda _: line, head, count=1, flags=re.M)
+        else:
+            head += "\n" + line
+    with open(path, "w") as f:
+        f.write(head + rest)
+
+def jira_config():
+    """`server` and `login`, the top-level keys of jira-cli's YAML config."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    path = os.environ.get("JIRA_CONFIG_FILE") or os.path.join(base, ".jira", ".config.yml")
+    with open(path) as f:
+        top = dict(m.groups() for m in re.finditer(r"^(server|login):[ \t]*['\"]?([^'\"\n]*?)['\"]?[ \t]*$", f.read(), re.M))
+    return top.get("server", "").rstrip("/"), top.get("login", "")
+
+def keyring_token(login):
+    commands = {
+        "darwin": ["security", "find-generic-password", "-s", "jira-cli", "-a", login, "-w"],
+        "linux": ["secret-tool", "lookup", "service", "jira-cli", "username", login],
+    }
+    command = commands.get(sys.platform)
+    if not command:
+        return ""
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+def api_token(server, login):
+    """Same order as jira-cli: the env var, then `~/.netrc`, then the keyring."""
+    token = os.environ.get("JIRA_API_TOKEN", "")
+    if not token:
+        try:
+            entry = netrc.netrc().authenticators(urllib.parse.urlparse(server).hostname or "")
+            token = entry[2] if entry else ""
+        except (OSError, netrc.NetrcParseError):
+            pass
+    return token or keyring_token(login)
+
+def statuses(server, login, token, keys):
+    """`{key: (status name, category key)}` of up to PAGE keys; keys Jira does not know are left out."""
+    auth = base64.b64encode(f"{login}:{token}".encode()).decode()
+    body = {"jql": f"key in ({', '.join(keys)})", "fields": ["status"], "maxResults": PAGE}
+    request = urllib.request.Request(f"{server}/rest/api/3/search/jql", data=json.dumps(body).encode(), method="POST",
+                                     headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json", "Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        issues = json.load(response)["issues"]
+    return {i["key"]: (i["fields"]["status"]["name"], i["fields"]["status"]["statusCategory"]["key"]) for i in issues}
+
+def main():
+    root = os.environ["WORKITEM_DIR_ROOT"]
+    keys = {}
+    for item in json.load(sys.stdin):
+        key = (item["issue"].split() or [""])[0]
+        if KEY.fullmatch(key):
+            keys.setdefault(key, []).append(item["dir"])
+    if not keys:
+        return
+    try:
+        server, login = jira_config()
+    except OSError as e:
+        print(f"no jira-cli config, skipping: {e}", file=sys.stderr)
+        return
+    token = api_token(server, login)
+    if not (server and login and token):
+        print("no Jira server, login or API token (see jira-cli), skipping", file=sys.stderr)
+        return
+    found = {}
+    sorted_keys = sorted(keys)
+    for start in range(0, len(sorted_keys), PAGE):
+        try:
+            found.update(statuses(server, login, token, sorted_keys[start:start + PAGE]))
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            print(f"cannot read Jira statuses: {e}", file=sys.stderr)
+            return
+    for key, (name, category) in found.items():
+        for directory in keys[key]:
+            path = os.path.join(root, directory, "workitem.md")
+            values = {"issue_status": name, "issue_status_category": category}
+            fields = read_fields(path)
+            changed = {k: v for k, v in values.items() if fields.get(k) != v}
+            if changed:
+                set_fields(path, changed)
+
+if __name__ == "__main__":
+    main()

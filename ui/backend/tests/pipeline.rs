@@ -58,6 +58,9 @@ fn write_item(repo: &Path, dir: &str, stage: &str, extra: &str) {
 }
 
 fn world() -> World {
+    // The bundled board's `issue-status` watcher must not reach the real Jira: without a jira-cli
+    // config it does nothing.
+    std::env::set_var("JIRA_CONFIG_FILE", "/nonexistent/jira.yml");
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo").canonicalize_or_create();
     let logs = dir.path().join("logs");
@@ -1197,6 +1200,27 @@ async fn a_column_watcher_runs_its_script_once_per_interval_with_the_column_as_c
     assert_eq!(fs::read_to_string(w.repo.join(".watch-log")).unwrap(), "default queue other hello\n", "once, not per pass");
     let items = fs::read_to_string(w.repo.join(".watch-items")).unwrap();
     assert!(items.contains("T-30-in") && !items.contains("T-31-out"), "only the column's items: {items}");
+}
+
+#[tokio::test]
+async fn a_board_watcher_gets_every_item_of_the_board_and_no_stage() {
+    let w = world();
+    write_item(&w.repo, "T-34-queue", "queue", "");
+    write_item(&w.repo, "T-35-done", "other", "");
+    write_item(&w.repo, "T-36-elsewhere", "queue", "board: side\n");
+    write_watch_script(&w.repo, "record", "echo \"$WORKITEM_BOARD [$WORKITEM_STAGE] [$WORKITEM_NEXT]\" >> .watch-log\ncat >> .watch-items");
+    let stages = r#"[{"name":"queue","next":["other"]},{"name":"other"}], "watch": {"every":"1d","command":"record"}"#;
+    fs::write(w.repo.join(".claude/workitems/pipeline.json"), board(stages).replace(r#""entry": "qa""#, r#""entry": "queue""#)).unwrap();
+
+    dispatch::pass(&w.state).await;
+    eventually("the watcher ran", || w.repo.join(".watch-items").exists()).await;
+    dispatch::pass(&w.state).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    assert_eq!(fs::read_to_string(w.repo.join(".watch-log")).unwrap(), "default [] []\n", "once, not per pass");
+    let items = fs::read_to_string(w.repo.join(".watch-items")).unwrap();
+    assert!(items.contains("T-34-queue") && items.contains("T-35-done"), "every column: {items}");
+    assert!(!items.contains("T-36-elsewhere"), "only this board: {items}");
 }
 
 #[tokio::test]

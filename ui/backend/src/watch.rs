@@ -1,5 +1,5 @@
 //! Column watchers: a script per stage that runs every `watch.every`, whether or not the column
-//! has items. The backend only schedules it and hands over the context; what it does (move,
+//! has items. A board can carry watchers too; they get every item of the board and no stage. The backend only schedules it and hands over the context; what it does (move,
 //! delete, create) is the script's business, through `workitem-move` and the workitem files.
 //! Costs no tokens. The script is a file run directly, never through a shell.
 use std::{collections::{HashMap, HashSet}, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
@@ -94,9 +94,11 @@ pub async fn pass(state: &AppState) {
             let Some(pipeline) = state.pipeline(&project, &board).pipeline else {
                 continue;
             };
+            // A board watcher has no stage; `@` keeps its key apart from every stage name.
             let stages = pipeline.stages.iter().filter(|s| !paused.contains(&paused_key(&project, &board, &s.name)));
-            for (stage, index, watch) in stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (s, i, w))) {
-                let key = format!("{}/{board}/{}/{index}", project.name, stage.name);
+            let watchers = pipeline.watch.iter().enumerate().map(|(i, w)| (None, i, w));
+            for (stage, index, watch) in watchers.chain(stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (Some(s), i, w)))) {
+                let key = format!("{}/{board}/{}/{index}", project.name, stage.map_or("@board", |s| s.name.as_str()));
                 if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
                     continue;
                 }
@@ -112,7 +114,7 @@ pub async fn pass(state: &AppState) {
                 }
                 runs.insert(key.clone(), now());
                 started = true;
-                let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && i.stage == stage.name).collect();
+                let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
                 let job = Job::new(state, &project, &board, stage, watch, script, &here, &sessions);
                 let running = state.watching.clone();
                 tokio::spawn(async move {
@@ -142,22 +144,22 @@ struct Job {
 
 impl Job {
     #[allow(clippy::too_many_arguments)]
-    fn new(state: &AppState, project: &Project, board: &str, stage: &Stage, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
+    fn new(state: &AppState, project: &Project, board: &str, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
         let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, project, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
         let env = vec![
             ("WORKITEM_REPO", project.repo.display().to_string()),
             ("WORKITEM_DIR_ROOT", workitem::workitems_dir(&project.repo).display().to_string()),
             ("WORKITEM_BOARD", board.to_string()),
-            ("WORKITEM_STAGE", stage.name.clone()),
+            ("WORKITEM_STAGE", stage.map(|s| s.name.clone()).unwrap_or_default()),
             ("WORKITEM_PROJECT", project.name.clone()),
             ("WORKITEM_UI_PORT", state.port.to_string()),
             ("WORKITEM_UI_CONFIG", state.store.path().display().to_string()),
-            ("WORKITEM_NEXT", stage.next.join(",")),
+            ("WORKITEM_NEXT", stage.map(|s| s.next.join(",")).unwrap_or_default()),
             ("WORKITEM_BUSY", busy.join(",")),
             ("WORKITEM_GH", state.gh.clone()),
-            ("WORKITEM_ON_MERGE", stage.on_merge.clone().unwrap_or_default()),
-            ("WORKITEM_ONCE", if stage.once { "1" } else { "0" }.to_string()),
-            ("WORKITEM_WHEN", serde_json::to_string(&stage.when).unwrap_or_else(|_| "{}".into())),
+            ("WORKITEM_ON_MERGE", stage.and_then(|s| s.on_merge.clone()).unwrap_or_default()),
+            ("WORKITEM_ONCE", if stage.is_some_and(|s| s.once) { "1" } else { "0" }.to_string()),
+            ("WORKITEM_WHEN", stage.and_then(|s| serde_json::to_string(&s.when).ok()).unwrap_or_else(|| "{}".into())),
             ("WORKITEM_MOVE", state.skills_dir.join("workitem-pipeline/bin/workitem-move").display().to_string()),
         ];
         Job { script, args: watch.args.clone(), repo: project.repo.clone(), env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
