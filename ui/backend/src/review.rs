@@ -1,13 +1,21 @@
-//! What the board shows of a PR, and the PR tab. The watching itself (reading the PR, reacting to
-//! it) is the `pr-review` watch script (`skills/workitem-pipeline/watch/pr-review`); it pushes the
-//! status below through `PUT /api/workitems/{project}/{dir}/review`.
-use std::{path::Path, time::Duration};
+//! What the board shows of a PR, and the PR tab. Reading the PR is the `pr-status` watch script
+//! (`skills/workitem-pipeline/watch/pr-status`), which writes `pr_*` keys into the workitem's
+//! frontmatter; reacting to it is `watch/pr-review`. Here the keys become the board's chips.
+use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    Open,
+    Merged,
+    Closed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Approval {
     Approved,
@@ -16,7 +24,7 @@ pub enum Approval {
     None,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Merge {
     Mergeable,
@@ -24,7 +32,7 @@ pub enum Merge {
     Unknown,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Ci {
     Passing,
@@ -33,29 +41,57 @@ pub enum Ci {
     None,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct FailedCheck {
-    pub name: String,
-    pub url: String,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PrStatus {
+    pub state: State,
     pub approval: Approval,
     /// The reader's latest verdict on the PR is an approval.
     pub approved_by_me: bool,
     pub merge: Merge,
     /// Every check, as GitHub shows it.
     pub ci: Ci,
-    pub failed: Vec<FailedCheck>,
+    /// Names of the red checks.
+    pub failed: Vec<String>,
     /// Commit the PR head points to.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub head: Option<String>,
 }
 
-/// The status the `pr-review` script last pushed for an item.
-pub struct Review {
-    pub status: PrStatus,
+impl PrStatus {
+    /// The status `pr-status` last wrote into the frontmatter; `None` before its first reading.
+    /// Values it does not know read as the neutral one.
+    pub fn from_fields(fields: &HashMap<String, String>) -> Option<PrStatus> {
+        let get = |key: &str| fields.get(key).map(String::as_str).unwrap_or_default();
+        let state = match get("pr_state") {
+            "open" => State::Open,
+            "merged" => State::Merged,
+            "closed" => State::Closed,
+            _ => return None,
+        };
+        Some(PrStatus {
+            state,
+            approval: match get("pr_approval") {
+                "approved" => Approval::Approved,
+                "changes_requested" => Approval::ChangesRequested,
+                "review_required" => Approval::ReviewRequired,
+                _ => Approval::None,
+            },
+            approved_by_me: get("pr_approved_by_me") == "true",
+            merge: match get("pr_merge") {
+                "mergeable" => Merge::Mergeable,
+                "conflicting" => Merge::Conflicting,
+                _ => Merge::Unknown,
+            },
+            ci: match get("pr_ci") {
+                "passing" => Ci::Passing,
+                "failing" => Ci::Failing,
+                "pending" => Ci::Pending,
+                _ => Ci::None,
+            },
+            failed: get("pr_ci_failed").split(',').filter(|n| !n.is_empty()).map(String::from).collect(),
+            head: Some(get("pr_head")).filter(|h| !h.is_empty()).map(String::from),
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -173,4 +209,42 @@ pub async fn conversation(state: &AppState, repo: &Path, pr: &str) -> Result<Con
     // ISO 8601 timestamps sort as text.
     notes.sort_by(|a, b| b.at.cmp(&a.at));
     Ok(Conversation { body: raw.body, notes })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fields(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn status_comes_from_the_keys_pr_status_wrote() {
+        assert_eq!(PrStatus::from_fields(&fields(&[("pr_ci", "failing")])), None, "no reading yet");
+        let open = PrStatus::from_fields(&fields(&[
+            ("pr_state", "open"),
+            ("pr_approval", "changes_requested"),
+            ("pr_approved_by_me", "true"),
+            ("pr_merge", "conflicting"),
+            ("pr_ci", "failing"),
+            ("pr_ci_failed", "lint,rspec"),
+            ("pr_head", "abc"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            open,
+            PrStatus {
+                state: State::Open,
+                approval: Approval::ChangesRequested,
+                approved_by_me: true,
+                merge: Merge::Conflicting,
+                ci: Ci::Failing,
+                failed: vec!["lint".into(), "rspec".into()],
+                head: Some("abc".into()),
+            }
+        );
+        let merged = PrStatus::from_fields(&fields(&[("pr_state", "merged"), ("pr_ci", "odd")])).unwrap();
+        assert_eq!((merged.state, merged.ci, merged.merge, merged.failed.len(), merged.head), (State::Merged, Ci::None, Merge::Unknown, 0, None));
+    }
 }

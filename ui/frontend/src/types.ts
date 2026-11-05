@@ -23,12 +23,14 @@ export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string
 export type Pipelines = Record<string, BoardInfo[]>;
 
 export type Review = {
+  state: "open" | "merged" | "closed";
   approval: "approved" | "changes_requested" | "review_required" | "none";
   /** My latest verdict on the PR is an approval. */
   approved_by_me: boolean;
   merge: "mergeable" | "conflicting" | "unknown";
   ci: "passing" | "failing" | "pending" | "none";
-  failed: { name: string; url: string }[];
+  /** Names of the red checks. */
+  failed: string[];
 };
 
 export type Item = {

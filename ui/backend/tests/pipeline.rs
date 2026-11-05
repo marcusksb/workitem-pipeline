@@ -120,6 +120,13 @@ async fn settle(w: &World) {
     panic!("a watcher is still running");
 }
 
+/// Two passes: `pr-status` reads the PR in the first, `pr-review` acts on what it wrote in the
+/// second (both start in the same pass, so the first `pr-review` may not see the reading).
+async fn settle_pr(w: &World) {
+    settle(w).await;
+    settle(w).await;
+}
+
 fn set_pr(w: &World, state: &str, decision: &str, mergeable: &str, conclusion: &str) {
     let json = serde_json::json!({
         "state": state, "reviewDecision": decision, "mergeable": mergeable,
@@ -585,9 +592,9 @@ async fn review_shows_pr_status_and_leaves_green_ci_alone() {
     write_item(&w.repo, "T-20-green", "in_review", PR);
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
 
-    settle(&w).await;
+    settle_pr(&w).await;
     let items = get(&w, "/api/workitems").await;
-    assert!(items.contains(r#""review":{"approval":"approved","approved_by_me":false,"merge":"mergeable","ci":"passing","failed":[]}"#), "{items}");
+    assert!(items.contains(r#""review":{"state":"open","approval":"approved","approved_by_me":false,"merge":"mergeable","ci":"passing","failed":[]}"#), "{items}");
     assert!(stub_log(&w.repo).is_empty() && !w.tmux.has("wi-T-20-green"), "nothing to fix");
 }
 
@@ -600,12 +607,12 @@ async fn merge_button_merges_in_review_items_and_the_next_pass_moves_them_to_don
 
     write_item(&w.repo, "T-24-merge", "in_review", PR);
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
-    settle(&w).await;
+    settle_pr(&w).await;
     set_pr(&w, "MERGED", "APPROVED", "MERGEABLE", "SUCCESS");
     let (status, _) = post(&w, "/api/workitems/app/T-24-merge/merge", "").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(field(&w.repo, "T-24-merge", "stage"), "in_review", "the dispatcher moves it, not the button");
-    settle(&w).await;
+    settle_pr(&w).await;
     assert_eq!(field(&w.repo, "T-24-merge", "stage"), "done");
 }
 
@@ -629,15 +636,15 @@ async fn review_starts_a_fixer_on_red_ci_and_leaves_a_blocked_one_waiting() {
     set_pr(&w, "OPEN", "REVIEW_REQUIRED", "MERGEABLE", "FAILURE");
     fs::write(w.repo.join(".stub-in_review"), "block").unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("fixer could not fix it and blocked", || field(&w.repo, "T-21-red", "agent_status").starts_with("blocked")).await;
     let items = get(&w, "/api/workitems").await;
     assert!(items.contains(r#""approval":"review_required","approved_by_me":false,"merge":"mergeable","ci":"failing""#), "{items}");
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("CI is failing on https://github.com/app/pull/7"), "{prompts}");
 
-    settle(&w).await;
-    settle(&w).await;
+    settle_pr(&w).await;
+    settle_pr(&w).await;
     assert!(w.tmux.has("wi-T-21-red"), "a blocked fixer waits for the human");
     assert_eq!(stub_log(&w.repo).len(), 1, "no second fixer while blocked");
 }
@@ -646,30 +653,33 @@ async fn review_starts_a_fixer_on_red_ci_and_leaves_a_blocked_one_waiting() {
 async fn review_starts_one_fixer_per_changes_requested_review() {
     let w = world();
     write_item(&w.repo, "T-25-changes", "in_review", PR);
-    let set_review = |id: &str| {
+    let set_reviews = |ids: &[&str]| {
+        let reviews: Vec<_> = ids.iter().map(|id| serde_json::json!({ "id": id, "state": "CHANGES_REQUESTED" })).collect();
         let json = serde_json::json!({
-            "state": "OPEN", "reviewDecision": "CHANGES_REQUESTED", "mergeable": "MERGEABLE",
+            "state": "OPEN", "reviewDecision": if ids.is_empty() { "" } else { "CHANGES_REQUESTED" }, "mergeable": "MERGEABLE",
             "statusCheckRollup": [{ "name": "rspec", "status": "COMPLETED", "conclusion": "SUCCESS" }],
-            "reviews": [{ "id": id, "state": "CHANGES_REQUESTED" }],
+            "reviews": reviews,
         });
         fs::write(w.dir.path().join("pr.json"), json.to_string()).unwrap();
     };
-    set_review("r1");
+    set_reviews(&[]);
     fs::write(w.repo.join(".stub-in_review"), "done").unwrap();
+    settle_pr(&w).await;
 
-    settle(&w).await;
+    set_reviews(&["r1"]);
+    settle_pr(&w).await;
     eventually("fixer ran", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
-    assert!(prompts.contains("A reviewer requested changes on https://github.com/app/pull/7"), "{prompts}");
+    assert!(prompts.contains("a review requesting changes on https://github.com/app/pull/7"), "the comments fixer takes it: {prompts}");
 
     for _ in 0..3 {
-        settle(&w).await;
+        settle_pr(&w).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
     assert_eq!(stub_log(&w.repo).len(), 1, "the same review starts no second fixer");
 
-    set_review("r2");
-    settle(&w).await;
+    set_reviews(&["r1", "r2"]);
+    settle_pr(&w).await;
     eventually("a new review starts a new fixer", || stub_log(&w.repo).len() == 2).await;
 }
 
@@ -692,7 +702,7 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
     let plain = |login: &str, body: &str, at: &str| serde_json::json!({ "id": at, "author": { "login": login }, "body": body, "createdAt": at });
     let passes = || async {
         for _ in 0..3 {
-            settle(&w).await;
+            settle_pr(&w).await;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         }
     };
@@ -704,10 +714,10 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
     assert_eq!(stub_log(&w.repo).len(), 0, "existing comments start no fixer");
 
     set_comments(serde_json::json!([]), serde_json::json!([old.clone(), inline("alice", "extract a method", "2026-02-01T10:00:00Z")]));
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("a new inline comment starts a fixer", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
-    assert!(prompts.contains("New review comments on https://github.com/app/pull/7"), "{prompts}");
+    assert!(prompts.contains("New review comments or a review requesting changes on https://github.com/app/pull/7"), "{prompts}");
     assert!(prompts.contains("Unsure whether a comment or suggestion is right"), "the fixer asks instead of guessing: {prompts}");
     passes().await;
     assert_eq!(stub_log(&w.repo).len(), 1, "the same comment starts no second fixer");
@@ -723,14 +733,14 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
     // Any PR comment by someone else does, a bot's included.
     let bot = plain("github-actions[bot]", "Verdict: Requires Additional Work", "2026-03-01T10:00:00Z");
     set_comments(serde_json::json!([bot.clone()]), serde_json::json!(seen));
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("a bot's PR comment starts a fixer", || stub_log(&w.repo).len() == 2).await;
 
     // The reader's own new inline thread asks for a change, with no marker.
     let mut own = seen.to_vec();
     own.push(inline("me", "why not remove this method?", "2026-04-01T10:00:00Z"));
     set_comments(serde_json::json!([bot]), serde_json::json!(own));
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("the reader's own inline thread starts a fixer", || stub_log(&w.repo).len() == 3).await;
 }
 
@@ -748,13 +758,13 @@ async fn review_starts_one_conflict_fixer_per_pr_head() {
     set_head("aaa");
     fs::write(w.repo.join(".stub-in_review"), "done").unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("conflict fixer ran", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("conflicts with its base branch"), "{prompts}");
 
     for _ in 0..3 {
-        settle(&w).await;
+        settle_pr(&w).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
     assert_eq!(stub_log(&w.repo).len(), 1, "the same head starts no second fixer");
@@ -764,16 +774,16 @@ async fn review_starts_one_conflict_fixer_per_pr_head() {
 
     // Clearing the block tries again on the same head; a new head does too.
     set_ok(&w.repo, "T-26-conflict");
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("clearing the block retries the fixer", || stub_log(&w.repo).len() == 2).await;
 
     for _ in 0..3 {
-        settle(&w).await;
+        settle_pr(&w).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
     set_ok(&w.repo, "T-26-conflict");
     set_head("bbb");
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("a new head starts a new fixer", || stub_log(&w.repo).len() == 3).await;
 }
 
@@ -785,9 +795,9 @@ async fn review_forgets_the_conflict_head_while_the_fixer_is_blocked() {
     fs::write(w.dir.path().join("pr.json"), json.to_string()).unwrap();
     fs::write(w.repo.join(".stub-in_review"), "block").unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("the fixer blocked", || field(&w.repo, "T-33-conflict-blocked", "agent_status").starts_with("blocked")).await;
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("the head is forgotten", || field(&w.repo, "T-33-conflict-blocked", "pr_conflict_head").is_empty()).await;
     assert_eq!(stub_log(&w.repo).len(), 1, "a blocked item starts nothing");
 }
@@ -812,11 +822,11 @@ async fn review_fixes_the_conflict_before_cancelled_ci() {
     fs::write(w.dir.path().join("pr.json"), json.to_string()).unwrap();
     fs::write(w.repo.join(".stub-in_review"), "done").unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("a fixer ran", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("conflicts with its base branch"), "the conflict fixer goes first: {prompts}");
-    assert_eq!(field(&w.repo, "T-31-conflict-ci", "pr_fix_attempts"), "0", "the conflict fixer resets the CI attempts");
+    assert_eq!(field(&w.repo, "T-31-conflict-ci", "pr_fix_attempts"), "", "the conflict fixer resets the CI attempts");
     assert_eq!(field(&w.repo, "T-31-conflict-ci", "pr_conflict_head"), "aaa", "the head it handled is kept in the item");
 }
 
@@ -830,7 +840,7 @@ async fn review_asks_again_while_github_computes_mergeability() {
     fs::write(w.dir.path().join("pr-once.json"), computing.to_string()).unwrap();
     fs::write(w.repo.join(".stub-in_review"), "done").unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     eventually("the conflict is seen on the first pass", || stub_log(&w.repo).len() == 1).await;
 }
 
@@ -841,8 +851,8 @@ async fn review_blocks_after_the_fix_attempt_cap() {
     set_pr(&w, "OPEN", "", "MERGEABLE", "FAILURE");
     fs::write(w.repo.join(".stub-in_review"), "crash").unwrap();
 
-    for _ in 0..12 {
-        settle(&w).await;
+    for _ in 0..30 {
+        settle_pr(&w).await;
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         if field(&w.repo, "T-22-cap", "agent_status").starts_with("blocked") {
             break;
@@ -853,16 +863,38 @@ async fn review_blocks_after_the_fix_attempt_cap() {
 }
 
 #[tokio::test]
+async fn review_waits_for_a_fresh_reading_and_blocks_a_ci_fixer_that_pushed_nothing() {
+    let w = world();
+    write_item(&w.repo, "T-34-no-push", "in_review", PR);
+    let json = serde_json::json!({
+        "state": "OPEN", "reviewDecision": "", "mergeable": "MERGEABLE", "headRefOid": "aaa",
+        "statusCheckRollup": [{ "name": "rspec", "status": "COMPLETED", "conclusion": "FAILURE" }],
+    });
+    fs::write(w.dir.path().join("pr.json"), json.to_string()).unwrap();
+    // The fixer says ok without pushing, so the reading before and after it look the same.
+    fs::write(w.repo.join(".stub-in_review"), "done").unwrap();
+
+    settle_pr(&w).await;
+    eventually("the CI fixer ran", || stub_log(&w.repo).len() == 1).await;
+    for _ in 0..4 {
+        settle_pr(&w).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(stub_log(&w.repo).len(), 1, "no second fixer on the reading from before the first one ended");
+    assert!(field(&w.repo, "T-34-no-push", "agent_status").starts_with("blocked: CI still failing and the CI fixer pushed nothing"));
+}
+
+#[tokio::test]
 async fn review_moves_a_merged_pr_to_done_and_blocks_a_closed_one() {
     let w = world();
     write_item(&w.repo, "T-23-merged", "in_review", PR);
     set_pr(&w, "MERGED", "APPROVED", "UNKNOWN", "SUCCESS");
-    settle(&w).await;
+    settle_pr(&w).await;
     assert_eq!(field(&w.repo, "T-23-merged", "stage"), "done");
 
     write_item(&w.repo, "T-24-closed", "in_review", PR);
     set_pr(&w, "CLOSED", "", "UNKNOWN", "SUCCESS");
-    settle(&w).await;
+    settle_pr(&w).await;
     assert_eq!(field(&w.repo, "T-24-closed", "stage"), "in_review");
     assert_eq!(field(&w.repo, "T-24-closed", "agent_status"), "blocked: PR was closed without merge");
 }
@@ -984,7 +1016,7 @@ async fn gates_and_the_pr_stage_follow_the_project_board_not_stage_names() {
     assert_eq!(field(&w.repo, "T-41-approve", "approved"), "true");
 
     set_pr(&w, "MERGED", "APPROVED", "UNKNOWN", "SUCCESS");
-    settle(&w).await;
+    settle_pr(&w).await;
     assert_eq!(field(&w.repo, "T-43-merged", "stage"), "shipped", "on_merge decides where a merged PR goes");
 }
 
@@ -1164,20 +1196,20 @@ async fn once_and_when_keep_a_final_handler_from_starting_again_or_for_the_wrong
 }
 
 #[tokio::test]
-async fn a_pr_status_stage_shows_the_pr_chips_and_starts_nothing() {
+async fn a_pr_status_board_shows_the_pr_chips_and_starts_nothing() {
     let w = world();
     queue_board(&w.repo);
     let board = fs::read_to_string(w.repo.join(".claude/workitems/pipeline.json")).unwrap();
     fs::write(w.repo.join(".claude/workitems/pipeline.json"), board.replace(r#""name": "post", "handler""#, r#""name": "post", "pr_status": true, "handler""#)).unwrap();
     write_item(&w.repo, "T-30-waiting", "post", PR);
-    write_item(&w.repo, "T-31-no-chips", "queue", PR);
+    write_item(&w.repo, "T-31-queued", "queue", PR);
     set_pr(&w, "OPEN", "CHANGES_REQUESTED", "CONFLICTING", "FAILURE");
 
-    settle(&w).await;
+    settle_pr(&w).await;
     let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
     let review = |dir: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["review"].clone();
     assert_eq!(review("T-30-waiting")["approval"], "changes_requested");
-    assert!(review("T-31-no-chips").is_null(), "only stages with pr_status poll");
+    assert_eq!(review("T-31-queued")["merge"], "conflicting", "the board's reader reads every item with a PR");
     assert!(stub_log(&w.repo).is_empty() && !w.tmux.has("wi-T-30-waiting"), "red CI and conflicts start no fixer");
     assert_eq!(review("T-30-waiting")["approved_by_me"], false);
 
@@ -1185,7 +1217,6 @@ async fn a_pr_status_stage_shows_the_pr_chips_and_starts_nothing() {
     let mut pr: serde_json::Value = serde_json::from_str(&fs::read_to_string(w.dir.path().join("pr.json")).unwrap()).unwrap();
     pr["reviews"] = serde_json::json!([{ "id": "r1", "state": "APPROVED", "author": { "login": "me" } }]);
     fs::write(w.dir.path().join("pr.json"), pr.to_string()).unwrap();
-    w.state.reviews.lock().unwrap().clear();
     settle(&w).await;
     let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
     let mine = items.as_array().unwrap().iter().find(|i| i["dir"] == "T-30-waiting").unwrap()["review"]["approved_by_me"].clone();
@@ -1204,7 +1235,7 @@ async fn an_item_whose_pr_head_moved_past_its_head_sha_is_flagged() {
     let pr = serde_json::json!({ "state": "OPEN", "reviewDecision": "", "mergeable": "MERGEABLE", "headRefOid": "aaa", "statusCheckRollup": [] });
     fs::write(w.dir.path().join("pr.json"), pr.to_string()).unwrap();
 
-    settle(&w).await;
+    settle_pr(&w).await;
     let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
     let moved = |dir: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["pr_moved"].clone();
     assert_eq!(moved("T-40-seen"), false);

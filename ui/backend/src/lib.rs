@@ -37,8 +37,6 @@ pub struct AppState {
     pub gh: String,
     /// Last valid board per project name; see `AppState::pipeline`.
     pub pipelines: std::sync::Mutex<HashMap<String, pipeline::Pipeline>>,
-    /// Latest PR status per `project/dir`, filled by the dispatcher for `in_review` items.
-    pub reviews: std::sync::Mutex<HashMap<String, review::Review>>,
     /// Serialises session launches and dispatcher passes so an item is never started twice.
     pub busy: tokio::sync::Mutex<()>,
     /// Keys (`project/board/stage`) of column watchers whose script is running, so one never overlaps itself.
@@ -61,7 +59,6 @@ impl AppState {
             claude: env("WORKITEM_UI_CLAUDE").unwrap_or_else(|| "claude".into()),
             gh: env("WORKITEM_UI_GH").unwrap_or_else(|| "gh".into()),
             pipelines: Default::default(),
-            reviews: Default::default(),
             busy: Default::default(),
             watching: Default::default(),
             wake: Default::default(),
@@ -98,7 +95,6 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workitems/{project}/{dir}/start", post(actions::start))
         .route("/api/workitems/{project}/{dir}/run", post(actions::run_handler))
         .route("/api/workitems/{project}/{dir}/fix", post(actions::fix))
-        .route("/api/workitems/{project}/{dir}/review", put(actions::set_review).delete(actions::clear_review))
         .route("/api/workitems/{project}/{dir}/session", post(actions::start_session))
         .route("/api/workitems/{project}/{dir}/discuss", post(actions::discuss_brief))
         .route("/api/workitems/{project}/{dir}/merge",post(actions::merge))

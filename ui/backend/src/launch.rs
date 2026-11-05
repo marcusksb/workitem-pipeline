@@ -290,42 +290,16 @@ Never change stage:.\n\
     )
 }
 
-/// Prompt for the fixer the dispatcher starts when an in-review PR has a changes-requested review.
-pub fn changes_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
-    let session = format!("wi-{dir}");
-    let worktree = git::worktree_path(repo, dir);
-    format!(
-        "A reviewer requested changes on {pr}, the PR of workitem {dir} in repo {repo}.\n\
-1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Read the review and its comments: gh pr view {pr} --comments, and gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments for inline ones.\n\
-3. Implement what the reviewer asked for, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
-4. Reply once on the PR to each comment you acted on: \"Fixed in <short sha>\" plus a few words on what changed, \
-or \"Not changing this: <reason>\" for one you denied. Inline comment: \
-gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments/<id>/replies -f body=<text>. Other: gh pr comment {pr} --body <text>.\n\
-5. {record} Then set agent_status: ok and stop.\n\
-6. Cannot do it (unclear request, needs a decision, large refactor, database migration): \
-set agent_status: blocked: <one line reason>, explain here and wait.\n\
-{learnings}The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
-Never change stage:.\n\
-{protocol}",
-        file = workitem::file(repo, dir).display(),
-        worktree = worktree.display(),
-        repo = repo.display(),
-        record = record_learnings(repo, board),
-        learnings = learnings(repo, board),
-        protocol = protocol(&session),
-    )
-}
-
-/// Prompt for the fixer the dispatcher starts when an in-review PR gets new comments that ask for a change.
+/// Prompt for the fixer `pr-review` starts when an in-review PR gets new comments or reviews that ask for a change.
 pub fn comments_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
     let session = format!("wi-{dir}");
     let worktree = git::worktree_path(repo, dir);
     format!(
-        "New review comments on {pr}, the PR of workitem {dir} in repo {repo}.\n\
+        "New review comments or a review requesting changes on {pr}, the PR of workitem {dir} in repo {repo}.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Read them: gh pr view {pr} --comments, and gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments for inline ones. \
-Act only on comments from others and on your user's own comments that contain @change or that start an inline thread (not a reply).\n\
+2. Read them: gh pr view {pr} --comments (reviews included), and gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments for inline ones. \
+Act only on comments and reviews from others and on your user's own comments that contain @change or that start an inline thread (not a reply). \
+A review that requests changes: implement what the reviewer asked for.\n\
 3. Check each against the actual code before acting, bot findings included. Implement a clear, legitimate change. \
 Leave a clearly wrong one untouched. Unsure whether a comment or suggestion is right, or what it asks for: \
 do not guess and do not skip it. Finish the rest, then set agent_status: blocked: <your question, one line>, ask it here and wait.\n\
@@ -398,7 +372,6 @@ mod tests {
         let want = "/r/proj/.workitems/item-1/workitem.md";
         for prompt in [
             ci_fix_prompt("item-1", repo, "default", "#7"),
-            changes_fix_prompt("item-1", repo, "default", "#7"),
             comments_fix_prompt("item-1", repo, "default", "#7"),
             conflict_fix_prompt("item-1", repo, "default", "#7"),
         ] {
@@ -442,7 +415,7 @@ mod tests {
         fs::write(repo.path().join(".workitems/boards/ops/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
         let file = repo.path().join(".workitems/boards/ops/learnings.md");
         let file = file.display().to_string();
-        let review = [changes_fix_prompt("i", repo.path(), "ops", "#7"), comments_fix_prompt("i", repo.path(), "ops", "#7")];
+        let review = [comments_fix_prompt("i", repo.path(), "ops", "#7")];
         let other = [ci_fix_prompt("i", repo.path(), "ops", "#7"), conflict_fix_prompt("i", repo.path(), "ops", "#7")];
         for prompt in review.iter().chain(&other) {
             assert!(prompt.contains("--- learnings ---\n# Learnings\n\n- Never mock tmux.\n--- end of learnings ---"), "{prompt}");

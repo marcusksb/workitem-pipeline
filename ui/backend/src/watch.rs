@@ -15,6 +15,9 @@ use crate::{
     AppState,
 };
 
+/// Stands in for the stage in the key of a board watcher; `@` is never in a stage name.
+pub const BOARD: &str = "@board";
+
 /// A script that runs longer than this is killed.
 const TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -98,7 +101,7 @@ pub async fn pass(state: &AppState) {
             let stages = pipeline.stages.iter().filter(|s| !paused.contains(&paused_key(&project, &board, &s.name)));
             let watchers = pipeline.watch.iter().enumerate().map(|(i, w)| (None, i, w));
             for (stage, index, watch) in watchers.chain(stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (Some(s), i, w)))) {
-                let key = format!("{}/{board}/{}/{index}", project.name, stage.map_or("@board", |s| s.name.as_str()));
+                let key = format!("{}/{board}/{}/{index}", project.name, stage.map_or(BOARD, |s| s.name.as_str()));
                 if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
                     continue;
                 }

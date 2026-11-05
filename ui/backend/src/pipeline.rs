@@ -26,8 +26,8 @@ pub struct Gate {
 
 /// How often the watcher runs for a stage written the old way (`auto` and no `watch`).
 const LEGACY_EVERY: Duration = Duration::from_secs(5);
-const LEGACY_PR_EVERY: Duration = Duration::from_secs(60);
-const LEGACY_PR_STATUS_EVERY: Duration = Duration::from_secs(300);
+/// How often the implicit `pr-status` board watcher reads the PRs.
+const PR_STATUS_EVERY: Duration = Duration::from_secs(60);
 
 /// A script the backend runs on a timer for a column, whether or not items are in it.
 #[derive(Clone, Debug, Deserialize)]
@@ -103,8 +103,8 @@ pub struct Stage {
     /// At most this many items of the board can be in the stage.
     #[serde(default)]
     pub limit: Option<usize>,
-    /// Show the PR status chips on the cards of this stage. Polls the PR read-only: no fixers, no
-    /// merge handling (that is `builtin:pr-review`, which already shows them).
+    /// Read the PRs of the board with the `pr-status` board watcher, for the chips, even without a
+    /// stage that reacts to them. Older files; a board now lists `pr-status` in its `watch`.
     #[serde(default, skip_serializing)]
     pub pr_status: bool,
     /// Start the handler at most once per entry into the stage.
@@ -125,11 +125,6 @@ impl Stage {
     /// The stage whose PRs are watched, and acted on, by the `pr-review` script.
     pub fn watches_prs(&self) -> bool {
         self.handler.as_deref() == Some(PR_REVIEW) || self.watch.iter().any(|w| w.command == "pr-review")
-    }
-
-    /// The stage shows PR status chips on its cards, read by the `pr-status` script.
-    pub fn shows_pr_status(&self) -> bool {
-        self.pr_status || self.watch.iter().any(|w| w.command == "pr-status")
     }
 
     /// Approved items here are developed by the start handler.
@@ -159,22 +154,24 @@ impl Pipeline {
     pub fn parse(text: &str) -> Result<Pipeline, String> {
         let mut pipeline: Pipeline = serde_json::from_str(text).map_err(|e| e.to_string())?;
         // Older files have no `watch`: `auto` plus a handler or prompt is `run-items`, `auto` with
-        // nothing to run a queue (`pull-queue`), the PR handler is `pr-review`, and `pr_status`
-        // adds `pr-status`.
+        // nothing to run a queue (`pull-queue`) and the PR handler is `pr-review`.
+        let legacy = |command: &str, every| Watch { every, command: command.into(), args: vec![], implicit: true };
         for stage in pipeline.stages.iter_mut().filter(|s| s.watch.is_empty()) {
-            let legacy = |command: &str, every| Watch { every, command: command.into(), args: vec![], implicit: true };
             if stage.auto {
                 match (stage.handler.as_deref(), stage.prompt.as_deref()) {
                     (None, None) => stage.watch.push(legacy("pull-queue", LEGACY_EVERY)),
-                    (Some(PR_REVIEW), _) => stage.watch.push(legacy("pr-review", LEGACY_PR_EVERY)),
+                    (Some(PR_REVIEW), _) => stage.watch.push(legacy("pr-review", LEGACY_EVERY)),
                     (Some(handler), _) if !handler.starts_with("builtin:") => stage.watch.push(legacy("run-items", LEGACY_EVERY)),
                     (None, Some(_)) => stage.watch.push(legacy("run-items", LEGACY_EVERY)),
                     _ => {}
                 }
             }
-            if stage.pr_status {
-                stage.watch.push(legacy("pr-status", LEGACY_PR_STATUS_EVERY));
-            }
+        }
+        // `pr-review` only reacts to what `pr-status` wrote, so a board that reacts to PRs (or asks
+        // for their chips with `pr_status`) and does not read them gets the reader.
+        let reads_prs = pipeline.watch.iter().chain(pipeline.stages.iter().flat_map(|s| &s.watch)).any(|w| w.command == "pr-status");
+        if !reads_prs && pipeline.stages.iter().any(|s| s.pr_status || s.watches_prs()) {
+            pipeline.watch.push(legacy("pr-status", PR_STATUS_EVERY));
         }
         let names: HashSet<&str> = pipeline.stages.iter().map(|s| s.name.as_str()).collect();
         if names.contains("") {
@@ -380,16 +377,19 @@ mod tests {
         assert_eq!((commands("a"), commands("b")), (vec!["run-items"], vec!["run-items"]));
         assert_eq!(commands("c"), vec!["pr-review"], "the PR handler is the pr-review script");
         assert!(commands("d").is_empty(), "a manual stage is not watched");
+        assert_eq!(pipeline.watch.iter().map(|w| (w.command.as_str(), w.every.as_secs(), w.implicit)).collect::<Vec<_>>(), [("pr-status", 60, true)], "and its PRs are read");
     }
 
     #[test]
-    fn watch_is_one_object_or_a_list_and_pr_status_adds_its_script() {
+    fn watch_is_one_object_or_a_list_and_pr_status_adds_the_board_reader() {
         let list = parse(r#"[{"name":"a","watch":[{"every":"5s","command":"x"},{"every":"1m","command":"y","args":["-z"]}]}]"#, "a").unwrap();
         assert_eq!(list.stage("a").unwrap().watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["x", "y"]);
+        assert!(list.watch.is_empty(), "no PR stage, no reader");
         let status = parse(r#"[{"name":"a","handler":"h","auto":true,"pr_status":true}]"#, "a").unwrap();
-        let stage = status.stage("a").unwrap();
-        assert_eq!(stage.watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["run-items", "pr-status"]);
-        assert!(stage.shows_pr_status() && !stage.watches_prs());
+        assert_eq!(status.stage("a").unwrap().watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["run-items"]);
+        assert_eq!(status.watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["pr-status"]);
+        let own = parse(r#"[{"name":"a","on_merge":"b","next":["b"],"watch":[{"every":"5s","command":"pr-review"},{"every":"2m","command":"pr-status"}]},{"name":"b"}]"#, "a").unwrap();
+        assert!(own.watch.is_empty(), "a board that reads its PRs itself gets no second reader");
     }
 
     #[test]
@@ -401,5 +401,6 @@ mod tests {
         assert!(pipeline.stage("ready_for_development").unwrap().gate.is_some());
         assert!(pipeline.stage("in_review").unwrap().watches_prs());
         assert!(pipeline.stage("in_development").unwrap().develops());
+        assert!(pipeline.watch.iter().any(|w| w.command == "pr-status" && !w.implicit), "the bundled board reads its PRs itself");
     }
 }

@@ -163,19 +163,15 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
       {tab === "pr" && live.pr && (
         <div className="brief">
           <PrActions item={live} onDone={() => void reload()} />
-          {live.review && live.review.failed.length > 0 && (
+          {live.review?.state === "open" && live.review.failed.length > 0 && (
             <div className="failed-checks">
               <strong>Failing checks</strong>
               <ul>
-                {live.review.failed.map((check) => (
-                  <li key={check.name}>
-                    {check.url ? (
-                      <a href={check.url} target="_blank" rel="noreferrer">
-                        {check.name} ↗
-                      </a>
-                    ) : (
-                      check.name
-                    )}
+                {live.review.failed.map((name) => (
+                  <li key={name}>
+                    <a href={`${live.pr}/checks`} target="_blank" rel="noreferrer">
+                      {name} ↗
+                    </a>
                   </li>
                 ))}
               </ul>

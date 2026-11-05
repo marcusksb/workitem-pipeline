@@ -16,7 +16,7 @@ use crate::{
     launch,
     locate::{Found, Origin},
     pipeline::{Gate, Pipeline, Resolved},
-    review::{self, Conversation, PrStatus},
+    review::{self, Conversation},
     tmux,
     workitem::{self, Workitem},
     AppState, Shared,
@@ -134,9 +134,6 @@ pub struct Roles {
     gate: Option<Gate>,
     /// The stage polls PRs: PR actions.
     pr_watch: bool,
-    /// The stage only shows PR status.
-    #[serde(skip)]
-    pr_status: bool,
     /// An approved item here can be started.
     develops: bool,
 }
@@ -145,7 +142,7 @@ fn roles_of(board: Option<&Pipeline>, item: &Workitem) -> Roles {
     let Some(stage) = board.and_then(|b| b.stage(&item.stage)) else {
         return Roles::default();
     };
-    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), pr_status: stage.shows_pr_status(), develops: stage.develops() }
+    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops() }
 }
 
 #[derive(Serialize)]
@@ -155,28 +152,19 @@ pub struct Item {
     session: bool,
     #[serde(flatten)]
     roles: Roles,
-    /// PR approval, merge and CI status; only items in the PR stage have one.
-    review: Option<PrStatus>,
     /// Commits in the item's worktree that no remote has; `None` when it has no worktree.
     unpushed: Option<u32>,
     /// The PR head moved past the item's `head_sha`.
     pr_moved: bool,
 }
 
-fn pr_moved(item: &Workitem, review: Option<&PrStatus>) -> bool {
-    let head = review.and_then(|r| r.head.as_deref());
+fn pr_moved(item: &Workitem) -> bool {
+    let head = item.review.as_ref().and_then(|r| r.head.as_deref());
     !item.head_sha.is_empty() && head.is_some_and(|head| head != item.head_sha)
 }
 
 async fn unpushed_of(project: &Project, item: &Workitem, worktrees: &[std::path::PathBuf]) -> Option<u32> {
     git::unpushed(git::worktree_for(worktrees, &project.repo, &item.dir)?).await
-}
-
-fn review_of(state: &AppState, item: &Workitem, roles: &Roles) -> Option<PrStatus> {
-    if !roles.pr_watch && !roles.pr_status {
-        return None;
-    }
-    state.reviews.lock().unwrap().get(&format!("{}/{}", item.project, item.dir)).map(|r| r.status.clone())
 }
 
 pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
@@ -191,14 +179,13 @@ pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
                 let board = boards.entry(item.board.clone()).or_insert_with(|| state.pipeline(project, &item.board).pipeline);
                 let session = tmux::session_for(sessions, project, &item.dir).is_some();
                 let roles = roles_of(board.as_ref(), &item);
-                let review = review_of(state, &item, &roles);
-                (item, session, roles, review)
+                (item, session, roles)
             });
             let worktrees = &worktrees;
-            futures_util::future::join_all(items.map(|(item, session, roles, review)| async move {
+            futures_util::future::join_all(items.map(|(item, session, roles)| async move {
                 let unpushed = unpushed_of(project, &item, worktrees).await;
-                let pr_moved = pr_moved(&item, review.as_ref());
-                Item { item, session, roles, review, unpushed, pr_moved }
+                let pr_moved = pr_moved(&item);
+                Item { item, session, roles, unpushed, pr_moved }
             }))
             .await
         }
@@ -222,10 +209,9 @@ pub async fn item(
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let session = tmux::session_for(&sessions, &project, &dir).is_some();
     let roles = roles_of(state.pipeline(&project, &item.board).pipeline.as_ref(), &item);
-    let review = review_of(&state, &item, &roles);
     let unpushed = unpushed_of(&project, &item, &git::worktrees(&project.repo).await).await;
-    let pr_moved = pr_moved(&item, review.as_ref());
-    Ok(Json(Detail { item: Item { item, session, roles, review, unpushed, pr_moved }, content }))
+    let pr_moved = pr_moved(&item);
+    Ok(Json(Detail { item: Item { item, session, roles, unpushed, pr_moved }, content }))
 }
 
 /// The PR description and comments of a workitem, read live with `gh`.

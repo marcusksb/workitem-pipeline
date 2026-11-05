@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { IconCircleCheck, IconGitMerge, IconThumbsUp, IconUserCheck } from "./icons";
+import { IconCircleCheck, IconGitMerge, IconGitPullRequest, IconThumbsUp, IconUserCheck } from "./icons";
 import { Review } from "./types";
 
 type Tone = "good" | "bad" | "wait" | "idle";
@@ -30,10 +30,15 @@ function ci(failedCount: number): Record<Review["ci"], Slot> {
   };
 }
 
-/** Approval, merge and CI status of a PR, as a three-slot icon strip; a fourth slot leads it when I approved the PR. */
+const DONE: Record<Exclude<Review["state"], "open">, Slot> = {
+  merged: { glyph: <IconGitMerge />, tone: "good", label: "PR merged" },
+  closed: { glyph: <IconGitPullRequest />, tone: "idle", label: "PR closed without merge" },
+};
+
+/** Approval, merge and CI status of an open PR, as a three-slot icon strip; a fourth slot leads it when I approved the PR. A merged or closed PR gets one slot. */
 export function ReviewStrip({ review }: { review: Review | null }) {
   if (!review) return null;
-  const slots = [
+  const slots = review.state !== "open" ? [DONE[review.state]] : [
     ...(review.approved_by_me ? [{ glyph: <IconThumbsUp />, tone: "good" as Tone, label: "approved by you" }] : []),
     APPROVAL[review.approval],
     MERGE[review.merge],

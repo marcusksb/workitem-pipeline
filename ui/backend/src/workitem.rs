@@ -32,6 +32,8 @@ pub struct Workitem {
     pub head_sha: String,
     /// Open `- [ ]` items under `## Follow-ups`: work left for after the item is done.
     pub follow_ups: Vec<String>,
+    /// PR approval, merge and CI status as `pr-status` last read it; `None` before that.
+    pub review: Option<crate::review::PrStatus>,
 }
 
 /// Flat `key: value` frontmatter, as written by `workitem-create` and edited by `workitem-move`.
@@ -97,6 +99,7 @@ fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
         created: field("created", ""),
         head_sha: field("head_sha", ""),
         follow_ups: follow_ups(text),
+        review: crate::review::PrStatus::from_fields(&fields),
     }
 }
 

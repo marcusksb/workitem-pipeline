@@ -16,7 +16,6 @@ use crate::{
     dispatch::RunError,
     git, launch,
     pipeline::{Stage, DEFAULT_BOARD},
-    review::{PrStatus, Review},
     tmux,
     workitem::{self, Workitem},
     AppState, Shared,
@@ -245,7 +244,7 @@ pub struct Fix {
     kind: String,
 }
 
-/// Starts the fixer session for an item's PR (`ci`, `conflict`, `changes` or `comments`). For the
+/// Starts the fixer session for an item's PR (`ci`, `conflict` or `comments`). For the
 /// `pr-review` watcher, which decides when; this only launches, like `run_handler`.
 pub async fn fix(
     State(state): State<Shared>,
@@ -262,28 +261,10 @@ pub async fn fix(
     let prompt = match kind.as_str() {
         "ci" => launch::ci_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         "conflict" => launch::conflict_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
-        "changes" => launch::changes_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         "comments" => launch::comments_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
     launch_item_session(&state, &project, &path, &item, &prompt).await
-}
-
-/// Keeps the PR status the `pr-review` watcher read, for the board's chips.
-pub async fn set_review(
-    State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
-    Json(status): Json<PrStatus>,
-) -> Result<StatusCode> {
-    let (project, ..) = find(&state, &project, &dir)?;
-    state.reviews.lock().unwrap().insert(format!("{}/{dir}", project.name), Review { status });
-    Ok(StatusCode::NO_CONTENT)
-}
-
-pub async fn clear_review(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, ..) = find(&state, &project, &dir)?;
-    state.reviews.lock().unwrap().remove(&format!("{}/{dir}", project.name));
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// A free-form agent session on the workitem, in any stage: the human drives it from the
@@ -330,9 +311,10 @@ async fn launch_item_session(
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs `gh pr <subcommand> <pr url> <args>` in the project's repo, then forgets the cached
-/// PR reading and wakes the stage's watchers so the next pass reads the PR at once.
-async fn gh_pr(state: &AppState, project: &Project, dir: &str, item: &Workitem, args: &[&str]) -> Result<()> {
+/// Runs `gh pr <subcommand> <pr url> <args>` in the project's repo, then makes the board's
+/// watchers (`pr-status` among them) and the stage's due and wakes the dispatcher, so the next
+/// pass reads the PR at once.
+async fn gh_pr(state: &AppState, project: &Project, item: &Workitem, args: &[&str]) -> Result<()> {
     if !stage_of(state, project, item)?.watches_prs() || !item.pr.starts_with("http") {
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
     }
@@ -345,7 +327,7 @@ async fn gh_pr(state: &AppState, project: &Project, dir: &str, item: &Workitem, 
     if !output.status.success() {
         return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
     }
-    state.reviews.lock().unwrap().remove(&format!("{}/{}", project.name, dir));
+    crate::watch::forget(state, project, &item.board, crate::watch::BOARD);
     crate::watch::forget(state, project, &item.board, &item.stage);
     state.wake.notify_one();
     Ok(())
@@ -355,7 +337,7 @@ async fn gh_pr(state: &AppState, project: &Project, dir: &str, item: &Workitem, 
 /// review pass: the same path also covers a merge queue that lands the PR later.
 pub async fn merge(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
     let (project, _, item) = find(&state, &project, &dir)?;
-    gh_pr(&state, &project, &dir, &item, &["merge", "--squash"]).await?;
+    gh_pr(&state, &project, &item, &["merge", "--squash"]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -363,7 +345,7 @@ pub async fn merge(State(state): State<Shared>, UrlPath((project, dir)): UrlPath
 /// --rebase`), so no local checkout is touched. GitHub refuses when the rebase conflicts.
 pub async fn rebase(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
     let (project, _, item) = find(&state, &project, &dir)?;
-    gh_pr(&state, &project, &dir, &item, &["update-branch", "--rebase"]).await?;
+    gh_pr(&state, &project, &item, &["update-branch", "--rebase"]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

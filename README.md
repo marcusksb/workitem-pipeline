@@ -56,7 +56,7 @@ Two parts live in this repo:
 | `analyze` | `workitem-analyze` | Writes the `## Review brief`: findings, plan, risk, size, test plan, assumptions, links |
 | `ready_for_development` | gate | You approve (→ `in_development`) or reject with a comment (→ `analyze`) |
 | `in_development` | `workitem-start` | Sets up the worktree and branch, implements, opens a PR |
-| `in_review` | `watch/pr-review` | Polls the PR, fixes red CI, conflicts and review comments, moves merged PRs to `done` |
+| `in_review` | `watch/pr-review` | Reacts to what the board's `watch/pr-status` read: fixes conflicts, red CI and review comments, moves merged PRs to `done` |
 | `done` | none | Final |
 
 ### Custom boards

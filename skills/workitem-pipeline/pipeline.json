@@ -1,7 +1,10 @@
 {
   "brief_sections": ["Findings", "Plan", "Risk", "Size", "Test plan", "Assumptions", "Links"],
   "entry": "backlog",
-  "watch": [{ "every": "5m", "command": "issue-status" }],
+  "watch": [
+    { "every": "5m", "command": "issue-status" },
+    { "every": "1m", "command": "pr-status" }
+  ],
   "stages": [
     {
       "name": "backlog",
@@ -39,7 +42,7 @@
       "name": "in_review",
       "handler": null,
       "auto": true,
-      "watch": { "every": "1m", "command": "pr-review" },
+      "watch": { "every": "5s", "command": "pr-review" },
       "next": ["done"],
       "on_merge": "done"
     },

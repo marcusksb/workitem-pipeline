@@ -1,3 +1,243 @@
-#!/bin/sh
-# Column watcher that only keeps the PR status chips of a column up to date; starts nothing.
-exec "$(dirname "$0")/pr-review" --status-only "$@"
+#!/usr/bin/env python3
+"""Board watcher: read the PR of every item with gh and write what it found into the item.
+
+  pr-status [--ignore dockerized,e2e,playwright]
+
+For each item on stdin with a PR link whose PR is not already recorded as merged (a closed one
+can be reopened, so it is still read), it writes these frontmatter keys (only when they change, except pr_checked_at):
+  pr_url              the link it read; a different `pr:` clears every pr_* key first
+  pr_state            open | merged | closed
+  pr_ci               passing | failing | pending | none, over every check (the board's chip)
+  pr_ci_fix           the same without checks whose name contains an --ignore word (the CI fixer)
+  pr_ci_failed        names of the red checks
+  pr_merge            mergeable | conflicting | unknown
+  pr_approval         approved | changes_requested | review_required | none
+  pr_approved_by_me   true | false
+  pr_head             commit the PR head points to
+  pr_unseen_comments  ids of comments that ask for a change and are not in pr_seen_comments
+  pr_checked_at       when it last read the PR (UTC), every run
+The first reading of an item puts the comments already there into pr_seen_comments, so only new
+ones are unseen. It starts nothing; watch/pr-review reacts to these keys.
+"""
+import json, os, subprocess, sys, time
+from datetime import datetime, timezone
+
+sys.dont_write_bytecode = True
+# The helpers sit next to workitem-move, which the backend names.
+sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
+                else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
+from workitem_fields import read_fields, set_fields  # noqa: E402
+
+FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+PENDING = ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED", "EXPECTED")
+VIEW_FIELDS = "state,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
+UNKNOWN_RETRIES = 3
+UNKNOWN_RETRY_WAIT = 2
+
+
+def check_name(check):
+    return check.get("name") or check.get("context") or ""
+
+
+def result_of(check):
+    for key in ("conclusion", "state", "status"):
+        if check.get(key):
+            return check[key]
+    return ""
+
+
+def ci_of(checks, ignore=()):
+    """passing, failing, pending or none. Pending wins, so a fixer never races running checks."""
+    seen = pending = failing = False
+    for check in checks or []:
+        if any(word in check_name(check).lower() for word in ignore):
+            continue
+        seen = True
+        result = result_of(check)
+        if result in PENDING:
+            pending = True
+        elif result in FAILED:
+            failing = True
+    if not seen:
+        return "none"
+    return "pending" if pending else "failing" if failing else "passing"
+
+
+def failed_checks(checks):
+    names = []
+    for check in checks or []:
+        if result_of(check) in FAILED and check_name(check) not in names:
+            names.append(check_name(check))
+    return names
+
+
+def login_of(entry):
+    return ((entry or {}).get("login")) or ""
+
+
+def approved_by(raw, me):
+    """The latest verdict by `me` is an approval; plain comments do not change a verdict."""
+    verdicts = [r["state"] for r in raw.get("reviews") or [] if login_of(r.get("author")) == me
+                and r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")]
+    return bool(verdicts) and verdicts[-1] == "APPROVED"
+
+
+def facts_of(raw, me, ignore):
+    """The frontmatter values of an open PR, comments aside."""
+    checks = raw.get("statusCheckRollup")
+    approval = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes_requested", "REVIEW_REQUIRED": "review_required"}
+    merge = {"MERGEABLE": "mergeable", "CONFLICTING": "conflicting"}
+    return {
+        "pr_state": "open",
+        "pr_ci": ci_of(checks),
+        "pr_ci_fix": ci_of(checks, ignore),
+        "pr_ci_failed": ",".join(failed_checks(checks)),
+        "pr_merge": merge.get(raw.get("mergeable"), "unknown"),
+        "pr_approval": approval.get(raw.get("reviewDecision"), "none"),
+        "pr_approved_by_me": "true" if approved_by(raw, me) else "false",
+        "pr_head": raw.get("headRefOid") or "",
+    }
+
+
+def asks_for_change(author, body, me, inline, reply):
+    """My own comment with @change or as a new inline thread (a reply is conversation); any
+    comment by someone else, bots included (a review bot's findings are a top-level comment).
+    The fixer decides which of them need a change."""
+    if author == me:
+        return "@change" in body or (inline and not reply)
+    return True
+
+
+def review_comments(raw, me):
+    """Reviews that ask for a change, as review-<id>: every changes-requested review, anyone
+    else's commented review with text (a QA report, say), and my own with @change."""
+    ids = []
+    for r in raw.get("reviews") or []:
+        author, body, state = login_of(r.get("author")), (r.get("body") or "").strip(), r.get("state")
+        if state == "CHANGES_REQUESTED" or (author and body and state == "COMMENTED" and (author != me or "@change" in body)):
+            ids.append(f"review-{r['id']}")
+    return ids
+
+
+def gh(args):
+    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
+    return json.loads(result.stdout)
+
+
+def fetch(pr):
+    """GitHub says UNKNOWN while it computes mergeability; asking again a moment later helps."""
+    raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
+    for _ in range(UNKNOWN_RETRIES):
+        if raw.get("mergeable") != "UNKNOWN":
+            break
+        time.sleep(UNKNOWN_RETRY_WAIT)
+        raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
+    return raw
+
+
+def change_comments(pr, raw, me):
+    """Ids of the comments and reviews on the PR that ask for a change."""
+    number = pr.rstrip("/").rsplit("/", 1)[-1]
+    pages = gh(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/comments", "--paginate", "--slurp"])
+    ids = []
+    for page in pages:
+        for c in page:
+            author = login_of(c.get("user"))
+            if author and asks_for_change(author, c.get("body") or "", me, True, c.get("in_reply_to_id") is not None):
+                ids.append(f"inline-{c['id']}")
+    for c in raw.get("comments") or []:
+        author = login_of(c.get("author"))
+        if author and asks_for_change(author, c.get("body") or "", me, False, False):
+            ids.append(c["id"])
+    return ids + review_comments(raw, me)
+
+
+def id_list(value):
+    return [i for i in (value or "").split(",") if i]
+
+
+def comment_updates(fields, comments):
+    """pr_seen_comments and pr_unseen_comments for the comments now on the PR. An old
+    pr_handled_review (a changes-requested review a fixer already had) counts as seen."""
+    updates = {}
+    seen = None if "pr_seen_comments" not in fields else id_list(fields["pr_seen_comments"])
+    if fields.get("pr_handled_review"):
+        seen = (seen or []) + [f"review-{fields['pr_handled_review']}"]
+        updates["pr_handled_review"] = None
+    if seen is None:
+        seen = list(comments)
+    updates["pr_seen_comments"] = ",".join(seen)
+    updates["pr_unseen_comments"] = ",".join(c for c in comments if c not in seen)
+    return updates
+
+
+def changed(fields, updates):
+    return {k: v for k, v in updates.items() if fields.get(k) != v and not (v is None and k not in fields)}
+
+
+def now():
+    """UTC with milliseconds; pr-status and pr-review compare these as text."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class Reader:
+    def __init__(self, ignore):
+        self.ignore = ignore
+        self.root = os.environ["WORKITEM_DIR_ROOT"]
+        self._me = None
+
+    def me(self):
+        if self._me is None:
+            try:
+                self._me = gh(["api", "user"])["login"]
+            except (RuntimeError, KeyError, ValueError):
+                self._me = ""
+        return self._me
+
+    def check(self, item):
+        path = os.path.join(self.root, item["dir"], "workitem.md")
+        fields = read_fields(path)
+        pr = item["pr"]
+        if fields.get("pr_url", pr) != pr:
+            set_fields(path, {k: None for k in fields if k.startswith("pr_")})
+            fields = read_fields(path)
+        elif fields.get("pr_state") == "merged":
+            return
+        try:
+            updates = self.read(pr, fields)
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+            print(f"cannot read the PR of {item['dir']}: {e}", file=sys.stderr)
+            return
+        set_fields(path, {**changed(fields, {"pr_url": pr, **updates}), "pr_checked_at": now()})
+
+    def read(self, pr, fields):
+        raw = fetch(pr)
+        if raw["state"] in ("MERGED", "CLOSED"):
+            return {"pr_state": raw["state"].lower()}
+        if raw["state"] != "OPEN":
+            raise RuntimeError(f"unknown PR state {raw['state']}")
+        return {**facts_of(raw, self.me(), self.ignore), **comment_updates(fields, change_comments(pr, raw, self.me()))}
+
+
+def options_of(argv):
+    ignore = ["dockerized", "e2e", "playwright"]
+    while argv:
+        flag = argv.pop(0)
+        if flag == "--ignore":
+            ignore = [w for w in argv.pop(0).lower().split(",") if w]
+        else:
+            sys.exit(f"unknown option {flag}")
+    return ignore
+
+
+def main(argv):
+    reader = Reader(options_of(list(argv)))
+    for item in json.load(sys.stdin):
+        if item["pr"].startswith("http"):
+            reader.check(item)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
