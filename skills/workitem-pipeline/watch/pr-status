@@ -4,7 +4,7 @@
   pr-status [--ignore dockerized,e2e,playwright]
 
 For each item on stdin with a PR link whose PR is not already recorded as merged (a closed one
-can be reopened, so it is still read), it writes these frontmatter keys (only when they change, except pr_checked_at):
+can be reopened, so it is still read), it writes these frontmatter keys, only when they change:
   pr_url              the link it read; a different `pr:` clears every pr_* key first
   pr_state            open | merged | closed
   pr_ci               passing | failing | pending | none, over every check (the board's chip)
@@ -15,7 +15,9 @@ can be reopened, so it is still read), it writes these frontmatter keys (only wh
   pr_approved_by_me   true | false
   pr_head             commit the PR head points to
   pr_unseen_comments  ids of comments that ask for a change and are not in pr_seen_comments
-  pr_checked_at       when it last read the PR (UTC), every run
+  pr_checked_at       when it read the PR (UTC): with every change, and on every reading while
+                      pr-review waits for one newer than pr_fix_ended_at. Not on every run:
+                      agents that read the file are told about each write.
 The first reading of an item puts the comments already there into pr_seen_comments, so only new
 ones are unseen. It starts nothing; watch/pr-review reacts to these keys.
 """
@@ -177,6 +179,12 @@ def changed(fields, updates):
     return {k: v for k, v in updates.items() if fields.get(k) != v and not (v is None and k not in fields)}
 
 
+def awaits_reading(fields):
+    """pr-review acts after a fixer only on a reading newer than the fixer's end."""
+    ended = fields.get("pr_fix_ended_at", "")
+    return bool(ended) and fields.get("pr_checked_at", "") <= ended
+
+
 def now():
     """UTC with milliseconds; pr-status and pr-review compare these as text."""
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -210,7 +218,10 @@ class Reader:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
             print(f"cannot read the PR of {item['dir']}: {e}", file=sys.stderr)
             return
-        set_fields(path, {**changed(fields, {"pr_url": pr, **updates}), "pr_checked_at": now()})
+        updates = changed(fields, {"pr_url": pr, **updates})
+        if updates or awaits_reading(fields):
+            updates["pr_checked_at"] = now()
+        set_fields(path, updates)
 
     def read(self, pr, fields):
         raw = fetch(pr)

@@ -170,14 +170,17 @@ class ReaderTest(unittest.TestCase):
         f = self.fields()
         self.assertEqual((f["pr_url"], f["pr_state"], f["pr_seen_comments"]), ("https://github.com/o/r/pull/2", "open", ""))
 
-    def test_unchanged_facts_leave_only_the_check_time_written(self):
+    def test_unchanged_facts_leave_the_file_alone_unless_a_reading_is_awaited(self):
         self.pr({"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []})
         self.run_script()
-        before = {k: v for k, v in self.fields().items() if k != "pr_checked_at"}
+        before = self.text(self.path)
+        self.assertTrue(before.endswith("---\n\n# body\n"), "the body is untouched")
         self.run_script()
-        after = {k: v for k, v in self.fields().items() if k != "pr_checked_at"}
-        self.assertEqual(before, after)
-        self.assertTrue(self.text(self.path).endswith("---\n\n# body\n"), "the body is untouched")
+        self.assertEqual(self.text(self.path), before, "agents that read the file see no write")
+
+        pr.set_fields(self.path, {"pr_fix_ended_at": "9999-01-01T00:00:00.000Z"})
+        self.run_script()
+        self.assertNotEqual(self.fields()["pr_checked_at"], before.split("pr_checked_at: ")[1].split("\n")[0], "pr-review waits for it")
 
 
 if __name__ == "__main__":
