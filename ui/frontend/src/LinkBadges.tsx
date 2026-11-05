@@ -5,23 +5,21 @@ import { Item } from "./types";
 // Clicking a badge must not also select the card it sits in.
 const stop = (event: MouseEvent) => event.stopPropagation();
 
-/** Clickable Jira and PR badges of an item. */
+/** Clickable Jira (key and status) and PR badges of an item. */
 export function LinkBadges({ item }: { item: Pick<Item, "issue" | "issue_status" | "issue_status_category" | "pr" | "parent"> }) {
   const issue = ticket(item.issue);
   const group = issueCategory(item.issue_status_category);
   const tint = group ? ` issue-${group}` : "";
-  const status = item.issue_status ? `${item.issue_status}\n` : "";
+  const label = issue && (item.issue_status ? `${issue.key} · ${item.issue_status}` : issue.key);
   return (
     <>
       {issue &&
         (issue.url ? (
-          <a className={`badge link-badge${tint}`} href={issue.url} target="_blank" rel="noreferrer" title={`${status}${issue.url}`} onClick={stop}>
-            {issue.key} ↗
+          <a className={`badge link-badge${tint}`} href={issue.url} target="_blank" rel="noreferrer" title={issue.url} onClick={stop}>
+            {label}
           </a>
         ) : (
-          <span className={`badge${tint}`} title={item.issue_status || undefined}>
-            {issue.key}
-          </span>
+          <span className={`badge${tint}`}>{label}</span>
         ))}
       {item.parent && (
         <span className="badge" title={`split from ${item.parent}`}>

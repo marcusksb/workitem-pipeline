@@ -12,7 +12,6 @@ import { PrConversation } from "./PrConversation";
 import { Files } from "./Files";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Info } from "./Info";
-import { IssueStatusChip } from "./IssueStatusChip";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
 import { Tab } from "./url";
@@ -70,7 +69,6 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
             <span className="badge">{stageLabel(live.stage)}</span>
             <span className="badge">{kindIcon && `${kindIcon} `}{live.kind}</span>
             <LinkBadges item={live} />
-            <IssueStatusChip status={live.issue_status} category={live.issue_status_category} />
             {isBlocked(live) && <span className="chip blocked">blocked</span>}
             {isWaiting(live) && <WaitingChip item={live} />}
             <FollowUpsChip
