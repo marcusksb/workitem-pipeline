@@ -13,7 +13,9 @@ can be reopened, so it is still read), it writes these frontmatter keys, only wh
   pr_merge            mergeable | conflicting | unknown
   pr_approval         approved | changes_requested | review_required | none
   pr_approved_by_me   true | false
+  pr_draft            true | false
   pr_head             commit the PR head points to
+  pr_head_at          when it first saw that head (UTC), so a script can wait until pushes settle
   pr_unseen_comments  ids of comments that ask for a change and are not in pr_seen_comments
   pr_checked_at       when it read the PR (UTC): with every change, and on every reading while
                       pr-review waits for one newer than pr_fix_ended_at. Not on every run:
@@ -32,7 +34,7 @@ from workitem_fields import read_fields, set_fields  # noqa: E402
 
 FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
 PENDING = ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED", "EXPECTED")
-VIEW_FIELDS = "state,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
+VIEW_FIELDS = "state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
 UNKNOWN_RETRIES = 3
 UNKNOWN_RETRY_WAIT = 2
 
@@ -97,6 +99,7 @@ def facts_of(raw, me, ignore):
         "pr_merge": merge.get(raw.get("mergeable"), "unknown"),
         "pr_approval": approval.get(raw.get("reviewDecision"), "none"),
         "pr_approved_by_me": "true" if approved_by(raw, me) else "false",
+        "pr_draft": "true" if raw.get("isDraft") else "false",
         "pr_head": raw.get("headRefOid") or "",
     }
 
@@ -219,8 +222,11 @@ class Reader:
             print(f"cannot read the PR of {item['dir']}: {e}", file=sys.stderr)
             return
         updates = changed(fields, {"pr_url": pr, **updates})
+        stamp = now()
+        if updates.get("pr_head") or (fields.get("pr_head") and "pr_head_at" not in fields):
+            updates["pr_head_at"] = stamp
         if updates or awaits_reading(fields):
-            updates["pr_checked_at"] = now()
+            updates["pr_checked_at"] = stamp
         set_fields(path, updates)
 
     def read(self, pr, fields):

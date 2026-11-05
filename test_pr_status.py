@@ -39,9 +39,9 @@ class FactsTest(unittest.TestCase):
     def test_approval_merge_and_both_ci_values_map_from_github(self):
         raw = {"state": "OPEN", "mergeable": "CONFLICTING", "reviewDecision": "CHANGES_REQUESTED", "headRefOid": "h1",
                "statusCheckRollup": [run("e2e", "COMPLETED", "FAILURE"), run("lint", "COMPLETED", "SUCCESS")]}
-        self.assertEqual(pr.facts_of(raw, "me", IGNORE), {
+        self.assertEqual(pr.facts_of({**raw, "isDraft": True}, "me", IGNORE), {
             "pr_state": "open", "pr_ci": "failing", "pr_ci_fix": "passing", "pr_ci_failed": "e2e", "pr_merge": "conflicting",
-            "pr_approval": "changes_requested", "pr_approved_by_me": "false", "pr_head": "h1",
+            "pr_approval": "changes_requested", "pr_approved_by_me": "false", "pr_draft": "true", "pr_head": "h1",
         })
         facts = pr.facts_of({"state": "OPEN", "mergeable": "UNKNOWN", "reviewDecision": ""}, "me", IGNORE)
         self.assertEqual((facts["pr_approval"], facts["pr_merge"], facts["pr_ci"]), ("none", "unknown", "none"))
@@ -157,6 +157,20 @@ class ReaderTest(unittest.TestCase):
                 inline=[{"id": 7, "user": {"login": "me"}, "body": "x", "in_reply_to_id": None}])
         self.run_script()
         self.assertEqual(self.fields()["pr_unseen_comments"], "inline-7,c2")
+
+    def test_pr_head_at_is_when_the_current_head_was_first_seen(self):
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []}
+        self.pr(view)
+        self.run_script()
+        first = self.fields()["pr_head_at"]
+        self.run_script()
+        self.assertEqual(self.fields()["pr_head_at"], first, "the same head keeps its time")
+        self.pr({**view, "headRefOid": "h2"})
+        self.run_script()
+        self.assertGreater(self.fields()["pr_head_at"], first, "a new head gets a new time")
+        pr.set_fields(self.path, {"pr_head_at": None})
+        self.run_script()
+        self.assertIn("pr_head_at", self.fields(), "an item read before pr_head_at existed gets one")
 
     def test_a_merged_pr_is_not_read_again_and_a_new_link_starts_over(self):
         self.pr({"state": "MERGED"})
