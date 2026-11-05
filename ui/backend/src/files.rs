@@ -6,12 +6,13 @@ use std::{
 };
 
 use axum::{
-    extract::{Path as UrlPath, State},
-    http::{header, StatusCode},
+    extract::{Path as UrlPath, Request, State},
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use serde::{Deserialize, Serialize};
+use tower_http::services::ServeFile;
 
 use crate::{api::ApiError, workitem, Shared};
 
@@ -76,24 +77,23 @@ pub async fn list_files(
     Ok(Json(list(&item_dir(&state, &project, &dir)?)))
 }
 
-/// The raw file. It is served from the UI's origin, so it is sandboxed: an HTML file an agent
-/// wrote must not run script with the session cookie.
+/// The raw file, with range requests so audio and video can seek. It is served from the UI's
+/// origin, so it is sandboxed: an HTML file an agent wrote must not run script with the session cookie.
 pub async fn file(
     State(state): State<Shared>,
     UrlPath((project, dir, rel)): UrlPath<(String, String, String)>,
+    req: Request,
 ) -> Result<Response, ApiError> {
     let path = resolve(&item_dir(&state, &project, &dir)?, &rel).ok_or(ApiError::not_found("file"))?;
-    let bytes = tokio::fs::read(&path).await.map_err(|_| ApiError::not_found("file"))?;
-    let mime = mime_guess::from_path(&path).first_or_octet_stream();
-    Ok((
-        [
-            (header::CONTENT_TYPE, mime.to_string()),
-            (header::CONTENT_SECURITY_POLICY, "sandbox".to_string()),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
-        ],
-        bytes,
-    )
-        .into_response())
+    let mut response = ServeFile::new(path)
+        .try_call(req)
+        .await
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox"));
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    Ok(response)
 }
 
 #[derive(Deserialize)]
