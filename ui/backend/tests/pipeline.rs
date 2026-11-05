@@ -162,6 +162,7 @@ async fn dispatcher_runs_handlers_reaps_finished_sessions_and_leaves_blocked_alo
     write_item(&w.repo, "T-1-flow", "backlog", "");
     fs::write(w.repo.join(".stub-backlog"), "advance").unwrap();
     fs::write(w.repo.join(".stub-analyze"), "block").unwrap();
+    fs::write(w.repo.join(".claude/workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
 
     settle(&w).await;
     assert!(w.tmux.has("wi-T-1-flow"), "backlog item gets a handler session");
@@ -175,6 +176,8 @@ async fn dispatcher_runs_handlers_reaps_finished_sessions_and_leaves_blocked_alo
     settle(&w).await;
     assert!(w.tmux.has("wi-T-1-flow"), "a blocked session waits for the human");
     assert_eq!(stub_log(&w.repo), vec!["T-1-flow backlog", "T-1-flow analyze"]);
+    let args = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
+    assert!(!args.contains("Never mock tmux"), "stages that do not write code get no learnings: {args}");
 }
 
 #[tokio::test]
@@ -200,6 +203,7 @@ async fn dispatcher_retries_crashed_handlers_then_blocks_at_the_attempt_cap() {
 async fn dispatcher_starts_development_with_the_start_prompt() {
     let w = world();
     write_item(&w.repo, "T-10-dev", "in_development", "");
+    fs::write(w.repo.join(".claude/workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
 
     settle(&w).await;
     eventually("the start handler logged its invocation", || {
@@ -210,6 +214,7 @@ async fn dispatcher_starts_development_with_the_start_prompt() {
     assert!(args.contains("Current stage: in_development"), "{args}");
     assert!(args.contains("resume it as is"), "{args}");
     assert!(!args.contains("Do not change code"), "{args}");
+    assert!(args.contains("- Never mock tmux."), "development gets the learnings: {args}");
 }
 
 #[tokio::test]
@@ -1346,6 +1351,20 @@ async fn the_default_board_can_live_in_the_boards_folder() {
     fs::write(dir.join("boards/default.json"), board(r#"[{"name":"new"}]"#).replace(r#""entry": "qa""#, r#""entry": "new""#)).unwrap();
     assert_eq!(entry(&w), "new", "boards/default.json wins over pipeline.json");
     assert_eq!(w.state.board_names(&project), vec!["default"], "it is not listed as a second board");
+}
+
+#[tokio::test]
+async fn learnings_show_the_project_file_or_nothing() {
+    let w = world();
+    fs::create_dir_all(w.repo.join(".claude/workitems")).unwrap();
+    let read = || async { serde_json::from_str::<serde_json::Value>(&get(&w, "/api/projects/app/learnings").await).unwrap() };
+
+    let none = read().await;
+    assert_eq!(none["content"], "", "no file yet");
+    assert!(none["path"].as_str().unwrap().ends_with(".claude/workitems/learnings.md"));
+
+    fs::write(w.repo.join(".claude/workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
+    assert_eq!(read().await["content"], "# Learnings\n\n- Never mock tmux.\n");
 }
 
 #[tokio::test]

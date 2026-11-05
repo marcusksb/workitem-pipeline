@@ -265,6 +265,21 @@ pub struct Source {
 }
 
 #[derive(Serialize)]
+pub struct Learnings {
+    path: String,
+    /// Empty while no fixer has written the file.
+    content: String,
+}
+
+/// The project's `learnings.md`, which the review fixers write and code-writing sessions get.
+pub async fn learnings(State(state): State<Shared>, Path(project): Path<String>) -> Result<Json<Learnings>, ApiError> {
+    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
+    let path = launch::learnings_file(&project.repo);
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    Ok(Json(Learnings { path: path.display().to_string(), content }))
+}
+
+#[derive(Serialize)]
 pub struct StageSource {
     scripts: Vec<Source>,
     prose: Option<Source>,

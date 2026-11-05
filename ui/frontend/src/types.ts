@@ -111,5 +111,8 @@ export type Source = {
 
 export type StageSource = { scripts: Source[]; prose: Source | null };
 
+/** A project's `learnings.md`; `content` is empty while the file does not exist. */
+export type Learnings = { path: string; content: string };
+
 /** A file in a workitem folder; `path` is relative to it. */
 export type FileEntry = { path: string; size: number };

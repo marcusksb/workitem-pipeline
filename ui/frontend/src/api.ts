@@ -1,4 +1,4 @@
-import { AgentSession, Detail, FileEntry, Item, Pipelines, Plan, PlanDetail, PrConversation, Project, StageSource } from "./types";
+import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Project, StageSource } from "./types";
 
 type Launched = { session: string };
 
@@ -35,6 +35,7 @@ export const api = {
     request<StageSource>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
   pauseStage: (project: string, board: string, stage: string, paused: boolean) =>
     request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/paused`, { paused }),
+  learnings: (project: string) => request<Learnings>("GET", `/api/projects/${segment(project)}/learnings`),
   items: () => request<Item[]>("GET", "/api/workitems"),
   detail: (project: string, dir: string) =>
     request<Detail>("GET", `/api/workitems/${segment(project)}/${segment(dir)}`),

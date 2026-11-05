@@ -159,6 +159,37 @@ Move it with python3 {mv} {file} <stage>. Only workitem-move changes stage:.\n",
     )
 }
 
+/// `<workitems dir>/learnings.md`: rules the review fixers wrote down from past review comments.
+pub fn learnings_file(repo: &Path) -> std::path::PathBuf {
+    workitem::workitems_dir(repo).join("learnings.md")
+}
+
+/// The learnings as a prompt block for sessions that write code, or nothing when the file is
+/// missing or holds only headings.
+pub fn learnings(repo: &Path) -> String {
+    let text = fs::read_to_string(learnings_file(repo)).unwrap_or_default();
+    if !text.lines().any(|l| !l.trim().is_empty() && !l.starts_with('#')) {
+        return String::new();
+    }
+    format!(
+        "Rules learned from past reviews in this repo. Follow them like the repo's CLAUDE.md rules.\n\
+--- learnings ---\n{}\n--- end of learnings ---\n",
+        text.trim_end()
+    )
+}
+
+/// The step that has a review fixer write down what generalises from the comments it acted on.
+fn record_learnings(repo: &Path) -> String {
+    format!(
+        "Record learnings in {file}: for each comment you acted on whose lesson applies beyond this PR and is not \
+already covered by the repo's CLAUDE.md/AGENTS.md or an entry in that file, add one bullet written as a rule, ending with \
+(source: <comment url>). If an entry already says the same, append the new source link to it instead. \
+Create the file with a # Learnings heading if it is missing. Most runs add nothing. \
+If the edit fails because the file changed, read it again and retry.",
+        file = learnings_file(repo).display(),
+    )
+}
+
 /// Prompt for a stage handler (triage, analyze, development, or an inline prompt): the stage
 /// context, then `instructions`.
 pub fn handler_prompt(state: &AppState, project: &Project, item: &Workitem, stage: &Stage, instructions: &str) -> String {
@@ -178,9 +209,10 @@ agent_status line. Do not change code.\n"
     };
     format!(
         "{context}\nFollow these instructions for this workitem:\n--- instructions ---\n{instructions}\n--- end of instructions ---\n\
-{rules}{protocol}\
+{rules}{learnings}{protocol}\
 When you are done, make sure agent_status is ok (a stage move does this).{kill}",
         context = stage_context(state, project, item, stage),
+        learnings = if stage.develops() { learnings(&project.repo) } else { String::new() },
         protocol = protocol(&session),
     )
 }
@@ -226,16 +258,17 @@ pub fn ci_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
         "CI is failing on {pr}, the PR of workitem {dir} in repo {repo}.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
 2. Find the failure: gh pr checks {pr}, then gh run view <run> --log-failed.\n\
-3. Fix the cause in code, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed, commit and push. No force push, no rebase.\n\
+3. Fix the cause in code, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
 4. Pushed a fix: set agent_status: ok and stop.\n\
 5. Cannot fix it (flaky or infrastructure failure, failure not caused by this PR, needs a decision or a secret): \
 set agent_status: blocked: <one line reason>, explain here and wait.\n\
-The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
+{learnings}The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
 Never change stage:.\n\
 {protocol}",
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
+        learnings = learnings(repo),
         protocol = protocol(&session),
     )
 }
@@ -248,19 +281,21 @@ pub fn changes_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
         "A reviewer requested changes on {pr}, the PR of workitem {dir} in repo {repo}.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
 2. Read the review and its comments: gh pr view {pr} --comments, and gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments for inline ones.\n\
-3. Implement what the reviewer asked for, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed, commit and push. No force push, no rebase.\n\
+3. Implement what the reviewer asked for, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
 4. Reply once on the PR to each comment you acted on: \"Fixed in <short sha>\" plus a few words on what changed, \
 or \"Not changing this: <reason>\" for one you denied. Inline comment: \
-gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments/<id>/replies -f body=<text>. Other: gh pr comment {pr} --body <text>. \
-Then set agent_status: ok and stop.\n\
-5. Cannot do it (unclear request, needs a decision, large refactor, database migration): \
+gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments/<id>/replies -f body=<text>. Other: gh pr comment {pr} --body <text>.\n\
+5. {record} Then set agent_status: ok and stop.\n\
+6. Cannot do it (unclear request, needs a decision, large refactor, database migration): \
 set agent_status: blocked: <one line reason>, explain here and wait.\n\
-The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
+{learnings}The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
 Never change stage:.\n\
 {protocol}",
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
+        record = record_learnings(repo),
+        learnings = learnings(repo),
         protocol = protocol(&session),
     )
 }
@@ -277,19 +312,22 @@ Act only on comments from others and on your user's own comments that contain @c
 3. Check each against the actual code before acting, bot findings included. Implement a clear, legitimate change. \
 Leave a clearly wrong one untouched. Unsure whether a comment or suggestion is right, or what it asks for: \
 do not guess and do not skip it. Finish the rest, then set agent_status: blocked: <your question, one line>, ask it here and wait.\n\
-4. Run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed, commit and push. No force push, no rebase.\n\
+4. Run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
 5. Reply once on the PR to each comment you acted on: \"Fixed in <short sha>\" plus a few words on what changed, \
 or \"Not changing this: <reason>\" for one you denied. Inline comment: \
 gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments/<id>/replies -f body=<text>. Other PR comment: gh pr comment {pr} --body <text>. \
-Do not reply to one you are blocked on. Then set agent_status: ok and stop.\n\
-6. Cannot do it (needs a decision, large refactor, database migration): \
+Do not reply to one you are blocked on.\n\
+6. {record} Then set agent_status: ok and stop.\n\
+7. Cannot do it (needs a decision, large refactor, database migration): \
 set agent_status: blocked: <one line reason>, explain here and wait.\n\
-The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
+{learnings}The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
 Never change stage:.\n\
 {protocol}",
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
+        record = record_learnings(repo),
+        learnings = learnings(repo),
         protocol = protocol(&session),
     )
 }
@@ -308,12 +346,13 @@ and keeps both sides' behavior. Lockfiles: take the base version, then rerun the
 or you would have to guess what someone meant: git rebase --abort, then step 5.\n\
 4. Run the affected tests and the linter. Only if they pass, git push --force-with-lease, then set agent_status: ok and stop.\n\
 5. Cannot resolve it safely: set agent_status: blocked: merge conflict needs manual rebase: <one line reason>, explain here and wait.\n\
-The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
+{learnings}The workitem file is {file} (in the main repo, not the worktree): set agent_status there.\n\
 Never change stage:.\n\
 {protocol}",
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
+        learnings = learnings(repo),
         protocol = protocol(&session),
     )
 }
@@ -347,6 +386,35 @@ mod tests {
             conflict_fix_prompt("item-1", repo, "#7"),
         ] {
             assert!(prompt.contains(want), "missing workitem path in: {prompt}");
+        }
+    }
+
+    #[test]
+    fn learnings_are_empty_without_a_file_or_rules() {
+        let repo = tempfile::tempdir().unwrap();
+        assert_eq!(learnings(repo.path()), "");
+        fs::create_dir_all(repo.path().join(".workitems")).unwrap();
+        fs::write(repo.path().join(".workitems/learnings.md"), "# Learnings\n\n").unwrap();
+        assert_eq!(learnings(repo.path()), "", "a header alone adds nothing");
+    }
+
+    #[test]
+    fn every_fixer_gets_the_learnings_and_review_fixers_write_them() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join(".workitems")).unwrap();
+        fs::write(repo.path().join(".workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
+        let file = repo.path().join(".workitems/learnings.md");
+        let file = file.display().to_string();
+        let review = [changes_fix_prompt("i", repo.path(), "#7"), comments_fix_prompt("i", repo.path(), "#7")];
+        let other = [ci_fix_prompt("i", repo.path(), "#7"), conflict_fix_prompt("i", repo.path(), "#7")];
+        for prompt in review.iter().chain(&other) {
+            assert!(prompt.contains("--- learnings ---\n# Learnings\n\n- Never mock tmux.\n--- end of learnings ---"), "{prompt}");
+        }
+        for prompt in &review {
+            assert!(prompt.contains(&format!("Record learnings in {file}")), "{prompt}");
+        }
+        for prompt in &other {
+            assert!(!prompt.contains("Record learnings"), "{prompt}");
         }
     }
 }

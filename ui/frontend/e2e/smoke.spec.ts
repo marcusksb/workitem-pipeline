@@ -59,6 +59,10 @@ test.beforeAll(async () => {
     join(followUps, "workitem.md"),
     `---\ntitle: Merged with follow-ups\ntype: feature\nstage: done\nagent_status: ok\nissue: T-6\n---\n\n# Done\n\n${"A paragraph.\n\n".repeat(40)}## Follow-ups\n\n- [ ] Deploy to prod\n- [x] Tell support\n- [ ] Remove the flag\n`,
   );
+  writeFileSync(
+    join(repo, ".claude/workitems/learnings.md"),
+    "# Learnings\n\n- Never mock tmux in tests. (source: https://github.com/demo/repo/pull/42#discussion_r1)\n",
+  );
   const plans = join(repo, ".claude/workitems/plans");
   mkdirSync(plans, { recursive: true });
   writeFileSync(
@@ -250,6 +254,17 @@ test("the Files tab lists the workitem folder and previews a file", async ({ pag
   await page.screenshot({ path: process.env.FILES_SHOT ?? join(tmpdir(), "files-tab.png") });
   const raw = await page.request.get(base.split("#")[0].replace(/\/$/, "") + "/api/workitems/demo/T-2-gate/files/notes/findings.md");
   expect(await raw.text()).toContain("the cache is stale");
+});
+
+test("the Learnings button shows the project's learnings.md", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Brief waiting");
+  await page.getByRole("button", { name: "Learnings", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Learnings in demo" });
+  await expect(dialog.getByRole("listitem")).toContainText("Never mock tmux in tests.");
+  await expect(dialog.getByRole("link", { name: /pull\/42/ })).toHaveAttribute("target", "_blank");
+  await expect(dialog.locator(".source-path code")).toContainText("learnings.md");
+  await page.screenshot({ path: process.env.LEARNINGS_SHOT ?? join(tmpdir(), "learnings.png") });
 });
 
 test("pausing a column marks it until it is resumed, and only watched columns can pause", async ({ page }) => {

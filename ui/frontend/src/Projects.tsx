@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { Dialog } from "./Dialog";
 import { DEFAULT_BOARD } from "./boardState";
+import { Learnings } from "./Learnings";
 import { Pipelines, Project } from "./types";
 
 type Props = {
@@ -21,6 +22,7 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
   const [repo, setRepo] = useState("");
   const [error, setError] = useState<string>();
   const [creating, setCreating] = useState(false);
+  const [learning, setLearning] = useState(false);
   const [input, setInput] = useState("");
   const target = selected ?? projects[0]?.name;
   const boards = (pipelines?.[target] ?? []).map((b) => b.name);
@@ -103,6 +105,12 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
           New workitem
         </button>
       )}
+      {target && (
+        <button className="link" onClick={() => setLearning(true)}>
+          Learnings
+        </button>
+      )}
+      {learning && target && <Learnings project={target} onClose={() => setLearning(false)} />}
       {creating && target && (
         <Dialog title={`New workitem in ${target}`} onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={create}>

@@ -441,6 +441,7 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .file-preview pre { font-size: 12px; white-space: pre; }
 .file-preview img, .file-preview video { max-width: 100%; border: 1px solid var(--border); border-radius: 4px; }
 .file-markdown { border-top: 1px solid var(--border); padding-top: 8px; }
+.learnings-body { max-height: 60vh; overflow: auto; }
 
 /* Planning sessions bar (decision 36) */
 .plans { padding: 6px 24px 10px; border-bottom: 1px solid var(--border); }

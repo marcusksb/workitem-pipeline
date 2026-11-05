@@ -82,6 +82,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/pipelines", get(api::pipelines))
         .route("/api/projects/{project}/boards/{board}/stages/{stage}/source", get(api::stage_source))
         .route("/api/projects/{project}/boards/{board}/stages/{stage}/paused", put(api::pause_stage))
+        .route("/api/projects/{project}/learnings", get(api::learnings))
         .route("/api/workitems", get(api::list_items))
         .route("/api/workitems/{project}/{dir}", get(api::item))
         .route("/api/workitems/{project}/{dir}/pr", get(api::pr_conversation))
