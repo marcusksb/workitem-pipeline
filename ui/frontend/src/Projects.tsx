@@ -23,6 +23,8 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
   const [error, setError] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [learning, setLearning] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(false);
+  const [agent, setAgent] = useState("");
   const [input, setInput] = useState("");
   const target = selected ?? projects[0]?.name;
   const boards = (pipelines?.[target] ?? []).map((b) => b.name);
@@ -62,6 +64,21 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
     }
   };
 
+  const saveAgent = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
+    try {
+      await api.setAgent(selected, agent);
+      setEditingAgent(false);
+      setError(undefined);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const selectedAgent = projects.find((p) => p.name === selected)?.agent;
+
   const remove = async () => {
     if (!selected || !confirm(`Remove project "${selected}" from the UI? The repo is not touched.`)) return;
     await api.removeProject(selected);
@@ -82,6 +99,19 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
       {selected && (
         <button className="link" onClick={remove}>
           Remove
+        </button>
+      )}
+      {selected && (
+        <button
+          className="link"
+          title="Executable that runs this project's agent sessions"
+          onClick={() => {
+            setError(undefined);
+            setAgent(selectedAgent ?? "");
+            setEditingAgent(true);
+          }}
+        >
+          Agent: {selectedAgent || "default"}
         </button>
       )}
       <button
@@ -139,6 +169,22 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
               </label>
             )}
             <button type="submit">Create</button>
+            {error && <span className="error">{error}</span>}
+          </form>
+        </Dialog>
+      )}
+      {editingAgent && selected && (
+        <Dialog title={`Agent for ${selected}`} onClose={() => setEditingAgent(false)}>
+          <form className="dialog-form" onSubmit={saveAgent}>
+            <label>
+              Executable
+              <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="default (claude)" autoFocus />
+            </label>
+            <span className="hint">
+              One executable on PATH or an absolute path, taking the same arguments as claude. Put flags in a wrapper script. Empty uses
+              the default. Applies to sessions started from now on.
+            </span>
+            <button type="submit">Save</button>
             {error && <span className="error">{error}</span>}
           </form>
         </Dialog>

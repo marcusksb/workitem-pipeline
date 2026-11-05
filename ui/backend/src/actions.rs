@@ -323,7 +323,7 @@ async fn launch_item_session(
     let _busy = state.busy.lock().await;
     let session = format!("wi-{}", item.dir);
     set_status(path, "working").map_err(internal)?;
-    if let Err(e) = launch::spawn(state, &session, &project.repo, Some(&item.dir), prompt).await {
+    if let Err(e) = launch::spawn(state, &session, &project, Some(&item.dir), prompt).await {
         let _ = set_status(path, &item.agent_status);
         return Err(conflict(e));
     }
@@ -443,6 +443,6 @@ pub async fn create(
     let session = format!("wi-new-{}", id.iter().map(|b| format!("{b:02x}")).collect::<String>());
     let prompt = launch::create_prompt(&state, &project, &session, body.input.trim(), &board).map_err(conflict)?;
     let _busy = state.busy.lock().await;
-    launch::spawn(&state, &session, &project.repo, None, &prompt).await.map_err(conflict)?;
+    launch::spawn(&state, &session, &project, None, &prompt).await.map_err(conflict)?;
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }

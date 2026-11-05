@@ -29,6 +29,7 @@ export const api = {
   me: () => request<void>("GET", "/api/me"),
   projects: () => request<Project[]>("GET", "/api/projects"),
   addProject: (name: string, repo: string) => request<Project>("POST", "/api/projects", { name, repo }),
+  setAgent: (name: string, agent: string) => request<Project>("PUT", `/api/projects/${segment(name)}`, { agent }),
   removeProject: (name: string) => request<void>("DELETE", `/api/projects/${segment(name)}`),
   pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
   stageSource: (project: string, board: string, stage: string) =>

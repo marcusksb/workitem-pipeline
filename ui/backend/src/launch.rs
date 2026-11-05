@@ -3,7 +3,7 @@ use std::{ffi::OsString, fs, path::Path};
 use serde_json::json;
 
 use crate::{
-    config::Project,
+    config::{self, Project},
     git,
     locate::{self, Found},
     pipeline::{valid_board_name, Stage, DEFAULT_BOARD},
@@ -21,10 +21,11 @@ use crate::{
 pub async fn spawn(
     state: &AppState,
     session: &str,
-    repo: &Path,
+    project: &Project,
     workitem: Option<&str>,
     prompt: &str,
 ) -> Result<(), String> {
+    let repo = &project.repo;
     let worktree = match workitem {
         Some(dir) => git::worktree_for(&git::worktrees(repo).await, repo, dir).cloned(),
         None => None,
@@ -41,17 +42,18 @@ pub async fn spawn(
     }
     let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
     args.extend(["--settings".into(), hooks.into(), prompt.into()]);
-    start(state, session, repo, worktree.as_deref().unwrap_or(repo), &env, &args).await
+    start(state, session, project, worktree.as_deref().unwrap_or(repo), &env, &args).await
 }
 
 /// Starts a planning session (decision 36) in the repo root: `claude` with the planning settings
 /// and `claude_args` (`--session-id <uuid> <prompt>`, or `--resume <uuid>`). `record` is its plan
 /// record, which the hooks and `workitem-plan-note` update.
-pub async fn spawn_plan(state: &AppState, session: &str, repo: &Path, record: &Path, claude_args: &[&str]) -> Result<(), String> {
+pub async fn spawn_plan(state: &AppState, session: &str, project: &Project, record: &Path, claude_args: &[&str]) -> Result<(), String> {
+    let repo = &project.repo;
     let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_REPO={}", repo.display())];
     let mut args: Vec<OsString> = vec!["--settings".into(), plan_settings(state).into()];
     args.extend(claude_args.iter().map(OsString::from));
-    start(state, session, repo, repo, &env, &args).await
+    start(state, session, project, repo, &env, &args).await
 }
 
 /// Inline `--settings` of a planning session: the helper and file edits run without asking, and
@@ -76,7 +78,14 @@ fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-async fn start(state: &AppState, session: &str, repo: &Path, cwd: &Path, env: &[String], args: &[OsString]) -> Result<(), String> {
+/// Runs the project's agent (decision 39), resolved here because tmux's `PATH` may differ from ours,
+/// or `state.claude` when it has none.
+async fn start(state: &AppState, session: &str, project: &Project, cwd: &Path, env: &[String], args: &[OsString]) -> Result<(), String> {
+    let repo = &project.repo;
+    let agent: OsString = match &project.agent {
+        Some(name) => config::resolve_executable(name).ok_or_else(|| format!("agent '{name}' of project {} not found", project.name))?.into(),
+        None => state.claude.clone().into(),
+    };
     let existing = tmux::sessions(state.tmux_socket.as_deref()).await;
     if let Some(other) = existing.iter().find(|s| s.name == session) {
         return Err(format!("session {session} already exists (repo {})", other.repo.display()));
@@ -86,7 +95,7 @@ async fn start(state: &AppState, session: &str, repo: &Path, cwd: &Path, env: &[
     for var in env {
         command.arg("-e").arg(var);
     }
-    command.arg("--").arg(&state.claude).args(args);
+    command.arg("--").arg(agent).args(args);
     command.args([";", "set-option", tmux::REPO_OPTION]).arg(repo);
     let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"))?;
     if !output.status.success() {

@@ -77,7 +77,8 @@ export type PrNote = {
 
 export type PrConversation = { body: string; notes: PrNote[] };
 
-export type Project = { name: string; repo: string };
+/** `agent`: executable that runs this project's sessions instead of the default `claude`. */
+export type Project = { name: string; repo: string; agent?: string };
 
 export type AgentSession = { project: string; name: string };
 

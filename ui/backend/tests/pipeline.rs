@@ -149,6 +149,18 @@ async fn post(w: &World, uri: &str, json: &str) -> (StatusCode, String) {
     (status, String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned())
 }
 
+async fn put(w: &World, uri: &str, json: &str) -> (StatusCode, String) {
+    let request = Request::put(uri)
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json.to_string()))
+        .unwrap();
+    let response = router(w.state.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    (status, String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned())
+}
+
 async fn get(w: &World, uri: &str) -> String {
     let request = Request::get(uri)
         .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
@@ -181,6 +193,35 @@ async fn dispatcher_runs_handlers_reaps_finished_sessions_and_leaves_blocked_alo
     assert_eq!(stub_log(&w.repo), vec!["T-1-flow backlog", "T-1-flow analyze"]);
     let args = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(!args.contains("Never mock tmux"), "stages that do not write code get no learnings: {args}");
+}
+
+#[tokio::test]
+async fn project_agent_runs_the_handler_instead_of_the_default() {
+    let w = world();
+    // A wrapper like `yolo`: marks that it ran, then hands over to the stub with the same arguments.
+    let agent = w.dir.path().join("my-agent");
+    fs::write(&agent, format!("#!/bin/bash\ntouch \"$WORKITEM_REPO/.agent-ran\"\nexec {} \"$@\"\n", w.state.claude)).unwrap();
+    fs::set_permissions(&agent, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let (status, _) = put(&w, "/api/projects/app", r#"{"agent":"no such agent"}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, body) = put(&w, "/api/projects/app", &serde_json::json!({ "agent": agent }).to_string()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(get(&w, "/api/projects").await.contains("my-agent"));
+
+    write_item(&w.repo, "T-9-agent", "backlog", "");
+    fs::write(w.repo.join(".stub-backlog"), "advance").unwrap();
+    settle(&w).await;
+    eventually("the handler ran and moved the item", || field(&w.repo, "T-9-agent", "stage") == "analyze").await;
+    assert!(w.repo.join(".agent-ran").exists(), "the project's agent ran the handler");
+
+    // Cleared, the next session runs the default again.
+    fs::remove_file(w.repo.join(".agent-ran")).unwrap();
+    assert_eq!(put(&w, "/api/projects/app", r#"{"agent":""}"#).await.0, StatusCode::OK);
+    settle(&w).await;
+    settle(&w).await;
+    eventually("analyze ran", || stub_log(&w.repo).len() == 2).await;
+    assert!(!w.repo.join(".agent-ran").exists());
 }
 
 #[tokio::test]

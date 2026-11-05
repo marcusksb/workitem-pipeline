@@ -92,7 +92,7 @@ pub async fn launch_handler(state: &AppState, project: &Project, item: &Workitem
     let _ = set_status(path, "working");
     let prompt = launch::handler_prompt(state, project, item, stage, instructions);
     let name = format!("wi-{}", item.dir);
-    launch::spawn(state, &name, &project.repo, Some(&item.dir), &prompt).await.map_err(|e| {
+    launch::spawn(state, &name, &project, Some(&item.dir), &prompt).await.map_err(|e| {
         let _ = set_status(path, "ok");
         format!("cannot start {name}: {e}")
     })

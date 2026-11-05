@@ -75,6 +75,24 @@ pub async fn add_project(
     Ok((StatusCode::CREATED, Json(project)))
 }
 
+#[derive(Deserialize)]
+pub struct ProjectChange {
+    agent: String,
+}
+
+/// Sets the project's agent (decision 39); an empty one clears it.
+pub async fn update_project(
+    State(state): State<Shared>,
+    Path(name): Path<String>,
+    Json(body): Json<ProjectChange>,
+) -> Result<Json<Project>, ApiError> {
+    match state.store.set_agent(&name, &body.agent) {
+        Ok(Some(project)) => Ok(Json(project)),
+        Ok(None) => Err(ApiError::not_found("project")),
+        Err(e) => Err(ApiError(StatusCode::BAD_REQUEST, e)),
+    }
+}
+
 pub async fn remove_project(State(state): State<Shared>, Path(name): Path<String>) -> Result<StatusCode, ApiError> {
     match state.store.remove_project(&name) {
         Ok(true) => Ok(StatusCode::NO_CONTENT),

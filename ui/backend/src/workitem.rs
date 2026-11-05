@@ -203,7 +203,7 @@ mod tests {
     use super::*;
 
     fn project(repo: &std::path::Path) -> Project {
-        Project { name: "app".into(), repo: repo.to_path_buf() }
+        Project { name: "app".into(), repo: repo.to_path_buf(), agent: None }
     }
 
     #[test]

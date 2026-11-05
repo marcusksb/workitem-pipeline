@@ -20,7 +20,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
     middleware,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Router,
 };
 
@@ -78,7 +78,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/login", post(api::login))
         .route("/api/me", get(api::me))
         .route("/api/projects", get(api::list_projects).post(api::add_project))
-        .route("/api/projects/{name}", delete(api::remove_project))
+        .route("/api/projects/{name}", put(api::update_project).delete(api::remove_project))
         .route("/api/pipelines", get(api::pipelines))
         .route("/api/projects/{project}/boards/{board}/stages/{stage}/source", get(api::stage_source))
         .route("/api/projects/{project}/boards/{board}/stages/{stage}/paused", put(api::pause_stage))
