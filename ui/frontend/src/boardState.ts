@@ -178,6 +178,7 @@ export const KIND_ICONS: Record<string, string> = {
   test: "🧪",
   spike: "🔬",
   question: "❓",
+  review: "👀",
 };
 
 /** The `key: value` lines of the leading frontmatter block, in file order. */
