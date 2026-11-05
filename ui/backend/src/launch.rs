@@ -6,7 +6,7 @@ use crate::{
     config::Project,
     git,
     locate::{self, Found},
-    pipeline::{Stage, DEFAULT_BOARD},
+    pipeline::{valid_board_name, Stage, DEFAULT_BOARD},
     tmux,
     workitem::{self, Workitem},
     AppState,
@@ -159,15 +159,22 @@ Move it with python3 {mv} {file} <stage>. Only workitem-move changes stage:.\n",
     )
 }
 
-/// `<workitems dir>/learnings.md`: rules the review fixers wrote down from past review comments.
-pub fn learnings_file(repo: &Path) -> std::path::PathBuf {
-    workitem::workitems_dir(repo).join("learnings.md")
+/// The learnings of `board`: rules written down from past reviews, by the review fixers or by hand.
+/// `<workitems dir>/learnings.md` for the default board, `boards/<board>/learnings.md` for the
+/// others. Boards do not share a file. `None` for a board name that is not a plain name.
+pub fn learnings_file(repo: &Path, board: &str) -> Option<std::path::PathBuf> {
+    let dir = workitem::workitems_dir(repo);
+    if board == DEFAULT_BOARD {
+        Some(dir.join("learnings.md"))
+    } else {
+        valid_board_name(board).then(|| dir.join("boards").join(board).join("learnings.md"))
+    }
 }
 
-/// The learnings as a prompt block for sessions that write code, or nothing when the file is
-/// missing or holds only headings.
-pub fn learnings(repo: &Path) -> String {
-    let text = fs::read_to_string(learnings_file(repo)).unwrap_or_default();
+/// The learnings of `board` as a prompt block, or nothing when the file is missing or holds only
+/// headings.
+pub fn learnings(repo: &Path, board: &str) -> String {
+    let text = learnings_file(repo, board).and_then(|f| fs::read_to_string(f).ok()).unwrap_or_default();
     if !text.lines().any(|l| !l.trim().is_empty() && !l.starts_with('#')) {
         return String::new();
     }
@@ -179,14 +186,15 @@ pub fn learnings(repo: &Path) -> String {
 }
 
 /// The step that has a review fixer write down what generalises from the comments it acted on.
-fn record_learnings(repo: &Path) -> String {
+fn record_learnings(repo: &Path, board: &str) -> String {
+    let Some(file) = learnings_file(repo, board) else { return String::new() };
     format!(
         "Record learnings in {file}: for each comment you acted on whose lesson applies beyond this PR and is not \
 already covered by the repo's CLAUDE.md/AGENTS.md or an entry in that file, add one bullet written as a rule, ending with \
 (source: <comment url>). If an entry already says the same, append the new source link to it instead. \
 Create the file with a # Learnings heading if it is missing. Most runs add nothing. \
 If the edit fails because the file changed, read it again and retry.",
-        file = learnings_file(repo).display(),
+        file = file.display(),
     )
 }
 
@@ -212,7 +220,7 @@ agent_status line. Do not change code.\n"
 {rules}{learnings}{protocol}\
 When you are done, make sure agent_status is ok (a stage move does this).{kill}",
         context = stage_context(state, project, item, stage),
-        learnings = if stage.develops() { learnings(&project.repo) } else { String::new() },
+        learnings = if stage.develops() || stage.learnings { learnings(&project.repo, &item.board) } else { String::new() },
         protocol = protocol(&session),
     )
 }
@@ -251,7 +259,7 @@ If the brief changes while the workitem is approved, say so: the human decides w
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR has red CI.
-pub fn ci_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
+pub fn ci_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
     let session = format!("wi-{dir}");
     let worktree = git::worktree_path(repo, dir);
     format!(
@@ -268,13 +276,13 @@ Never change stage:.\n\
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
-        learnings = learnings(repo),
+        learnings = learnings(repo, board),
         protocol = protocol(&session),
     )
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR has a changes-requested review.
-pub fn changes_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
+pub fn changes_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
     let session = format!("wi-{dir}");
     let worktree = git::worktree_path(repo, dir);
     format!(
@@ -294,14 +302,14 @@ Never change stage:.\n\
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
-        record = record_learnings(repo),
-        learnings = learnings(repo),
+        record = record_learnings(repo, board),
+        learnings = learnings(repo, board),
         protocol = protocol(&session),
     )
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR gets new comments that ask for a change.
-pub fn comments_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
+pub fn comments_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
     let session = format!("wi-{dir}");
     let worktree = git::worktree_path(repo, dir);
     format!(
@@ -326,14 +334,14 @@ Never change stage:.\n\
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
-        record = record_learnings(repo),
-        learnings = learnings(repo),
+        record = record_learnings(repo, board),
+        learnings = learnings(repo, board),
         protocol = protocol(&session),
     )
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR conflicts with its base.
-pub fn conflict_fix_prompt(dir: &str, repo: &Path, pr: &str) -> String {
+pub fn conflict_fix_prompt(dir: &str, repo: &Path, board: &str, pr: &str) -> String {
     let session = format!("wi-{dir}");
     let worktree = git::worktree_path(repo, dir);
     format!(
@@ -352,7 +360,7 @@ Never change stage:.\n\
         file = workitem::file(repo, dir).display(),
         worktree = worktree.display(),
         repo = repo.display(),
-        learnings = learnings(repo),
+        learnings = learnings(repo, board),
         protocol = protocol(&session),
     )
 }
@@ -380,35 +388,56 @@ mod tests {
         let repo = Path::new("/r/proj");
         let want = "/r/proj/.workitems/item-1/workitem.md";
         for prompt in [
-            ci_fix_prompt("item-1", repo, "#7"),
-            changes_fix_prompt("item-1", repo, "#7"),
-            comments_fix_prompt("item-1", repo, "#7"),
-            conflict_fix_prompt("item-1", repo, "#7"),
+            ci_fix_prompt("item-1", repo, "default", "#7"),
+            changes_fix_prompt("item-1", repo, "default", "#7"),
+            comments_fix_prompt("item-1", repo, "default", "#7"),
+            conflict_fix_prompt("item-1", repo, "default", "#7"),
         ] {
             assert!(prompt.contains(want), "missing workitem path in: {prompt}");
         }
     }
 
     #[test]
-    fn learnings_are_empty_without_a_file_or_rules() {
-        let repo = tempfile::tempdir().unwrap();
-        assert_eq!(learnings(repo.path()), "");
-        fs::create_dir_all(repo.path().join(".workitems")).unwrap();
-        fs::write(repo.path().join(".workitems/learnings.md"), "# Learnings\n\n").unwrap();
-        assert_eq!(learnings(repo.path()), "", "a header alone adds nothing");
+    fn each_board_has_its_own_learnings_file() {
+        let repo = Path::new("/r/proj");
+        assert_eq!(learnings_file(repo, "default").unwrap(), Path::new("/r/proj/.workitems/learnings.md"));
+        assert_eq!(learnings_file(repo, "pr-review").unwrap(), Path::new("/r/proj/.workitems/boards/pr-review/learnings.md"));
+        assert_eq!(learnings_file(repo, "../x"), None, "a board name never leaves the boards folder");
     }
 
     #[test]
-    fn every_fixer_gets_the_learnings_and_review_fixers_write_them() {
+    fn learnings_are_empty_without_a_file_or_rules() {
         let repo = tempfile::tempdir().unwrap();
+        assert_eq!(learnings(repo.path(), "default"), "");
         fs::create_dir_all(repo.path().join(".workitems")).unwrap();
-        fs::write(repo.path().join(".workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
-        let file = repo.path().join(".workitems/learnings.md");
+        fs::write(repo.path().join(".workitems/learnings.md"), "# Learnings\n\n").unwrap();
+        assert_eq!(learnings(repo.path(), "default"), "", "a header alone adds nothing");
+        assert_eq!(learnings(repo.path(), "../x"), "");
+    }
+
+    #[test]
+    fn a_board_does_not_get_the_default_boards_learnings() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join(".workitems/boards/pr-review")).unwrap();
+        fs::write(repo.path().join(".workitems/learnings.md"), "- Dev rule.\n").unwrap();
+        fs::write(repo.path().join(".workitems/boards/pr-review/learnings.md"), "- Review rule.\n").unwrap();
+        let review = learnings(repo.path(), "pr-review");
+        assert!(review.contains("- Review rule.") && !review.contains("Dev rule"), "{review}");
+    }
+
+    #[test]
+    fn every_fixer_gets_its_boards_learnings_and_review_fixers_write_them() {
+        let repo = tempfile::tempdir().unwrap();
+        fs::create_dir_all(repo.path().join(".workitems/boards/ops")).unwrap();
+        fs::write(repo.path().join(".workitems/learnings.md"), "- Dev rule.\n").unwrap();
+        fs::write(repo.path().join(".workitems/boards/ops/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
+        let file = repo.path().join(".workitems/boards/ops/learnings.md");
         let file = file.display().to_string();
-        let review = [changes_fix_prompt("i", repo.path(), "#7"), comments_fix_prompt("i", repo.path(), "#7")];
-        let other = [ci_fix_prompt("i", repo.path(), "#7"), conflict_fix_prompt("i", repo.path(), "#7")];
+        let review = [changes_fix_prompt("i", repo.path(), "ops", "#7"), comments_fix_prompt("i", repo.path(), "ops", "#7")];
+        let other = [ci_fix_prompt("i", repo.path(), "ops", "#7"), conflict_fix_prompt("i", repo.path(), "ops", "#7")];
         for prompt in review.iter().chain(&other) {
             assert!(prompt.contains("--- learnings ---\n# Learnings\n\n- Never mock tmux.\n--- end of learnings ---"), "{prompt}");
+            assert!(!prompt.contains("Dev rule"), "{prompt}");
         }
         for prompt in &review {
             assert!(prompt.contains(&format!("Record learnings in {file}")), "{prompt}");

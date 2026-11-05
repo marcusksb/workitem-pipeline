@@ -110,6 +110,9 @@ pub struct Stage {
     /// Start the handler at most once per entry into the stage.
     #[serde(default)]
     pub once: bool,
+    /// Give the handler the board's learnings (`develops` stages always get them).
+    #[serde(default, skip_serializing)]
+    pub learnings: bool,
     /// Start the handler only for items whose frontmatter has all of these values.
     #[serde(default, skip_serializing)]
     pub when: HashMap<String, String>,

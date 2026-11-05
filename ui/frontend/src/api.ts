@@ -35,7 +35,10 @@ export const api = {
     request<StageSource>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
   pauseStage: (project: string, board: string, stage: string, paused: boolean) =>
     request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/paused`, { paused }),
-  learnings: (project: string) => request<Learnings>("GET", `/api/projects/${segment(project)}/learnings`),
+  learnings: (project: string, board: string) =>
+    request<Learnings>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/learnings`),
+  saveLearnings: (project: string, board: string, base: string, content: string) =>
+    request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/learnings`, { base, content }),
   items: () => request<Item[]>("GET", "/api/workitems"),
   detail: (project: string, dir: string) =>
     request<Detail>("GET", `/api/workitems/${segment(project)}/${segment(dir)}`),

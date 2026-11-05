@@ -110,7 +110,9 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
           Learnings
         </button>
       )}
-      {learning && target && <Learnings project={target} onClose={() => setLearning(false)} />}
+      {learning && target && (
+        <Learnings project={target} board={shown && boards.includes(shown) ? shown : DEFAULT_BOARD} onClose={() => setLearning(false)} />
+      )}
       {creating && target && (
         <Dialog title={`New workitem in ${target}`} onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={create}>

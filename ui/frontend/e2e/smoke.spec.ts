@@ -1,7 +1,7 @@
 // Runs the built backend against a real tmux session; needs `cargo build` and `npm run build` first.
 import { expect, test } from "@playwright/test";
 import { ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -256,7 +256,7 @@ test("the Files tab lists the workitem folder and previews a file", async ({ pag
   expect(await raw.text()).toContain("the cache is stale");
 });
 
-test("the Learnings button shows the project's learnings.md", async ({ page }) => {
+test("the Learnings button shows and edits the learnings of the board on screen", async ({ page }) => {
   await page.goto(base);
   await expect(page.locator(".board")).toContainText("Brief waiting");
   await page.getByRole("button", { name: "Learnings", exact: true }).click();
@@ -264,6 +264,21 @@ test("the Learnings button shows the project's learnings.md", async ({ page }) =
   await expect(dialog.getByRole("listitem")).toContainText("Never mock tmux in tests.");
   await expect(dialog.getByRole("link", { name: /pull\/42/ })).toHaveAttribute("target", "_blank");
   await expect(dialog.locator(".source-path code")).toContainText("learnings.md");
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  // Another board has its own file, empty until you add a rule.
+  await page.getByRole("tablist").getByRole("tab", { name: "research" }).click();
+  await page.getByRole("button", { name: "Learnings", exact: true }).click();
+  const research = page.getByRole("dialog", { name: "Learnings in demo · research" });
+  await expect(research.locator(".source-path code")).toContainText("boards/research/learnings.md");
+  await expect(research).toContainText("No learnings yet");
+  await research.getByRole("button", { name: "Edit" }).click();
+  const editor = research.getByRole("textbox", { name: "Learnings" });
+  await expect(editor).toHaveValue("# Learnings\n\n");
+  await editor.fill("# Learnings\n\n- Flag only real bugs.\n");
+  await research.getByRole("button", { name: "Save" }).click();
+  await expect(research.getByRole("listitem")).toHaveText("Flag only real bugs.");
+  expect(readFileSync(join(repo, ".claude/workitems/boards/research/learnings.md"), "utf8")).toBe("# Learnings\n\n- Flag only real bugs.\n");
   await page.screenshot({ path: process.env.LEARNINGS_SHOT ?? join(tmpdir(), "learnings.png") });
 });
 

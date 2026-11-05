@@ -260,10 +260,10 @@ pub async fn fix(
         return Err(conflict(format!("{dir} is {}, not ok", item.agent_status)));
     }
     let prompt = match kind.as_str() {
-        "ci" => launch::ci_fix_prompt(&dir, &project.repo, &item.pr),
-        "conflict" => launch::conflict_fix_prompt(&dir, &project.repo, &item.pr),
-        "changes" => launch::changes_fix_prompt(&dir, &project.repo, &item.pr),
-        "comments" => launch::comments_fix_prompt(&dir, &project.repo, &item.pr),
+        "ci" => launch::ci_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
+        "conflict" => launch::conflict_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
+        "changes" => launch::changes_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
+        "comments" => launch::comments_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
     launch_item_session(&state, &project, &path, &item, &prompt).await

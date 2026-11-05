@@ -3,36 +3,101 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api } from "./api";
+import { DEFAULT_BOARD } from "./boardState";
 import { Dialog } from "./Dialog";
+import { IconCheck, IconX } from "./icons";
 import { markdownLinks } from "./markdownLinks";
 import { Learnings as Data } from "./types";
 
-type Props = { project: string; onClose: () => void };
+type Props = { project: string; board: string; onClose: () => void };
 
-/** A project's `learnings.md`, read-only: the rules review fixers wrote down. Edit the file to prune it. */
-export function Learnings({ project, onClose }: Props) {
+const NEW_FILE = "# Learnings\n\n";
+
+/** A board's `learnings.md`: the rules review fixers wrote down, and the human adds or prunes.
+ * Saving sends the text the editor started from; the backend refuses if a fixer changed it since. */
+export function Learnings({ project, board, onClose }: Props) {
   const [data, setData] = useState<Data>();
   const [error, setError] = useState<string>();
+  const [text, setText] = useState<string>();
+  const [busy, setBusy] = useState(false);
 
+  const load = () =>
+    api.learnings(project, board).then(setData, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   useEffect(() => {
-    api.learnings(project).then(setData, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, [project]);
+    void load();
+  }, [project, board]);
 
+  const editing = text !== undefined && data !== undefined;
+  const changed = editing && text !== (data.content || NEW_FILE);
+  const save = async () => {
+    if (!editing) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api.saveLearnings(project, board, data.content, text);
+      setText(undefined);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
+  const close = () => {
+    if (!changed || confirm("Discard your changes to the learnings?")) onClose();
+  };
+
+  const title = board === DEFAULT_BOARD ? `Learnings in ${project}` : `Learnings in ${project} · ${board}`;
   return (
-    <Dialog title={`Learnings in ${project}`} onClose={onClose}>
-      <div className="source">
+    <Dialog title={title} onClose={close}>
+      <div className="source learnings">
         {data && (
           <p className="source-path">
             <code title={data.path}>{data.path}</code>
           </p>
         )}
-        {error && <p className="error">{error}</p>}
-        {!data && !error && <p className="empty">Loading…</p>}
-        {data && !data.content.trim() && <p className="empty">No learnings yet. Review fixers add them when a comment applies beyond its PR.</p>}
-        {data && data.content.trim() && (
-          <div className="file-markdown learnings-body">
-            <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{data.content}</Markdown>
+        {data && (
+          <div className="action-bar">
+            {editing ? (
+              <>
+                <button className="primary" disabled={busy || !changed} onClick={() => void save()}>
+                  <IconCheck />
+                  Save
+                </button>
+                <button disabled={busy} onClick={() => (!changed || confirm("Discard your changes?")) && setText(undefined)}>
+                  <IconX />
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setText(data.content || NEW_FILE)}>Edit</button>
+            )}
+            {error && <span className="error">{error}</span>}
           </div>
+        )}
+        {!data && !error && <p className="empty">Loading…</p>}
+        {!data && error && <p className="error">{error}</p>}
+        {editing ? (
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                if (!busy && changed) void save();
+              }
+            }}
+            aria-label="Learnings"
+            spellCheck
+            autoFocus
+          />
+        ) : data && !data.content.trim() ? (
+          <p className="empty">No learnings yet. Review fixers add them, or add your own with Edit.</p>
+        ) : (
+          data && (
+            <div className="file-markdown learnings-body">
+              <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{data.content}</Markdown>
+            </div>
+          )
         )}
       </div>
     </Dialog>

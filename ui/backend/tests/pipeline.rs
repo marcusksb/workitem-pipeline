@@ -1378,17 +1378,66 @@ async fn the_default_board_can_live_in_the_boards_folder() {
 }
 
 #[tokio::test]
-async fn learnings_show_the_project_file_or_nothing() {
+async fn learnings_are_read_and_saved_per_board() {
     let w = world();
-    fs::create_dir_all(w.repo.join(".claude/workitems")).unwrap();
-    let read = || async { serde_json::from_str::<serde_json::Value>(&get(&w, "/api/projects/app/learnings").await).unwrap() };
+    let boards = w.repo.join(".claude/workitems/boards");
+    fs::create_dir_all(&boards).unwrap();
+    fs::write(boards.join("review.json"), board(r#"[{"name":"qa"}]"#)).unwrap();
+    let read = |board: &'static str| {
+        let w = &w;
+        async move { serde_json::from_str::<serde_json::Value>(&get(w, &format!("/api/projects/app/boards/{board}/learnings")).await).unwrap() }
+    };
+    let save = |board: &str, base: &str, content: &str| {
+        let request = Request::put(format!("/api/projects/app/boards/{board}/learnings"))
+            .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+            .header(header::COOKIE, format!("wi_session={}", w.token))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::json!({ "base": base, "content": content }).to_string()))
+            .unwrap();
+        router(w.state.clone()).oneshot(request)
+    };
 
-    let none = read().await;
+    let none = read("review").await;
     assert_eq!(none["content"], "", "no file yet");
-    assert!(none["path"].as_str().unwrap().ends_with(".claude/workitems/learnings.md"));
+    assert!(none["path"].as_str().unwrap().ends_with(".claude/workitems/boards/review/learnings.md"));
+    assert!(read("default").await["path"].as_str().unwrap().ends_with(".claude/workitems/learnings.md"));
 
-    fs::write(w.repo.join(".claude/workitems/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
-    assert_eq!(read().await["content"], "# Learnings\n\n- Never mock tmux.\n");
+    assert_eq!(save("review", "", "# Learnings\n\n- Flag only real bugs.\n").await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(fs::read_to_string(boards.join("review/learnings.md")).unwrap(), "# Learnings\n\n- Flag only real bugs.\n");
+    assert_eq!(read("review").await["content"], "# Learnings\n\n- Flag only real bugs.\n");
+    assert_eq!(read("default").await["content"], "", "boards do not share a file");
+
+    let stale = save("review", "", "- Mine.\n").await.unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT, "a fixer's edit since opening the editor is never overwritten");
+    assert_eq!(read("review").await["content"], "# Learnings\n\n- Flag only real bugs.\n");
+
+    assert_eq!(save("nope", "", "- x\n").await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(save("..", "", "- x\n").await.unwrap().status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_stage_with_learnings_gets_its_boards_file() {
+    let w = world();
+    let boards = w.repo.join(".claude/workitems/boards");
+    fs::create_dir_all(boards.join("review")).unwrap();
+    fs::write(
+        boards.join("review.json"),
+        board(r#"[{"name":"qa","handler":"my-qa","auto":true,"learnings":true,"next":["post"]},{"name":"post","handler":"my-qa","auto":true}]"#),
+    )
+    .unwrap();
+    write_skill(&boards.join("review/skills"), "my-qa", "REVIEW QA\n");
+    fs::write(boards.join("review/learnings.md"), "- Flag only real bugs.\n").unwrap();
+    fs::write(w.repo.join(".claude/workitems/learnings.md"), "- Dev rule.\n").unwrap();
+    write_item(&w.repo, "T-60-qa", "qa", "board: review\n");
+    write_item(&w.repo, "T-61-post", "post", "board: review\n");
+
+    settle(&w).await;
+    eventually("both handlers ran", || stub_log(&w.repo).len() == 2).await;
+    let prompts: Vec<String> = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect();
+    let qa = prompts.iter().find(|p| p.contains("Current stage: qa")).unwrap();
+    let post = prompts.iter().find(|p| p.contains("Current stage: post")).unwrap();
+    assert!(qa.contains("- Flag only real bugs.") && !qa.contains("Dev rule"), "{qa}");
+    assert!(!post.contains("Flag only real bugs"), "a stage without the key gets none: {post}");
 }
 
 #[tokio::test]

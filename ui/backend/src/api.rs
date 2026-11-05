@@ -271,12 +271,44 @@ pub struct Learnings {
     content: String,
 }
 
-/// The project's `learnings.md`, which the review fixers write and code-writing sessions get.
-pub async fn learnings(State(state): State<Shared>, Path(project): Path<String>) -> Result<Json<Learnings>, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    let path = launch::learnings_file(&project.repo);
+/// The `learnings.md` of a board that exists in the project.
+fn learnings_path(state: &AppState, project: &str, board: &str) -> Result<std::path::PathBuf, ApiError> {
+    let project = state.store.project(project).ok_or(ApiError::not_found("project"))?;
+    state.pipeline(&project, board).pipeline.ok_or(ApiError::not_found("board"))?;
+    launch::learnings_file(&project.repo, board).ok_or(ApiError::not_found("board"))
+}
+
+/// A board's learnings, which the review fixers write and code-writing sessions get.
+pub async fn learnings(State(state): State<Shared>, Path((project, board)): Path<(String, String)>) -> Result<Json<Learnings>, ApiError> {
+    let path = learnings_path(&state, &project, &board)?;
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     Ok(Json(Learnings { path: path.display().to_string(), content }))
+}
+
+#[derive(Deserialize)]
+pub struct LearningsEdit {
+    /// The content the editor started from; empty for a file that did not exist.
+    base: String,
+    content: String,
+}
+
+/// Saves a board's learnings, unless the file changed since the editor opened (a fixer may have
+/// added a rule meanwhile).
+pub async fn save_learnings(
+    State(state): State<Shared>,
+    Path((project, board)): Path<(String, String)>,
+    Json(edit): Json<LearningsEdit>,
+) -> Result<StatusCode, ApiError> {
+    let path = learnings_path(&state, &project, &board)?;
+    let internal = |e: std::io::Error| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {e}", path.display()));
+    if std::fs::read_to_string(&path).unwrap_or_default() != edit.base {
+        return Err(ApiError(StatusCode::CONFLICT, "the learnings changed since you opened the editor; copy your text and reload".into()));
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(internal)?;
+    }
+    std::fs::write(&path, edit.content).map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]
