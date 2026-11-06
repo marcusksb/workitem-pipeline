@@ -20,11 +20,16 @@ can be reopened, so it is still read), it writes these frontmatter keys, only wh
   pr_activity_at      the latest of: PR opened, last commit, human review, human comment; bots and
                       pr-remind's own comments do not count (pr-remind)
   pr_unseen_comments  ids of comments that ask for a change and are not in pr_seen_comments
+  pr_updated_at       GitHub's updatedAt of the PR; inline review comments are read only when it moves
   pr_checked_at       when it read the PR (UTC): with every change, and on every reading while
                       pr-review waits for one newer than pr_fix_ended_at. Not on every run:
                       agents that read the file are told about each write.
 The first reading of an item puts the comments already there into pr_seen_comments, so only new
 ones are unseen. It starts nothing; watch/pr-review reacts to these keys.
+
+It reads every PR of a repo in one GraphQL query per CHUNK PRs: GitHub charges a query by the
+connections it asks for, not per PR, so a whole board costs about a point a run. Review threads
+are the expensive part (a connection per thread), hence the second query only for moved PRs.
 """
 import json, os, subprocess, sys, time
 from datetime import datetime, timezone
@@ -37,16 +42,18 @@ from workitem_fields import read_fields, set_fields  # noqa: E402
 
 FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
 PENDING = ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED", "EXPECTED")
-VIEW_FIELDS = "state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
 REMIND_MARKER = "<!-- pr-remind -->"
-ACTIVITY_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
-    createdAt
-    commits(last: 1) { nodes { commit { committedDate } } }
-    comments(last: 100) { nodes { createdAt body author { __typename login } } }
-    reviews(last: 100) { nodes { submittedAt body author { __typename login } } }
-  } }
-}"""
+# NUMBER is the PR's number; isRequired needs it.
+PULL_FIELDS = """number state isDraft mergeable reviewDecision headRefOid createdAt updatedAt
+  commits(last: 1) { nodes { commit { committedDate statusCheckRollup { contexts(first: 100) { nodes {
+    ... on CheckRun { name status conclusion isRequired(pullRequestNumber: NUMBER) }
+    ... on StatusContext { context state isRequired(pullRequestNumber: NUMBER) }
+  } } } } } }
+  comments(last: 100) { nodes { id createdAt body author { __typename login } } }
+  reviews(last: 100) { nodes { id state submittedAt body author { __typename login } } }"""
+THREAD_FIELDS = """reviewThreads(first: 100) { nodes { comments(first: 100) { nodes {
+  databaseId body author { login } replyTo { databaseId } } } } }"""
+CHUNK = 25
 UNKNOWN_RETRIES = 3
 UNKNOWN_RETRY_WAIT = 2
 
@@ -87,21 +94,13 @@ def failed_checks(checks):
     return names
 
 
-def required_ci_of(checks):
-    """`gh pr checks --required` buckets as pr_ci values; pending wins as in ci_of."""
-    buckets = {c.get("bucket") for c in checks}
-    if not buckets:
-        return "none"
-    return "pending" if "pending" in buckets else "failing" if buckets & {"fail", "cancel"} else "passing"
-
-
 def is_bot(author):
     login = (author or {}).get("login") or ""
     return (author or {}).get("__typename") == "Bot" or login.endswith("[bot]")
 
 
 def activity_of(pull):
-    """The latest human sign of life on the PR (GraphQL pullRequest, see ACTIVITY_QUERY)."""
+    """The latest human sign of life on the PR (a node of PULL_FIELDS)."""
     times = [pull.get("createdAt") or ""]
     times += [n["commit"]["committedDate"] for n in pull["commits"]["nodes"]]
     for kind, at in (("comments", "createdAt"), ("reviews", "submittedAt")):
@@ -163,56 +162,102 @@ def review_comments(raw, me):
     return ids
 
 
-def gh(args, ok_codes=(0,)):
-    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
-    if result.returncode not in ok_codes or not result.stdout.strip():
-        raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
-    return json.loads(result.stdout)
-
-
-def required_checks(pr):
-    """gh exits 1 on a red check and 8 on a pending one, and still prints them."""
+def graphql(query):
+    """The data of a GraphQL query and the messages of its partial errors (a missing PR, say)."""
+    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), "api", "graphql", "-f", f"query={query}"],
+                            capture_output=True, text=True, timeout=60)
     try:
-        return gh(["pr", "checks", pr, "--required", "--json", "name,state,bucket"], ok_codes=(0, 1, 8))
-    except RuntimeError as e:
-        if "no required checks" in str(e):
-            return []
-        raise
+        body = json.loads(result.stdout or "{}")
+    except ValueError:
+        body = {}
+    errors = [e.get("message", "") for e in body.get("errors") or []]
+    if not body.get("data"):
+        raise RuntimeError("; ".join(errors) or result.stderr.strip() or f"gh exited with {result.returncode}")
+    return body["data"], errors
 
 
-def activity(pr):
-    owner, repo, _, number = pr.rstrip("/").split("/")[-4:]
-    data = gh(["api", "graphql", "-f", f"query={ACTIVITY_QUERY}", "-f", f"owner={owner}", "-f", f"repo={repo}",
-               "-F", f"number={number}"])
-    return activity_of(data["data"]["repository"]["pullRequest"])
+def read_pulls(urls, fields):
+    """The `fields` of each PR, CHUNK PRs of a repo per query: ({url: node or error}, my login)."""
+    by_repo = {}
+    for url in urls:
+        owner, repo, _, number = url.rstrip("/").split("/")[-4:]
+        by_repo.setdefault((owner, repo), {})[int(number)] = url
+    found, me = {}, None
+    for (owner, repo), prs in by_repo.items():
+        numbers = sorted(prs)
+        for chunk in (numbers[i:i + CHUNK] for i in range(0, len(numbers), CHUNK)):
+            pulls = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields.replace('NUMBER', str(n))} }}" for n in chunk)
+            query = (f"query {{ viewer {{ login }} repository(owner: {json.dumps(owner)}, name: {json.dumps(repo)}) "
+                     f"{{ {pulls} }} }}")
+            try:
+                data, errors = graphql(query)
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                found.update({prs[n]: e for n in chunk})
+                continue
+            me = data["viewer"]["login"]
+            for n in chunk:
+                node = (data.get("repository") or {}).get(f"p{n}")
+                found[prs[n]] = node or RuntimeError("; ".join(errors) or "no such PR")
+    return found, me
 
 
-def fetch(pr):
+def read_open_pulls(urls):
     """GitHub says UNKNOWN while it computes mergeability; asking again a moment later helps."""
-    raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
+    pulls, me = read_pulls(urls, PULL_FIELDS)
     for _ in range(UNKNOWN_RETRIES):
-        if raw.get("mergeable") != "UNKNOWN":
+        computing = [u for u, n in pulls.items() if isinstance(n, dict) and n["state"] == "OPEN" and n["mergeable"] == "UNKNOWN"]
+        if not computing:
             break
         time.sleep(UNKNOWN_RETRY_WAIT)
-        raw = gh(["pr", "view", pr, "--json", VIEW_FIELDS])
-    return raw
+        again, _ = read_pulls(computing, PULL_FIELDS)
+        pulls.update({u: n for u, n in again.items() if isinstance(n, dict)})
+    return pulls, me
 
 
-def change_comments(pr, raw, me):
-    """Ids of the comments and reviews on the PR that ask for a change."""
-    number = pr.rstrip("/").rsplit("/", 1)[-1]
-    pages = gh(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}/comments", "--paginate", "--slurp"])
+def view_of(pull):
+    """A PULL_FIELDS node with its connections as plain lists, the checks of the head commit."""
+    commits = pull["commits"]["nodes"]
+    rollup = commits[0]["commit"].get("statusCheckRollup") if commits else None
+    return {**pull, "statusCheckRollup": rollup["contexts"]["nodes"] if rollup else [],
+            "comments": pull["comments"]["nodes"], "reviews": pull["reviews"]["nodes"]}
+
+
+def inline_comments(threads, me):
+    """Ids of the inline review comments (a THREAD_FIELDS node) that ask for a change."""
     ids = []
-    for page in pages:
-        for c in page:
-            author = login_of(c.get("user"))
-            if author and asks_for_change(author, c.get("body") or "", me, True, c.get("in_reply_to_id") is not None):
-                ids.append(f"inline-{c['id']}")
-    for c in raw.get("comments") or []:
-        author = login_of(c.get("author"))
-        if author and asks_for_change(author, c.get("body") or "", me, False, False):
-            ids.append(c["id"])
+    for thread in threads["reviewThreads"]["nodes"]:
+        for c in thread["comments"]["nodes"]:
+            author = login_of(c.get("author"))
+            if author and asks_for_change(author, c.get("body") or "", me, True, c.get("replyTo") is not None):
+                ids.append(f"inline-{c['databaseId']}")
+    return ids
+
+
+def change_comments(raw, me):
+    """Ids of the PR-level comments and reviews that ask for a change."""
+    ids = [c["id"] for c in raw.get("comments") or []
+           if login_of(c.get("author")) and asks_for_change(login_of(c["author"]), c.get("body") or "", me, False, False)]
     return ids + review_comments(raw, me)
+
+
+def updates_of(pull, threads, fields, me, ignore):
+    """The frontmatter of one PR. `threads` is None when the PR has not moved since the last
+    reading; the inline comments still unseen then stay so."""
+    for found in (pull, threads):
+        if isinstance(found, Exception):
+            raise found
+    if pull["state"] in ("MERGED", "CLOSED"):
+        return {"pr_state": pull["state"].lower()}
+    if pull["state"] != "OPEN":
+        raise RuntimeError(f"unknown PR state {pull['state']}")
+    raw = view_of(pull)
+    if threads is None:
+        inline = [i for i in id_list(fields.get("pr_unseen_comments")) if i.startswith("inline-")]
+    else:
+        inline = inline_comments(threads, me)
+    return {**facts_of(raw, me, ignore), "pr_ci_required": ci_of([c for c in raw["statusCheckRollup"] if c.get("isRequired")]),
+            "pr_activity_at": activity_of(pull), "pr_updated_at": pull["updatedAt"],
+            **comment_updates(fields, inline + change_comments(raw, me))}
 
 
 def id_list(value):
@@ -249,50 +294,14 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-class Reader:
-    def __init__(self, ignore):
-        self.ignore = ignore
-        self.root = os.environ["WORKITEM_DIR_ROOT"]
-        self._me = None
-
-    def me(self):
-        if self._me is None:
-            try:
-                self._me = gh(["api", "user"])["login"]
-            except (RuntimeError, KeyError, ValueError):
-                self._me = ""
-        return self._me
-
-    def check(self, item):
-        path = os.path.join(self.root, item["dir"], "workitem.md")
-        fields = read_fields(path)
-        pr = item["pr"]
-        if fields.get("pr_url", pr) != pr:
-            set_fields(path, {k: None for k in fields if k.startswith("pr_")})
-            fields = read_fields(path)
-        elif fields.get("pr_state") == "merged":
-            return
-        try:
-            updates = self.read(pr, fields)
-        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
-            print(f"cannot read the PR of {item['dir']}: {e}", file=sys.stderr)
-            return
-        updates = changed(fields, {"pr_url": pr, **updates})
-        stamp = now()
-        if updates.get("pr_head") or (fields.get("pr_head") and "pr_head_at" not in fields):
-            updates["pr_head_at"] = stamp
-        if updates or awaits_reading(fields):
-            updates["pr_checked_at"] = stamp
-        set_fields(path, updates)
-
-    def read(self, pr, fields):
-        raw = fetch(pr)
-        if raw["state"] in ("MERGED", "CLOSED"):
-            return {"pr_state": raw["state"].lower()}
-        if raw["state"] != "OPEN":
-            raise RuntimeError(f"unknown PR state {raw['state']}")
-        return {**facts_of(raw, self.me(), self.ignore), "pr_ci_required": required_ci_of(required_checks(pr)),
-                "pr_activity_at": activity(pr), **comment_updates(fields, change_comments(pr, raw, self.me()))}
+def write(path, fields, pr, updates):
+    updates = changed(fields, {"pr_url": pr, **updates})
+    stamp = now()
+    if updates.get("pr_head") or (fields.get("pr_head") and "pr_head_at" not in fields):
+        updates["pr_head_at"] = stamp
+    if updates or awaits_reading(fields):
+        updates["pr_checked_at"] = stamp
+    set_fields(path, updates)
 
 
 def options_of(argv):
@@ -307,10 +316,34 @@ def options_of(argv):
 
 
 def main(argv):
-    reader = Reader(options_of(list(argv)))
+    ignore = options_of(list(argv))
+    root = os.environ["WORKITEM_DIR_ROOT"]
+    items = []
     for item in json.load(sys.stdin):
-        if item["pr"].startswith("http"):
-            reader.check(item)
+        pr = item["pr"]
+        if not pr.startswith("http"):
+            continue
+        path = os.path.join(root, item["dir"], "workitem.md")
+        fields = read_fields(path)
+        if fields.get("pr_url", pr) != pr:
+            set_fields(path, {k: None for k in fields if k.startswith("pr_")})
+            fields = read_fields(path)
+        elif fields.get("pr_state") == "merged":
+            continue
+        items.append((item["dir"], path, fields, pr))
+    if not items:
+        return
+    pulls, me = read_open_pulls({pr for *_, pr in items})
+    moved = {pr for _, _, fields, pr in items
+             if isinstance(pulls[pr], dict) and pulls[pr]["state"] == "OPEN" and fields.get("pr_updated_at") != pulls[pr]["updatedAt"]}
+    threads, _ = read_pulls(moved, THREAD_FIELDS) if moved else ({}, None)
+    for name, path, fields, pr in items:
+        try:
+            updates = updates_of(pulls[pr], threads.get(pr), fields, me, ignore)
+        except (RuntimeError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as e:
+            print(f"cannot read the PR of {name}: {e}", file=sys.stderr)
+            continue
+        write(path, fields, pr, updates)
 
 
 if __name__ == "__main__":

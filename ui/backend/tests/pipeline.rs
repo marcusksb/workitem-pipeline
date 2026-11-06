@@ -35,6 +35,36 @@ fi
 sleep 60
 "#;
 
+/// `gh api graphql` for `watch/pr-status`: every PR the query asks for is `pr.json` (or `pr-once.json`,
+/// read once) in the shape of `gh pr view --json`, with `inline.json` (REST pages) as its review threads.
+/// `updatedAt` follows the files, as GitHub's moves with every comment.
+const GH_GRAPHQL: &str = r#"import json, os, re, sys
+d, query = sys.argv[1], sys.argv[2].split("=", 1)[1]
+def load(name, default):
+    try:
+        return json.load(open(os.path.join(d, name)))
+    except OSError:
+        return default
+inline = [c for page in load("inline.json", []) for c in page]
+once = os.path.join(d, "pr-once.json")
+threads = "reviewThreads" in query
+if not threads and os.path.exists(once):
+    view = load("pr-once.json", {})
+    os.remove(once)
+else:
+    view = load("pr.json", {})
+checks = view.get("statusCheckRollup") or []
+pull = {**view, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": json.dumps([view, inline]),
+        "commits": {"nodes": [{"commit": {"committedDate": "2026-01-01T00:00:00Z",
+                                          "statusCheckRollup": {"contexts": {"nodes": checks}} if checks else None}}]},
+        "comments": {"nodes": view.get("comments") or []}, "reviews": {"nodes": view.get("reviews") or []},
+        "reviewThreads": {"nodes": [{"comments": {"nodes": [{"databaseId": c["id"], "body": c.get("body", ""),
+            "author": {"login": c["user"]["login"]},
+            "replyTo": {"databaseId": c["in_reply_to_id"]} if c.get("in_reply_to_id") else None}]}} for c in inline]}}
+pulls = {alias: pull for alias in re.findall(r"(p\d+): pullRequest", query)}
+print(json.dumps({"data": {"viewer": {"login": "me"}, "repository": pulls}}))
+"#;
+
 struct World {
     dir: tempfile::TempDir,
     repo: PathBuf,
@@ -70,10 +100,12 @@ fn world() -> World {
     fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
 
     let gh = dir.path().join("gh");
-    // `gh api user` names the reader, `gh api <path>` lists inline comments, anything else is `gh pr view`.
+    // `gh api graphql` is pr-status (GH_GRAPHQL); for the PR tab, `gh api user` names the reader,
+    // `gh api <path>` lists inline comments, anything else is `gh pr view`.
     let d = dir.path().display();
+    fs::write(dir.path().join("gh_graphql.py"), GH_GRAPHQL).unwrap();
     let script = format!(
-        "#!/bin/bash\nif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
+        "#!/bin/bash\nif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
     );
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();

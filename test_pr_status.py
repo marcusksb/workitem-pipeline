@@ -35,23 +35,13 @@ class CiTest(unittest.TestCase):
         self.assertEqual(failed, ["RSpec"])
 
 
-class RequiredCiTest(unittest.TestCase):
-    def test_buckets_of_the_required_checks_map_to_ci_values(self):
-        def checks(*buckets):
-            return [{"bucket": b} for b in buckets]
-        self.assertEqual(pr.required_ci_of([]), "none")
-        self.assertEqual(pr.required_ci_of(checks("pass", "skipping")), "passing")
-        self.assertEqual(pr.required_ci_of(checks("pass", "cancel")), "failing")
-        self.assertEqual(pr.required_ci_of(checks("fail", "pending")), "pending")
-
-
 def pull(comments=(), reviews=(), committed="2026-11-02T10:00:00Z", created="2026-11-01T10:00:00Z"):
     return {"createdAt": created, "commits": {"nodes": [{"commit": {"committedDate": committed}}]},
             "comments": {"nodes": list(comments)}, "reviews": {"nodes": list(reviews)}}
 
 
 def note(at, login, body="hi", kind="User", key="createdAt"):
-    return {key: at, "body": body, "author": {"__typename": kind, "login": login}}
+    return {"id": f"{login}-{at}", key: at, "body": body, "author": {"__typename": kind, "login": login}}
 
 
 class ActivityTest(unittest.TestCase):
@@ -126,24 +116,33 @@ class CommentsTest(unittest.TestCase):
 
 
 GH_STUB = """#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
+import json, os, re, sys
+query = sys.argv[4].split("=", 1)[1]
 data = json.load(open(os.environ["STUB_PR"]))
-if args[:2] == ["api", "user"]:
-    print(json.dumps({"login": "me"}))
-elif args[:2] == ["api", "graphql"]:
-    print(json.dumps({"data": {"repository": {"pullRequest": data.get("activity", {
-        "createdAt": "2026-11-01T10:00:00Z", "commits": {"nodes": []}, "comments": {"nodes": []}, "reviews": {"nodes": []}})}}}))
-elif args[:2] == ["pr", "checks"]:
-    checks = data.get("required", [])
-    print(json.dumps(checks))
-    sys.exit(8 if any(c["bucket"] == "pending" for c in checks) else 1 if any(c["bucket"] == "fail" for c in checks) else 0)
-elif args[0] == "api":
-    print(json.dumps([data.get("inline", [])]))
-else:
-    open(os.environ["STUB_PR"] + ".calls", "a").write("view\\n")
-    print(json.dumps(data["view"]))
+kind = "threads" if "reviewThreads" in query else "pull"
+open(os.environ["STUB_PR"] + ".calls", "a").write(kind + "\\n")
+pulls = {alias: data[kind] for alias in re.findall(r"(p\\d+): pullRequest", query)}
+print(json.dumps({"data": {"viewer": {"login": "me"}, "repository": pulls}}))
 """
+
+
+def node(view, inline=(), activity=None):
+    """A PR as the GraphQL query returns it, from the shape of `gh pr view --json`."""
+    act = activity or pull()
+    checks = view.get("statusCheckRollup")
+    commit = {"committedDate": act["commits"]["nodes"][0]["commit"]["committedDate"] if act["commits"]["nodes"] else "",
+              "statusCheckRollup": {"contexts": {"nodes": checks}} if checks else None}
+    return {**{k: v for k, v in view.items() if k not in ("statusCheckRollup", "comments", "reviews")},
+            "updatedAt": view.get("updatedAt", json.dumps([view, list(inline)])),
+            "createdAt": act["createdAt"], "commits": {"nodes": [{"commit": commit}]},
+            "comments": {"nodes": view.get("comments", []) + act["comments"]["nodes"]},
+            "reviews": {"nodes": view.get("reviews", []) + act["reviews"]["nodes"]}}
+
+
+def threads(inline):
+    return {"reviewThreads": {"nodes": [{"comments": {"nodes": [
+        {"databaseId": c["id"], "body": c["body"], "author": {"login": c["user"]["login"]},
+         "replyTo": {"databaseId": c["in_reply_to_id"]} if c.get("in_reply_to_id") else None}]}} for c in inline]}}
 
 
 class ReaderTest(unittest.TestCase):
@@ -168,16 +167,17 @@ class ReaderTest(unittest.TestCase):
         with open(self.path, "w") as f:
             f.write(f"---\ntitle: t\nstage: in_review\npr: {pr_url}\nagent_status: ok\n{extra}---\n\n# body\n")
 
-    def pr(self, view, inline=(), required=(), activity=None):
+    def pr(self, view, inline=(), activity=None):
         with open(self.stub, "w") as f:
-            json.dump({"view": view, "inline": list(inline), "required": list(required),
-                       **({"activity": activity} if activity else {})}, f)
+            json.dump({"pull": node(view, inline, activity), "threads": threads(inline)}, f)
 
     def run_script(self, pr_url="https://github.com/o/r/pull/1"):
+        self.run_items([{"dir": "item", "pr": pr_url}, {"dir": "other", "pr": ""}])
+
+    def run_items(self, items):
         env = {**os.environ, "WORKITEM_GH": self.gh, "WORKITEM_DIR_ROOT": self.tmp.name, "STUB_PR": self.stub}
         env.pop("WORKITEM_MOVE", None)
-        items = json.dumps([{"dir": "item", "pr": pr_url}, {"dir": "other", "pr": ""}])
-        subprocess.run([sys.executable, PATH], input=items, text=True, env=env, check=True)
+        subprocess.run([sys.executable, PATH], input=json.dumps(items), text=True, env=env, check=True)
 
     def fields(self):
         return pr.read_fields(self.path)
@@ -200,10 +200,12 @@ class ReaderTest(unittest.TestCase):
         self.run_script()
         self.assertEqual(self.fields()["pr_unseen_comments"], "inline-7,c2")
 
-    def test_writes_required_ci_and_activity_even_when_gh_exits_non_zero_for_red_checks(self):
-        view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []}
-        self.pr(view, required=[{"name": "lint", "bucket": "pass"}, {"name": "rspec", "bucket": "fail"}],
-                activity=pull(comments=[note("2026-11-03T09:00:00Z", "bob")]))
+    def test_writes_required_ci_over_the_required_checks_and_activity(self):
+        checks = [{**run("lint", "COMPLETED", "SUCCESS"), "isRequired": True}, {**run("rspec", "COMPLETED", "FAILURE"), "isRequired": True},
+                  {**run("deploy", "IN_PROGRESS", None), "isRequired": False}]
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": [],
+                "statusCheckRollup": checks}
+        self.pr(view, activity=pull(comments=[note("2026-11-03T09:00:00Z", "bob")]))
         self.run_script()
         f = self.fields()
         self.assertEqual((f["pr_ci_required"], f["pr_activity_at"]), ("failing", "2026-11-03T09:00:00Z"))
@@ -227,7 +229,7 @@ class ReaderTest(unittest.TestCase):
         self.run_script()
         self.assertEqual(self.fields()["pr_state"], "merged")
         self.run_script()
-        self.assertEqual(self.text(self.stub + ".calls").count("view"), 1, "merged is final")
+        self.assertEqual(self.text(self.stub + ".calls").count("pull"), 1, "merged is final")
         self.write_item("https://github.com/o/r/pull/2", extra="pr_url: https://github.com/o/r/pull/1\npr_state: merged\npr_seen_comments: old\n")
         self.pr({"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h2", "comments": []})
         self.run_script("https://github.com/o/r/pull/2")
@@ -245,6 +247,30 @@ class ReaderTest(unittest.TestCase):
         pr.set_fields(self.path, {"pr_fix_ended_at": "9999-01-01T00:00:00.000Z"})
         self.run_script()
         self.assertNotEqual(self.fields()["pr_checked_at"], before.split("pr_checked_at: ")[1].split("\n")[0], "pr-review waits for it")
+
+
+    def test_every_pr_of_a_repo_is_one_query_and_threads_are_read_only_when_the_pr_moved(self):
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": [], "updatedAt": "t1"}
+        mine = {"id": 7, "user": {"login": "me"}, "body": "x", "in_reply_to_id": None}
+        self.pr(view, inline=[mine])
+        second = os.path.join(self.tmp.name, "second", "workitem.md")
+        os.makedirs(os.path.dirname(second))
+        with open(second, "w") as f:
+            f.write("---\ntitle: t\nstage: in_review\npr: https://github.com/o/r/pull/2\n---\n")
+        items = [{"dir": "item", "pr": "https://github.com/o/r/pull/1"}, {"dir": "second", "pr": "https://github.com/o/r/pull/2"}]
+        self.run_items(items)
+        self.assertEqual(self.text(self.stub + ".calls").split(), ["pull", "threads"], "both PRs in each query")
+        self.assertEqual(pr.read_fields(second)["pr_updated_at"], "t1")
+
+        pr.set_fields(self.path, {"pr_seen_comments": "", "pr_unseen_comments": "inline-7"})
+        self.run_items(items)
+        self.assertEqual(self.text(self.stub + ".calls").split(), ["pull", "threads", "pull"], "nothing moved, no threads")
+        self.assertEqual(self.fields()["pr_unseen_comments"], "inline-7", "an unseen inline comment stays unseen")
+
+        self.pr({**view, "updatedAt": "t2"}, inline=[mine, {**mine, "id": 8, "in_reply_to_id": 7}, {**mine, "id": 9, "user": {"login": "bob"}}])
+        self.run_items(items)
+        self.assertEqual(self.text(self.stub + ".calls").split()[-1], "threads")
+        self.assertEqual(self.fields()["pr_unseen_comments"], "inline-7,inline-9", "my own reply is conversation")
 
 
 if __name__ == "__main__":
