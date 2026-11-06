@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, pauseState, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { blockedByBoard, boardNames, byStage, columnsFor, DEFAULT_BOARD, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, orderFor, pauseState, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
@@ -194,7 +194,7 @@ export function Board({ items, pipelines, projects, board, onBoard, selected, on
                 {pause.projects.length > 0 && <PauseColumn projects={pause.projects} board={active} stage={name} label={label} paused={pause.paused} onDone={onChanged} />}
                 {final && inColumn.length > 0 && <ClearColumn items={inColumn} onDone={onChanged} />}
               </h2>
-              <div className="cards">{treeOrder(inColumn).map(({ item, depth }) => card(item, depth))}</div>
+              <div className="cards">{treeOrder(inColumn, orderFor(pipelines, projects, active, name)).map(({ item, depth }) => card(item, depth))}</div>
             </section>
           );
         })}

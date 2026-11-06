@@ -9,9 +9,12 @@ export type StageConfig = {
   next: string[];
   gate: Gate | null;
   on_merge: string | null;
+  /** Replaces the board's `order` for this column when not empty. */
+  order: string[];
 };
 
-export type Pipeline = { entry: string; stages: StageConfig[] };
+/** `order`: item fields each column is sorted by, first one first; title breaks ties. */
+export type Pipeline = { entry: string; stages: StageConfig[]; order: string[] };
 
 /**
  * A board of a project: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.

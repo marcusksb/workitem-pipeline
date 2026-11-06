@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Item, Pipelines, Review } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
@@ -37,8 +37,8 @@ describe("newlyBlocked", () => {
   });
 });
 
-const stage = (name: string, label: string | null = null) => ({ name, label, handler: null, auto: false, next: [], gate: null, on_merge: null });
-const board = (name: string, ...stages: string[]) => ({ name, pipeline: { entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [] });
+const stage = (name: string, label: string | null = null) => ({ name, label, handler: null, auto: false, next: [], gate: null, on_merge: null, order: [] as string[] });
+const board = (name: string, ...stages: string[]) => ({ name, pipeline: { order: [], entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [] });
 const pipelines: Pipelines = {
   app: [board("default", "todo", "doing", "done"), board("research", "idea", "done")],
   lib: [board("default", "todo", "review", "done")],
@@ -72,7 +72,7 @@ describe("columnsFor", () => {
 
   it("uses the label, else the name with spaces, and skips projects without a valid file", () => {
     const labelled: Pipelines = {
-      app: [{ name: "default", pipeline: { entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null, watched: [], paused: [] }],
+      app: [{ name: "default", pipeline: { order: [], entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null, watched: [], paused: [] }],
       bad: [{ name: "default", pipeline: null, error: "broken", watched: [], paused: [] }],
     };
     expect(columnsFor(labelled, ["app", "bad", "missing"], "default")).toEqual([
@@ -84,8 +84,8 @@ describe("columnsFor", () => {
 
   it("marks a column final only when no project has a next stage for it", () => {
     const flow: Pipelines = {
-      app: [{ name: "default", pipeline: { entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null, watched: [], paused: [] }],
-      lib: [{ name: "default", pipeline: { entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null, watched: [], paused: [] }],
+      app: [{ name: "default", pipeline: { order: [], entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null, watched: [], paused: [] }],
+      lib: [{ name: "default", pipeline: { order: [], entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null, watched: [], paused: [] }],
     };
     expect(columnsFor(flow, ["app"], "default").map((c) => c.final)).toEqual([false, true]);
     expect(columnsFor(flow, ["app", "lib"], "default").map((c) => c.final)).toEqual([false, false, true]);
@@ -159,6 +159,16 @@ describe("treeOrder", () => {
   });
 });
 
+describe("orderFor", () => {
+  it("uses the stage's order, else the board's", () => {
+    const pipelines: Pipelines = {
+      app: [{ name: "default", pipeline: { order: ["title desc"], entry: "a", stages: [{ ...stage("a"), order: ["issue_status desc"] }, stage("b")] }, error: null, watched: [], paused: [] }],
+    };
+    expect(orderFor(pipelines, ["app"], "default", "a")).toEqual(["issue_status desc"]);
+    expect(orderFor(pipelines, ["app"], "default", "b")).toEqual(["title desc"]);
+  });
+});
+
 describe("treeOrder sorting", () => {
   it("sorts roots and children by title with numeric awareness", () => {
     const rows = treeOrder([
@@ -168,6 +178,27 @@ describe("treeOrder sorting", () => {
       item({ dir: "p", title: "Alpha" }),
     ]);
     expect(rows.map((r) => r.item.dir)).toEqual(["p", "a", "b", "z"]);
+  });
+
+  it("sorts by the board's order, Jira categories in workflow order, empty values last, title breaking ties", () => {
+    const rows = treeOrder([
+      item({ dir: "none", title: "A" }),
+      item({ dir: "done", title: "B", issue_status_category: "done" }),
+      item({ dir: "prog", title: "C", issue_status_category: "indeterminate" }),
+      item({ dir: "todo", title: "D", issue_status_category: "new" }),
+      item({ dir: "todo2", title: "A", issue_status_category: "new" }),
+    ], ["issue_status_category"]);
+    expect(rows.map((r) => r.item.dir)).toEqual(["todo2", "todo", "prog", "done", "none"]);
+  });
+
+  it("sorts by several fields with a direction each, empty values last either way", () => {
+    const rows = treeOrder([
+      item({ dir: "none", title: "A" }),
+      item({ dir: "deploy", title: "B", issue_status_category: "done", issue_status: "Waiting for Deployment" }),
+      item({ dir: "closed", title: "C", issue_status_category: "done", issue_status: "Closed" }),
+      item({ dir: "todo", title: "D", issue_status_category: "new", issue_status: "To Do" }),
+    ], ["issue_status_category desc", "issue_status desc"]);
+    expect(rows.map((r) => r.item.dir)).toEqual(["deploy", "closed", "todo", "none"]);
   });
 });
 
@@ -231,7 +262,7 @@ describe("issueCategory", () => {
 
 describe("newlyDone", () => {
   const flow: Pipelines = {
-    app: [{ name: "default", pipeline: { entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
+    app: [{ name: "default", pipeline: { order: [], entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
   };
   const seen = new Map([["app/moved", "todo"], ["app/stayed", "done"], ["app/waits", "todo"]]);
 

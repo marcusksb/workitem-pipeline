@@ -122,12 +122,51 @@ export function byStage(items: Item[], pipelines: Pipelines | undefined, board: 
 }
 
 /**
+ * How column `stage` of board `board` is sorted: the stage's `order`, else the board's, from the first of
+ * `projects` whose file has one.
+ */
+export function orderFor(pipelines: Pipelines | undefined, projects: string[], board: string, stage: string): string[] {
+  const pipelinesOf = projects.map((project) => boardOfProject(pipelines, project, board)?.pipeline);
+  for (const pipeline of pipelinesOf) {
+    const order = pipeline?.stages.find((s) => s.name === stage)?.order ?? [];
+    if (order.length) return order;
+  }
+  for (const pipeline of pipelinesOf) if (pipeline?.order.length) return pipeline.order;
+  return [];
+}
+
+const CATEGORY_RANK: Record<string, number> = { new: 0, indeterminate: 1, done: 2 };
+
+/**
+ * Compares two items by one entry of a board's `order`: a field, optionally followed by `asc` (the default)
+ * or `desc`. Jira status categories rank to do, in progress, done; other fields compare as text, numbers
+ * as numbers ("PR 2" before "PR 10"). Empty values go last in either direction.
+ */
+function compareBy(a: Item, b: Item, entry: string): number {
+  const [field, direction] = entry.trim().split(/\s+/);
+  const x = String(a[field as keyof Item] ?? "");
+  const y = String(b[field as keyof Item] ?? "");
+  if (!x || !y) return Number(!x) - Number(!y);
+  const c = field === "issue_status_category"
+    ? (CATEGORY_RANK[x] ?? 3) - (CATEGORY_RANK[y] ?? 3)
+    : x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" });
+  return direction === "desc" ? -c : c;
+}
+
+/**
  * Orders one column as a tree: children follow their parent, indented by `depth`.
  * A child whose parent is in another column (or missing) stays a root here.
- * Siblings are sorted by title, numbers compared as numbers ("PR 2" before "PR 10").
+ * Siblings are sorted by the fields of `order` (the board's `order`), then by title.
  */
-export function treeOrder(unsorted: Item[]): { item: Item; depth: number }[] {
-  const items = [...unsorted].sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }));
+export function treeOrder(unsorted: Item[], order: string[] = []): { item: Item; depth: number }[] {
+  const entries = [...order, "title"];
+  const items = [...unsorted].sort((a, b) => {
+    for (const entry of entries) {
+      const c = compareBy(a, b, entry);
+      if (c) return c;
+    }
+    return 0;
+  });
   const dirs = new Set(items.map((i) => `${i.project}/${i.dir}`));
   const hasParent = (i: Item) => i.parent !== "" && i.parent !== i.dir && dirs.has(`${i.project}/${i.parent}`);
   const out: { item: Item; depth: number }[] = [];

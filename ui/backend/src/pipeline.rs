@@ -103,6 +103,9 @@ pub struct Stage {
     /// At most this many items of the board can be in the stage.
     #[serde(default)]
     pub limit: Option<usize>,
+    /// How this column is sorted, like the board's `order`, which it replaces when not empty.
+    #[serde(default)]
+    pub order: Vec<String>,
     /// Read the PRs of the board with the `pr-status` board watcher, for the chips, even without a
     /// stage that reacts to them. Older files; a board now lists `pr-status` in its `watch`.
     #[serde(default, skip_serializing)]
@@ -133,6 +136,14 @@ impl Stage {
     }
 }
 
+/// Item fields a board's `order` can name; the frontend sorts by them.
+const ORDER_FIELDS: &[&str] = &["issue_status_category", "issue_status", "issue", "title", "kind", "agent_status", "created", "dir"];
+
+/// One `order` entry: a field of `ORDER_FIELDS`, optionally followed by `asc` or `desc`.
+fn valid_order(entry: &str) -> bool {
+    matches!(entry.split_whitespace().collect::<Vec<_>>()[..], [field] | [field, "asc" | "desc"] if ORDER_FIELDS.contains(&field))
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Pipeline {
     pub entry: String,
@@ -140,6 +151,10 @@ pub struct Pipeline {
     /// Scripts that run for the whole board on a timer, with every item of the board on stdin.
     #[serde(default, skip_serializing, deserialize_with = "watchers")]
     pub watch: Vec<Watch>,
+    /// How each column is sorted: item fields, first one first, each optionally followed by `asc` or
+    /// `desc` (`"issue_status desc"`); title breaks ties. Empty means title only.
+    #[serde(default)]
+    pub order: Vec<String>,
     /// Required by `workitem-move`, so a file without it is invalid here too.
     #[serde(skip_serializing)]
     #[allow(dead_code)]
@@ -185,6 +200,10 @@ impl Pipeline {
         }
         if let Some(watch) = pipeline.watch.iter().find(|w| !crate::watch::valid_name(&w.command)) {
             return Err(format!("the board has watch command '{}', which is not a script name (lowercase letters, digits, . _ - only)", watch.command));
+        }
+        let orders = std::iter::once(&pipeline.order).chain(pipeline.stages.iter().map(|s| &s.order));
+        if let Some(entry) = orders.flatten().find(|entry| !valid_order(entry)) {
+            return Err(format!("order has '{entry}', which is not a field ({}) optionally followed by asc or desc", ORDER_FIELDS.join(", ")));
         }
         for stage in &pipeline.stages {
             if let Some(target) = stage.next.iter().find(|t| !names.contains(t.as_str())) {
@@ -308,6 +327,19 @@ mod tests {
         assert!(parse(r#"[{"name":""}]"#, "").unwrap_err().contains("name"));
         assert!(parse(r#"[{"name":"a","next":["gone"]}]"#, "a").unwrap_err().contains("gone"));
         assert!(Pipeline::parse(r#"{"entry":"a","stages":[{"name":"a"}]}"#).is_err());
+    }
+
+    #[test]
+    fn reads_the_column_order_and_rejects_unknown_fields() {
+        let with = |order: &str| Pipeline::parse(&format!(r#"{{ {BRIEF}, "entry": "a", "stages": [{{"name":"a"}}], "order": {order} }}"#));
+        assert_eq!(with(r#"["issue_status_category desc", "title asc", "created"]"#).unwrap().order, ["issue_status_category desc", "title asc", "created"]);
+        assert!(parse(r#"[{"name":"a"}]"#, "a").unwrap().order.is_empty());
+        assert!(with(r#"["nope"]"#).unwrap_err().contains("nope"));
+        assert!(with(r#"["title sideways"]"#).unwrap_err().contains("sideways"));
+        assert!(with(r#"[""]"#).is_err());
+        let stage = parse(r#"[{"name":"a","order":["issue_status desc"]}]"#, "a").unwrap();
+        assert_eq!(stage.stage("a").unwrap().order, ["issue_status desc"]);
+        assert!(parse(r#"[{"name":"a","order":["nope"]}]"#, "a").unwrap_err().contains("nope"));
     }
 
     #[test]

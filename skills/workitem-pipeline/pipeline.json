@@ -1,6 +1,7 @@
 {
   "brief_sections": ["Findings", "Plan", "Risk", "Size", "Test plan", "Assumptions", "Links"],
   "entry": "backlog",
+  "order": ["issue_status_category", "title"],
   "watch": [
     { "every": "5m", "command": "issue-status" },
     { "every": "1m", "command": "pr-status" }
