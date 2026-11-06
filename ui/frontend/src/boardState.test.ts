@@ -1,31 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
-import { Item, Pipelines, Review } from "./types";
+import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { item, stage } from "./testFixtures";
+import { Pipelines, Review } from "./types";
 
-const item = (over: Partial<Item>): Item => ({
-  project: "app",
-  dir: "x",
-  title: "x",
-  kind: "bug",
-  stage: "backlog",
-  board: "default",
-  approved: false,
-  agent_status: "ok",
-  issue: "none",
-  issue_status: "",
-  issue_status_category: "",
-  pr: "",
-  parent: "",
-  created: "",
-  session: false,
-  gate: null,
-  pr_watch: false,
-  develops: false,
-  review: null,
-  unpushed: null,
-  follow_ups: [],
-  ...over,
-});
 
 describe("newlyBlocked", () => {
   it("returns blocked items not seen with the same reason, ignoring unblocked ones", () => {
@@ -37,7 +14,6 @@ describe("newlyBlocked", () => {
   });
 });
 
-const stage = (name: string, label: string | null = null) => ({ name, label, handler: null, auto: false, next: [], gate: null, on_merge: null, order: [] as string[] });
 const board = (name: string, ...stages: string[]) => ({ name, pipeline: { order: [], entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [] });
 const pipelines: Pipelines = {
   app: [board("default", "todo", "doing", "done"), board("research", "idea", "done")],
@@ -257,27 +233,6 @@ describe("issueCategory", () => {
     expect(issueCategory("")).toBeUndefined();
     expect(issueCategory("undefined")).toBeUndefined();
     expect(issueCategory("toString")).toBeUndefined();
-  });
-});
-
-describe("newlyDone", () => {
-  const flow: Pipelines = {
-    app: [{ name: "default", pipeline: { order: [], entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
-  };
-  const seen = new Map([["app/moved", "todo"], ["app/stayed", "done"], ["app/waits", "todo"]]);
-
-  it("returns items that moved into a final stage since they were seen", () => {
-    const items = [
-      item({ dir: "moved", stage: "done" }),
-      item({ dir: "stayed", stage: "done" }),
-      item({ dir: "waits", stage: "todo" }),
-      item({ dir: "unseen", stage: "done" }),
-    ];
-    expect(newlyDone(seen, items, flow).map((i) => i.dir)).toEqual(["moved"]);
-  });
-
-  it("returns nothing while the pipelines are unknown", () => {
-    expect(newlyDone(seen, [item({ dir: "moved", stage: "done" })], undefined)).toEqual([]);
   });
 });
 

@@ -353,9 +353,26 @@ test("moving an item into a final stage shows a toast that opens it", async ({ p
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
   execFileSync("python3", [resolve("../../skills/workitem-pipeline/bin/workitem-move"), join(repo, ".claude/workitems/T-4-research/workitem.md"), "findings"]);
 
-  const toast = page.locator(".done-toast");
-  await expect(toast).toContainText("Research item is done");
-  await toast.getByRole("button", { name: /Research item is done/ }).click();
+  const toast = page.locator(".toast", { hasText: "Research item" });
+  await expect(toast).toContainText("Done");
+  if (process.env.TOAST_SHOTS) await page.screenshot({ path: join(process.env.TOAST_SHOTS, "done.png") });
+  await toast.getByRole("button", { name: /Research item/ }).click();
   await expect(page).toHaveURL(/#demo\/T-4-research/);
+  await expect(toast).toHaveCount(0);
+});
+
+test("a newly blocked item gets a toast that stays until it is dismissed", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Approve me");
+  const file = join(repo, ".claude/workitems/T-3-approve/workitem.md");
+  writeFileSync(file, readFileSync(file, "utf8").replace(/^agent_status: .*$/m, "agent_status: blocked: which flag?"));
+
+  const toast = page.locator(".toast", { hasText: "Approve me" });
+  await expect(toast).toContainText("Blocked: which flag?");
+  await expect(toast.locator(".toast-countdown")).toHaveCount(0);
+  if (process.env.TOAST_SHOTS) await page.screenshot({ path: join(process.env.TOAST_SHOTS, "blocked.png") });
+  await page.waitForTimeout(7000);
+  await expect(toast).toBeVisible();
+  await toast.getByRole("button", { name: "Dismiss" }).click();
   await expect(toast).toHaveCount(0);
 });

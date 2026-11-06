@@ -34,17 +34,6 @@ export function isFinal(item: Item, pipelines: Pipelines | undefined): boolean {
   return !!stage && stage.next.length === 0;
 }
 
-/**
- * Items now in a final stage that `seen` (stage by `itemKey`) had in another stage. Comparing stages rather
- * than finality keeps done items quiet when their board file turns valid again.
- */
-export function newlyDone(seen: Map<string, string>, items: Item[], pipelines: Pipelines | undefined): Item[] {
-  return items.filter((item) => {
-    const before = seen.get(itemKey(item));
-    return before !== undefined && before !== item.stage && isFinal(item, pipelines);
-  });
-}
-
 export const DEFAULT_BOARD = "default";
 
 /** Key of the column for items whose stage is not on their board. */
@@ -55,6 +44,12 @@ export type Column = { name: string; label: string; final: boolean };
 
 const boardOfProject = (pipelines: Pipelines | undefined, project: string, board: string) =>
   pipelines?.[project]?.find((b) => b.name === board);
+
+/** Column title of the item's stage: its `label` on the item's board, else the name with `_` as a space. */
+export function stageTitle(item: Item, pipelines: Pipelines | undefined): string {
+  const stage = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
+  return stage?.label ?? stageLabel(item.stage);
+}
 
 /**
  * The projects among `projects` where stage `stage` of board `board` has a watcher, and whether

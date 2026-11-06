@@ -3,7 +3,7 @@ import { api } from "./api";
 import { Board } from "./Board";
 import { itemKey, shownBoard } from "./boardState";
 import { DetailPanel } from "./DetailPanel";
-import { DoneCelebration } from "./DoneCelebration";
+import { ActivityToasts } from "./ActivityToasts";
 import { Login } from "./Login";
 import { PlanPanel } from "./PlanPanel";
 import { Plans } from "./Plans";
@@ -179,7 +179,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
           />
         )}
       </main>
-      <DoneCelebration items={items.data} pipelines={pipelines.data} />
+      <ActivityToasts items={items.data} pipelines={pipelines.data} />
       {searching && <QuickSearch items={items.data ?? []} showProject={(projects.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );
