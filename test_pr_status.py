@@ -35,6 +35,40 @@ class CiTest(unittest.TestCase):
         self.assertEqual(failed, ["RSpec"])
 
 
+class RequiredCiTest(unittest.TestCase):
+    def test_buckets_of_the_required_checks_map_to_ci_values(self):
+        def checks(*buckets):
+            return [{"bucket": b} for b in buckets]
+        self.assertEqual(pr.required_ci_of([]), "none")
+        self.assertEqual(pr.required_ci_of(checks("pass", "skipping")), "passing")
+        self.assertEqual(pr.required_ci_of(checks("pass", "cancel")), "failing")
+        self.assertEqual(pr.required_ci_of(checks("fail", "pending")), "pending")
+
+
+def pull(comments=(), reviews=(), committed="2026-11-02T10:00:00Z", created="2026-11-01T10:00:00Z"):
+    return {"createdAt": created, "commits": {"nodes": [{"commit": {"committedDate": committed}}]},
+            "comments": {"nodes": list(comments)}, "reviews": {"nodes": list(reviews)}}
+
+
+def note(at, login, body="hi", kind="User", key="createdAt"):
+    return {key: at, "body": body, "author": {"__typename": kind, "login": login}}
+
+
+class ActivityTest(unittest.TestCase):
+    def test_latest_of_opening_last_commit_and_human_reviews_and_comments(self):
+        self.assertEqual(pr.activity_of(pull()), "2026-11-02T10:00:00Z")
+        self.assertEqual(pr.activity_of(pull(comments=[note("2026-11-03T09:00:00Z", "bob")])), "2026-11-03T09:00:00Z")
+        review = note("2026-11-04T09:00:00Z", "carol", key="submittedAt")
+        self.assertEqual(pr.activity_of(pull(comments=[note("2026-11-03T09:00:00Z", "bob")], reviews=[review])), "2026-11-04T09:00:00Z")
+
+    def test_bots_reminders_and_deleted_authors_do_not_count(self):
+        ignored = [note("2026-11-05T00:00:00Z", "vercel", kind="Bot"),
+                   note("2026-11-05T00:00:00Z", "renovate[bot]"),
+                   note("2026-11-05T00:00:00Z", "me", body="<!-- pr-remind -->\n@bob nudge"),
+                   {"createdAt": "2026-11-05T00:00:00Z", "body": "x", "author": None}]
+        self.assertEqual(pr.activity_of(pull(comments=ignored)), "2026-11-02T10:00:00Z")
+
+
 class FactsTest(unittest.TestCase):
     def test_approval_merge_and_both_ci_values_map_from_github(self):
         raw = {"state": "OPEN", "mergeable": "CONFLICTING", "reviewDecision": "CHANGES_REQUESTED", "headRefOid": "h1",
@@ -97,6 +131,13 @@ args = sys.argv[1:]
 data = json.load(open(os.environ["STUB_PR"]))
 if args[:2] == ["api", "user"]:
     print(json.dumps({"login": "me"}))
+elif args[:2] == ["api", "graphql"]:
+    print(json.dumps({"data": {"repository": {"pullRequest": data.get("activity", {
+        "createdAt": "2026-11-01T10:00:00Z", "commits": {"nodes": []}, "comments": {"nodes": []}, "reviews": {"nodes": []}})}}}))
+elif args[:2] == ["pr", "checks"]:
+    checks = data.get("required", [])
+    print(json.dumps(checks))
+    sys.exit(8 if any(c["bucket"] == "pending" for c in checks) else 1 if any(c["bucket"] == "fail" for c in checks) else 0)
 elif args[0] == "api":
     print(json.dumps([data.get("inline", [])]))
 else:
@@ -127,9 +168,10 @@ class ReaderTest(unittest.TestCase):
         with open(self.path, "w") as f:
             f.write(f"---\ntitle: t\nstage: in_review\npr: {pr_url}\nagent_status: ok\n{extra}---\n\n# body\n")
 
-    def pr(self, view, inline=()):
+    def pr(self, view, inline=(), required=(), activity=None):
         with open(self.stub, "w") as f:
-            json.dump({"view": view, "inline": list(inline)}, f)
+            json.dump({"view": view, "inline": list(inline), "required": list(required),
+                       **({"activity": activity} if activity else {})}, f)
 
     def run_script(self, pr_url="https://github.com/o/r/pull/1"):
         env = {**os.environ, "WORKITEM_GH": self.gh, "WORKITEM_DIR_ROOT": self.tmp.name, "STUB_PR": self.stub}
@@ -157,6 +199,14 @@ class ReaderTest(unittest.TestCase):
                 inline=[{"id": 7, "user": {"login": "me"}, "body": "x", "in_reply_to_id": None}])
         self.run_script()
         self.assertEqual(self.fields()["pr_unseen_comments"], "inline-7,c2")
+
+    def test_writes_required_ci_and_activity_even_when_gh_exits_non_zero_for_red_checks(self):
+        view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []}
+        self.pr(view, required=[{"name": "lint", "bucket": "pass"}, {"name": "rspec", "bucket": "fail"}],
+                activity=pull(comments=[note("2026-11-03T09:00:00Z", "bob")]))
+        self.run_script()
+        f = self.fields()
+        self.assertEqual((f["pr_ci_required"], f["pr_activity_at"]), ("failing", "2026-11-03T09:00:00Z"))
 
     def test_pr_head_at_is_when_the_current_head_was_first_seen(self):
         view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []}

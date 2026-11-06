@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Column watcher for the PR stage: nudge the reviewers of a PR that only waits for a review.
+
+  pr-remind [--dry-run]
+
+Reads the facts watch/pr-status wrote. An item is reminded when all of these hold:
+  pr_state open, pr_draft false, pr_merge mergeable, pr_ci_required passing, pr_approval not
+  approved; 2 business days (Mon-Fri) since pr_activity_at; pr_reminded_at missing or older than
+  pr_activity_at (one reminder per quiet period); now is Mon-Fri 09:00-17:00 local time.
+Then it asks gh who to mention: requested reviewers who have not reviewed, and earlier reviewers
+who commented or requested changes; a requested team only when no person is pending. It posts a PR
+comment marked REMIND_MARKER, which pr-status does not count as activity, and sets pr_reminded_at.
+With nobody to mention it blocks the item instead, so the board alerts, and sets pr_reminded_at.
+A failed post is logged and tried again on the next run. --dry-run prints what it would do, and
+why the other items are not due, and writes nothing.
+"""
+import json, os, subprocess, sys
+from datetime import datetime, timedelta, timezone
+
+sys.dont_write_bytecode = True
+# The helpers sit next to workitem-move, which the backend names.
+sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
+                else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
+from workitem_fields import read_fields, set_fields  # noqa: E402
+
+REMIND_MARKER = "<!-- pr-remind -->"
+QUIET = timedelta(days=2)
+HOURS = range(9, 17)
+MENTION_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+    author { login }
+    reviewRequests(first: 50) { nodes { requestedReviewer {
+      __typename ... on User { login } ... on Team { combinedSlug } } } }
+    latestReviews(first: 50) { nodes { state author { __typename login } } }
+  } }
+}"""
+
+
+def parse_time(text):
+    return datetime.fromisoformat(text)
+
+
+def business_time(start, end):
+    """Time between two datetimes that falls on Mon-Fri, counted in start's time zone."""
+    total, t = timedelta(), start
+    while t < end:
+        stop = min(end, (t + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0))
+        if t.weekday() < 5:
+            total += stop - t
+        t = stop
+    return total
+
+
+def not_due(fields, now):
+    """Why the item gets no reminder now, or None when it does. `now` is local and aware."""
+    expected = {"pr_state": "open", "pr_draft": "false", "pr_merge": "mergeable", "pr_ci_required": "passing"}
+    for key, value in expected.items():
+        if fields.get(key) != value:
+            return f"{key} is {fields.get(key) or 'unset'}"
+    if fields.get("pr_approval") == "approved":
+        return "approved"
+    if not fields.get("pr_activity_at"):
+        return "pr_activity_at unset"
+    activity = parse_time(fields["pr_activity_at"])
+    if fields.get("pr_reminded_at") and parse_time(fields["pr_reminded_at"]) >= activity:
+        return "already reminded since the last activity"
+    if business_time(activity.astimezone(now.tzinfo), now) < QUIET:
+        return f"active at {fields['pr_activity_at']}"
+    if now.weekday() >= 5 or now.hour not in HOURS:
+        return "outside Mon-Fri 09:00-17:00"
+    return None
+
+
+def is_bot(author):
+    return author.get("__typename") == "Bot" or (author.get("login") or "").endswith("[bot]")
+
+
+def mentions_of(pull):
+    """@-mentions for the PR (GraphQL pullRequest, see MENTION_QUERY): pending people, then
+    earlier reviewers who did not approve; the requested teams only when that is nobody."""
+    me = (pull.get("author") or {}).get("login")
+    requested = [n["requestedReviewer"] for n in pull["reviewRequests"]["nodes"] if n.get("requestedReviewer")]
+    people = {r["login"]: "" for r in requested if r["__typename"] == "User"}
+    for review in pull["latestReviews"]["nodes"]:
+        author = review.get("author")
+        if not author or is_bot(author) or author["login"] == me:
+            continue
+        if review["state"] == "CHANGES_REQUESTED":
+            people[author["login"]] = " (re-review after your feedback)"
+        elif review["state"] == "COMMENTED":
+            people.setdefault(author["login"], "")
+    if people:
+        return [f"@{login}{note}" for login, note in people.items()]
+    return [f"@{r['combinedSlug']}" for r in requested if r["__typename"] == "Team"]
+
+
+def comment_of(mentions):
+    return (f"{REMIND_MARKER}\n{' '.join(mentions)} friendly nudge: this PR is mergeable and required CI is green, "
+            "it only needs a review. Thanks!")
+
+
+def gh(args):
+    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
+    return result.stdout
+
+
+def mentions(pr):
+    owner, repo, _, number = pr.rstrip("/").split("/")[-4:]
+    data = json.loads(gh(["api", "graphql", "-f", f"query={MENTION_QUERY}", "-f", f"owner={owner}",
+                          "-f", f"repo={repo}", "-F", f"number={number}"]))
+    return mentions_of(data["data"]["repository"]["pullRequest"])
+
+
+def stamp(now):
+    return now.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class Reminder:
+    def __init__(self, dry_run, now):
+        self.dry_run = dry_run
+        self.now = now
+        self.root = os.environ["WORKITEM_DIR_ROOT"]
+
+    def check(self, item):
+        name, pr = item["dir"], item["pr"]
+        path = os.path.join(self.root, name, "workitem.md")
+        fields = read_fields(path)
+        reason = not_due(fields, self.now)
+        if reason:
+            if self.dry_run:
+                print(f"{name}: skip, {reason}")
+            return
+        try:
+            who = mentions(pr)
+        except (RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
+            print(f"cannot read the reviewers of {name}: {e}", file=sys.stderr)
+            return
+        number = pr.rstrip("/").rsplit("/", 1)[-1]
+        updates = {"pr_reminded_at": stamp(self.now)}
+        if not who:
+            if (fields.get("agent_status") or "ok") == "ok":
+                updates["agent_status"] = f"blocked: PR #{number} is ready but has no reviewer to remind"
+            if self.dry_run:
+                print(f"{name}: would block, PR #{number} has no reviewer to mention")
+                return
+        else:
+            body = comment_of(who)
+            if self.dry_run:
+                print(f"{name}: would post on PR #{number}:\n{body}")
+                return
+            try:
+                gh(["pr", "comment", pr, "--body", body])
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                print(f"cannot post the reminder on PR #{number} of {name}: {e}", file=sys.stderr)
+                return
+        set_fields(path, updates)
+
+
+def main(argv, now=None):
+    dry_run = False
+    for flag in argv:
+        if flag == "--dry-run":
+            dry_run = True
+        else:
+            sys.exit(f"unknown option {flag}")
+    reminder = Reminder(dry_run, now or datetime.now().astimezone())
+    for item in json.load(sys.stdin):
+        if item["pr"].startswith("http"):
+            reminder.check(item)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

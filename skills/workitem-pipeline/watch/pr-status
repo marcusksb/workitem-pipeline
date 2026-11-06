@@ -10,12 +10,15 @@ can be reopened, so it is still read), it writes these frontmatter keys, only wh
   pr_ci               passing | failing | pending | none, over every check (the board's chip)
   pr_ci_fix           the same without checks whose name contains an --ignore word (the CI fixer)
   pr_ci_failed        names of the red checks
+  pr_ci_required      passing | failing | pending | none, over the required checks only (pr-remind)
   pr_merge            mergeable | conflicting | unknown
   pr_approval         approved | changes_requested | review_required | none
   pr_approved_by_me   true | false
   pr_draft            true | false
   pr_head             commit the PR head points to
   pr_head_at          when it first saw that head (UTC), so a script can wait until pushes settle
+  pr_activity_at      the latest of: PR opened, last commit, human review, human comment; bots and
+                      pr-remind's own comments do not count (pr-remind)
   pr_unseen_comments  ids of comments that ask for a change and are not in pr_seen_comments
   pr_checked_at       when it read the PR (UTC): with every change, and on every reading while
                       pr-review waits for one newer than pr_fix_ended_at. Not on every run:
@@ -35,6 +38,15 @@ from workitem_fields import read_fields, set_fields  # noqa: E402
 FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
 PENDING = ("IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED", "EXPECTED")
 VIEW_FIELDS = "state,isDraft,mergeable,reviewDecision,statusCheckRollup,reviews,headRefOid,comments"
+REMIND_MARKER = "<!-- pr-remind -->"
+ACTIVITY_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+    createdAt
+    commits(last: 1) { nodes { commit { committedDate } } }
+    comments(last: 100) { nodes { createdAt body author { __typename login } } }
+    reviews(last: 100) { nodes { submittedAt body author { __typename login } } }
+  } }
+}"""
 UNKNOWN_RETRIES = 3
 UNKNOWN_RETRY_WAIT = 2
 
@@ -73,6 +85,33 @@ def failed_checks(checks):
         if result_of(check) in FAILED and check_name(check) not in names:
             names.append(check_name(check))
     return names
+
+
+def required_ci_of(checks):
+    """`gh pr checks --required` buckets as pr_ci values; pending wins as in ci_of."""
+    buckets = {c.get("bucket") for c in checks}
+    if not buckets:
+        return "none"
+    return "pending" if "pending" in buckets else "failing" if buckets & {"fail", "cancel"} else "passing"
+
+
+def is_bot(author):
+    login = (author or {}).get("login") or ""
+    return (author or {}).get("__typename") == "Bot" or login.endswith("[bot]")
+
+
+def activity_of(pull):
+    """The latest human sign of life on the PR (GraphQL pullRequest, see ACTIVITY_QUERY)."""
+    times = [pull.get("createdAt") or ""]
+    times += [n["commit"]["committedDate"] for n in pull["commits"]["nodes"]]
+    for kind, at in (("comments", "createdAt"), ("reviews", "submittedAt")):
+        times += [n.get(at) or "" for n in pull[kind]["nodes"]
+                  if n.get("author") and not is_bot(n["author"]) and REMIND_MARKER not in (n.get("body") or "")]
+    return max(times, key=parse_time)
+
+
+def parse_time(text):
+    return datetime.fromisoformat(text) if text else datetime.min.replace(tzinfo=timezone.utc)
 
 
 def login_of(entry):
@@ -124,11 +163,28 @@ def review_comments(raw, me):
     return ids
 
 
-def gh(args):
+def gh(args, ok_codes=(0,)):
     result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
+    if result.returncode not in ok_codes or not result.stdout.strip():
         raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
     return json.loads(result.stdout)
+
+
+def required_checks(pr):
+    """gh exits 1 on a red check and 8 on a pending one, and still prints them."""
+    try:
+        return gh(["pr", "checks", pr, "--required", "--json", "name,state,bucket"], ok_codes=(0, 1, 8))
+    except RuntimeError as e:
+        if "no required checks" in str(e):
+            return []
+        raise
+
+
+def activity(pr):
+    owner, repo, _, number = pr.rstrip("/").split("/")[-4:]
+    data = gh(["api", "graphql", "-f", f"query={ACTIVITY_QUERY}", "-f", f"owner={owner}", "-f", f"repo={repo}",
+               "-F", f"number={number}"])
+    return activity_of(data["data"]["repository"]["pullRequest"])
 
 
 def fetch(pr):
@@ -235,7 +291,8 @@ class Reader:
             return {"pr_state": raw["state"].lower()}
         if raw["state"] != "OPEN":
             raise RuntimeError(f"unknown PR state {raw['state']}")
-        return {**facts_of(raw, self.me(), self.ignore), **comment_updates(fields, change_comments(pr, raw, self.me()))}
+        return {**facts_of(raw, self.me(), self.ignore), "pr_ci_required": required_ci_of(required_checks(pr)),
+                "pr_activity_at": activity(pr), **comment_updates(fields, change_comments(pr, raw, self.me()))}
 
 
 def options_of(argv):
