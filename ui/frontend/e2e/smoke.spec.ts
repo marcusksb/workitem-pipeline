@@ -325,7 +325,7 @@ test("open follow-ups show on the card and the detail chip jumps to them", async
 test("planning sessions show above the board and open in the side panel", async ({ page }) => {
   await page.goto(base);
   const bar = page.locator(".plans");
-  await expect(bar.getByRole("button", { name: /Plans · 2 · 1 waiting/ })).toBeVisible();
+  await expect(bar.getByRole("button", { name: /Plans · 2 · 1 needs input/ })).toBeVisible();
   const live = bar.locator(".plan-card", { hasText: "Split the auth module" });
   await expect(live).toContainText("Comparing a facade with a full split");
   await expect(bar.locator(".plan-card.ended")).toContainText("Old idea");
