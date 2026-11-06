@@ -299,7 +299,8 @@ async fn dispatcher_ignores_manual_stages_and_a_same_named_session_from_another_
     // The other repo's session is not this item's session, and the name is taken, so no launch.
     assert!(stub_log(&w.repo).is_empty());
     assert_eq!(field(&w.repo, "T-3-manual", "agent_status"), "ok");
-    assert_eq!(field(&w.repo, "T-4-other", "agent_status"), "ok", "failed launch is rolled back");
+    let status = field(&w.repo, "T-4-other", "agent_status");
+    assert!(status.starts_with("blocked: cannot start wi-T-4-other: session wi-T-4-other already exists"), "a failed launch says why: {status}");
 }
 
 #[tokio::test]
@@ -1661,4 +1662,31 @@ async fn a_plan_runs_in_the_repo_ends_with_its_session_resumes_and_is_deleted() 
     assert!(!record.exists());
     assert!(!w.tmux.has(&session));
     assert_eq!(get(&w, "/api/plans").await, "[]");
+}
+
+#[tokio::test]
+async fn a_prompt_over_the_tmux_command_limit_reaches_the_agent_unchanged() {
+    let w = world();
+    let project = w.state.store.project("app").unwrap();
+    // tmux refuses commands over about 16 KB; the prompt must not be part of one.
+    let prompt = format!("{}\n'quotes' \"and\" $(no expansion) `here`\n\n", "x".repeat(20_000));
+    workitem_ui::launch::spawn(&w.state, "wi-big", &project, None, &prompt).await.unwrap();
+    eventually("the agent ran", || !args_log(&w).is_empty()).await;
+    assert_eq!(args_log(&w), format!("argc=3\nlast={prompt}\n"));
+    assert!(w.tmux.has("wi-big"));
+}
+
+#[tokio::test]
+async fn a_handler_that_cannot_start_blocks_the_item_with_the_cause() {
+    let w = world();
+    write_item(&w.repo, "T-60-qa", "qa", "");
+    fs::write(w.repo.join(".claude/workitems/pipeline.json"), board(r#"[{"name":"qa","handler":"my-qa","next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
+    write_skill(&w.repo.join(".claude/workitems/skills"), "my-qa", "QA STEPS\n");
+    // A session of the same name, from another repo, is in the way.
+    w.tmux.run(&["new-session", "-d", "-s", "wi-T-60-qa", "sleep 60"]);
+
+    let (status, body) = post_bearer(&w, "/api/workitems/app/T-60-qa/run").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let agent_status = field(&w.repo, "T-60-qa", "agent_status");
+    assert!(agent_status.starts_with("blocked: cannot start wi-T-60-qa: session wi-T-60-qa already exists"), "{agent_status}");
 }

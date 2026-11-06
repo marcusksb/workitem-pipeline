@@ -86,15 +86,16 @@ fn instructions_of(state: &AppState, project: &Project, item: &Workitem, source:
 }
 
 /// Starts the handler of the item's stage as `wi-<dir>` and marks the item `working`; a failed
-/// start puts `ok` back. Shared by the dispatcher and `workitem-run-item`. The caller holds
+/// start blocks it with the cause, so it is not retried blindly. Shared by the dispatcher and `workitem-run-item`. The caller holds
 /// `AppState::busy` and has checked that the item is idle.
 pub async fn launch_handler(state: &AppState, project: &Project, item: &Workitem, path: &Path, stage: &Stage, instructions: &str) -> Result<(), String> {
     let _ = set_status(path, "working");
     let prompt = launch::handler_prompt(state, project, item, stage, instructions);
     let name = format!("wi-{}", item.dir);
     launch::spawn(state, &name, &project, Some(&item.dir), &prompt).await.map_err(|e| {
-        let _ = set_status(path, "ok");
-        format!("cannot start {name}: {e}")
+        let error = format!("cannot start {name}: {e}");
+        let _ = set_status(path, &format!("blocked: {}", error.split_whitespace().collect::<Vec<_>>().join(" ")));
+        error
     })
 }
 

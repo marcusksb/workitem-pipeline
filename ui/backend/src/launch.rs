@@ -14,8 +14,8 @@ use crate::{
 
 /// Starts `claude` with a prompt in a detached tmux session, the way `workitem-run` does:
 /// `remain-on-exit` keeps a crashed session visible, and the pipeline hooks mark a session
-/// that waits for input as blocked. The prompt goes to `claude` as one argv element, never
-/// through a shell. A workitem's session starts in its worktree when it has one, with the repo
+/// that waits for input as blocked. The prompt goes to `claude` as one argv element (see
+/// `start`), never interpreted by a shell. A workitem's session starts in its worktree when it has one, with the repo
 /// added so the agent can edit `workitem.md`; the session is tagged with `repo` in the same
 /// tmux call, so no listing sees it untagged.
 pub async fn spawn(
@@ -41,19 +41,19 @@ pub async fn spawn(
         args.extend(["--add-dir".into(), repo.into()]);
     }
     let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
-    args.extend(["--settings".into(), hooks.into(), prompt.into()]);
-    start(state, session, project, worktree.as_deref().unwrap_or(repo), &env, &args).await
+    args.extend(["--settings".into(), hooks.into()]);
+    start(state, session, project, worktree.as_deref().unwrap_or(repo), &env, &args, Some(prompt)).await
 }
 
 /// Starts a planning session (decision 36) in the repo root: `claude` with the planning settings
-/// and `claude_args` (`--session-id <uuid> <prompt>`, or `--resume <uuid>`). `record` is its plan
-/// record, which the hooks and `workitem-plan-note` update.
-pub async fn spawn_plan(state: &AppState, session: &str, project: &Project, record: &Path, claude_args: &[&str]) -> Result<(), String> {
+/// and `claude_args` (`--session-id <uuid>`, or `--resume <uuid>`), then `prompt` if any. `record`
+/// is its plan record, which the hooks and `workitem-plan-note` update.
+pub async fn spawn_plan(state: &AppState, session: &str, project: &Project, record: &Path, claude_args: &[&str], prompt: Option<&str>) -> Result<(), String> {
     let repo = &project.repo;
     let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_REPO={}", repo.display())];
     let mut args: Vec<OsString> = vec!["--settings".into(), plan_settings(state).into()];
     args.extend(claude_args.iter().map(OsString::from));
-    start(state, session, project, repo, &env, &args).await
+    start(state, session, project, repo, &env, &args, prompt).await
 }
 
 /// Inline `--settings` of a planning session: the helper and file edits run without asking, and
@@ -79,8 +79,10 @@ fn shell_quote(text: &str) -> String {
 }
 
 /// Runs the project's agent (decision 39), resolved here because tmux's `PATH` may differ from ours,
-/// or `state.claude` when it has none.
-async fn start(state: &AppState, session: &str, project: &Project, cwd: &Path, env: &[String], args: &[OsString]) -> Result<(), String> {
+/// or `state.claude` when it has none, with `args` and then `prompt` as the last argument.
+/// tmux sends a command to its server as one message and refuses one over about 16 KB, so the
+/// prompt goes through a private file that `READ_PROMPT` reads, deletes and appends unchanged.
+async fn start(state: &AppState, session: &str, project: &Project, cwd: &Path, env: &[String], args: &[OsString], prompt: Option<&str>) -> Result<(), String> {
     let repo = &project.repo;
     let agent: OsString = match &project.agent {
         Some(name) => config::resolve_executable(name).ok_or_else(|| format!("agent '{name}' of project {} not found", project.name))?.into(),
@@ -95,17 +97,50 @@ async fn start(state: &AppState, session: &str, project: &Project, cwd: &Path, e
     for var in env {
         command.arg("-e").arg(var);
     }
-    command.arg("--").arg(agent).args(args);
+    command.arg("--");
+    let file = match prompt {
+        Some(text) => {
+            let file = write_prompt(session, text)?;
+            command.args(["/bin/sh", "-c", READ_PROMPT, "sh"]).arg(&file);
+            Some(file)
+        }
+        None => None,
+    };
+    command.arg(agent).args(args);
     command.args([";", "set-option", tmux::REPO_OPTION]).arg(repo);
-    let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"))?;
-    if !output.status.success() {
-        return Err(format!("tmux new-session failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"));
+    let failed = match &output {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!("tmux new-session failed: {}", String::from_utf8_lossy(&output.stderr).trim())),
+        Err(e) => Some(e.clone()),
+    };
+    if let Some(e) = failed {
+        if let Some(file) = file {
+            let _ = fs::remove_file(file);
+        }
+        return Err(e);
     }
     let _ = tmux::command(state.tmux_socket.as_deref())
         .args(["set-option", "-t", &format!("={session}"), "remain-on-exit", "on"])
         .output()
         .await;
     Ok(())
+}
+
+/// `sh -c READ_PROMPT sh <file> <agent> <args>...`: runs the agent with the file's content as its
+/// last argument. The trailing `x` keeps trailing newlines, which `$(...)` would strip.
+const READ_PROMPT: &str = r#"f=$1; shift; p=$(cat -- "$f" && echo x) || exit 1; rm -f -- "$f"; exec "$@" "${p%x}""#;
+
+static PROMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Writes `text` to a new file only we can read, in the temp folder.
+fn write_prompt(session: &str, text: &str) -> Result<std::path::PathBuf, String> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let n = PROMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("workitem-prompt-{session}-{}-{n}", std::process::id()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 const PROTOCOL: &str = "agent_status is the agent_status: line in the frontmatter of the workitem's workitem.md.\n\

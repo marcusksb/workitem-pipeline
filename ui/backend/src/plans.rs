@@ -271,7 +271,7 @@ pub async fn create(
     }
     fs::create_dir_all(&folder).map_err(internal)?;
     fs::write(&path, text).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--session-id", &claude_session, &prompt]).await {
+    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--session-id", &claude_session], Some(&prompt)).await {
         let _ = fs::remove_file(&path);
         return Err(conflict(e));
     }
@@ -294,7 +294,7 @@ pub async fn resume(State(state): State<Shared>, UrlPath((project, id)): UrlPath
         return Err(conflict(format!("{session} is still running")));
     }
     workitem::set_fields(&path, &[("status", "working")]).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--resume", &claude_session]).await {
+    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--resume", &claude_session], None).await {
         let _ = workitem::set_fields(&path, &[("status", "ended")]);
         return Err(conflict(e));
     }
