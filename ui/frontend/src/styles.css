@@ -470,3 +470,39 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .plan-panel-summary { margin: 8px 0 0; color: var(--muted); }
 .tabs button.plan-delete { margin-left: auto; color: var(--blocked); }
 .hint { margin: 0; font-size: 13px; color: var(--muted); }
+
+.done-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--good) 40%, var(--border));
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  animation: done-in 0.2s ease-out;
+}
+@keyframes done-in { from { opacity: 0; } }
+.done-toast button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.done-toast button:hover { background: color-mix(in srgb, var(--good) 10%, transparent); }
+.done-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.done-project, .done-more { color: var(--muted); font-size: 12px; flex: none; }
+.done-more { padding: 2px 8px 4px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, newlyDone, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Item, Pipelines } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
@@ -226,5 +226,26 @@ describe("issueCategory", () => {
     expect(issueCategory("")).toBeUndefined();
     expect(issueCategory("undefined")).toBeUndefined();
     expect(issueCategory("toString")).toBeUndefined();
+  });
+});
+
+describe("newlyDone", () => {
+  const flow: Pipelines = {
+    app: [{ name: "default", pipeline: { entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
+  };
+  const seen = new Map([["app/moved", "todo"], ["app/stayed", "done"], ["app/waits", "todo"]]);
+
+  it("returns items that moved into a final stage since they were seen", () => {
+    const items = [
+      item({ dir: "moved", stage: "done" }),
+      item({ dir: "stayed", stage: "done" }),
+      item({ dir: "waits", stage: "todo" }),
+      item({ dir: "unseen", stage: "done" }),
+    ];
+    expect(newlyDone(seen, items, flow).map((i) => i.dir)).toEqual(["moved"]);
+  });
+
+  it("returns nothing while the pipelines are unknown", () => {
+    expect(newlyDone(seen, [item({ dir: "moved", stage: "done" })], undefined)).toEqual([]);
   });
 });

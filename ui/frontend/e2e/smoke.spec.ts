@@ -346,3 +346,16 @@ test("planning sessions show above the board and open in the side panel", async 
   await bar.getByRole("button", { name: /Plans ·/ }).click();
   await expect(bar.locator(".plan-card")).toHaveCount(2);
 });
+
+test("moving an item into a final stage shows a toast that opens it", async ({ page }) => {
+  await page.goto(base);
+  await page.getByRole("tablist").getByRole("tab", { name: "research" }).click();
+  await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
+  execFileSync("python3", [resolve("../../skills/workitem-pipeline/bin/workitem-move"), join(repo, ".claude/workitems/T-4-research/workitem.md"), "findings"]);
+
+  const toast = page.locator(".done-toast");
+  await expect(toast).toContainText("Research item is done");
+  await toast.getByRole("button", { name: /Research item is done/ }).click();
+  await expect(page).toHaveURL(/#demo\/T-4-research/);
+  await expect(toast).toHaveCount(0);
+});

@@ -17,6 +17,23 @@ export function newlyBlocked(seen: Set<string>, items: Item[]): Item[] {
   return items.filter((item) => isBlocked(item) && !seen.has(blockedKey(item)));
 }
 
+/** The item's stage is final on its board: no stage follows it. */
+export function isFinal(item: Item, pipelines: Pipelines | undefined): boolean {
+  const stage = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
+  return !!stage && stage.next.length === 0;
+}
+
+/**
+ * Items now in a final stage that `seen` (stage by `itemKey`) had in another stage. Comparing stages rather
+ * than finality keeps done items quiet when their board file turns valid again.
+ */
+export function newlyDone(seen: Map<string, string>, items: Item[], pipelines: Pipelines | undefined): Item[] {
+  return items.filter((item) => {
+    const before = seen.get(itemKey(item));
+    return before !== undefined && before !== item.stage && isFinal(item, pipelines);
+  });
+}
+
 export const DEFAULT_BOARD = "default";
 
 /** Key of the column for items whose stage is not on their board. */
