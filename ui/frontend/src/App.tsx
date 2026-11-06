@@ -10,7 +10,7 @@ import { Plans } from "./Plans";
 import { Projects } from "./Projects";
 import { QuickSearch } from "./QuickSearch";
 import { Terminal } from "./Terminal";
-import { useBlockedAlerts } from "./useBlockedAlerts";
+import { useAlerts } from "./useAlerts";
 import { usePolling } from "./usePolling";
 import { Item } from "./types";
 import { readRoute, Route, routeHash, Tab } from "./url";
@@ -63,7 +63,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
   const items = usePolling(api.items, 3000, "items", onUnauthorized);
   const sessions = usePolling(api.sessions, 3000, "sessions", onUnauthorized);
   const plans = usePolling(api.plans, 3000, "plans", onUnauthorized);
-  useBlockedAlerts(items.data);
+  useAlerts(items.data);
 
   useEffect(() => {
     const onHash = () => setRoute(readRoute());

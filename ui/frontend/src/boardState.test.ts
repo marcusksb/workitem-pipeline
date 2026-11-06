@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, newlyDone, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
-import { Item, Pipelines } from "./types";
+import { blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { Item, Pipelines, Review } from "./types";
 
 const item = (over: Partial<Item>): Item => ({
   project: "app",
@@ -247,5 +247,26 @@ describe("newlyDone", () => {
 
   it("returns nothing while the pipelines are unknown", () => {
     expect(newlyDone(seen, [item({ dir: "moved", stage: "done" })], undefined)).toEqual([]);
+  });
+});
+
+describe("readyToMerge", () => {
+  const review: Review = { state: "open", approval: "approved", approved_by_me: false, merge: "mergeable", ci: "passing", failed: [] };
+
+  it("needs an open, approved, mergeable PR with passing CI", () => {
+    expect(readyToMerge(item({ review }))).toBe(true);
+    expect(readyToMerge(item({ review: null }))).toBe(false);
+    expect(readyToMerge(item({ review: { ...review, state: "merged" } }))).toBe(false);
+    expect(readyToMerge(item({ review: { ...review, approval: "review_required" } }))).toBe(false);
+    expect(readyToMerge(item({ review: { ...review, merge: "conflicting" } }))).toBe(false);
+    expect(readyToMerge(item({ review: { ...review, ci: "pending" } }))).toBe(false);
+  });
+});
+
+describe("newlyMatching", () => {
+  it("returns matching items that did not match before", () => {
+    const seen = new Set(["app/old"]);
+    const items = [item({ dir: "old", issue_status_category: "done" }), item({ dir: "fresh", issue_status_category: "done" }), item({ dir: "open", issue_status_category: "indeterminate" })];
+    expect(newlyMatching(seen, items, issueDone).map((i) => i.dir)).toEqual(["fresh"]);
   });
 });

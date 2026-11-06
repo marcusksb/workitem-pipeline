@@ -17,6 +17,17 @@ export function newlyBlocked(seen: Set<string>, items: Item[]): Item[] {
   return items.filter((item) => isBlocked(item) && !seen.has(blockedKey(item)));
 }
 
+/** The PR is open, approved, free of conflicts and green: it only waits for someone to merge it. */
+export const readyToMerge = (item: Item) =>
+  item.review?.state === "open" && item.review.approval === "approved" && item.review.merge === "mergeable" && item.review.ci === "passing";
+
+export const issueDone = (item: Item) => item.issue_status_category === "done";
+
+/** Items that match now and whose `itemKey` is not in `seen`, the keys of the items that matched before. */
+export function newlyMatching(seen: Set<string>, items: Item[], matches: (item: Item) => boolean): Item[] {
+  return items.filter((item) => matches(item) && !seen.has(itemKey(item)));
+}
+
 /** The item's stage is final on its board: no stage follows it. */
 export function isFinal(item: Item, pipelines: Pipelines | undefined): boolean {
   const stage = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
