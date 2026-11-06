@@ -415,7 +415,7 @@ async fn agent_sessions_start_from_the_ui_and_pass_text_as_one_argument() {
     assert_eq!(field(&w.repo, "T-9-start", "agent_status"), "working");
     let (status, body) = post(&w, "/api/workitems/app/T-9-start/start", "").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body.contains("already exists"));
+    assert!(body.contains("already has a session"));
 
     let pwn = w.dir.path().join("pwned");
     let input = format!("it's \"quoted\" $(touch {}) `touch {}`", pwn.display(), pwn.display());
@@ -451,7 +451,7 @@ async fn a_manual_session_starts_in_any_stage_and_survives_the_dispatcher() {
 
     let (status, body) = post(&w, "/api/workitems/app/T-12-chat/session", "").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body.contains("already exists"));
+    assert!(body.contains("already has a session"));
     assert_eq!(field(&w.repo, "T-12-chat", "agent_status"), "working", "a refused launch leaves the status alone");
 
     write_item(&w.repo, "T-13-stuck", "analyze", "");
@@ -478,7 +478,7 @@ async fn discuss_brief_opens_a_session_on_the_brief() {
 
     let (status, body) = post(&w, "/api/workitems/app/T-14-talk/discuss", "").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(body.contains("already exists"));
+    assert!(body.contains("already has a session"));
 }
 
 #[tokio::test]
@@ -1689,4 +1689,36 @@ async fn a_handler_that_cannot_start_blocks_the_item_with_the_cause() {
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     let agent_status = field(&w.repo, "T-60-qa", "agent_status");
     assert!(agent_status.starts_with("blocked: cannot start wi-T-60-qa: session wi-T-60-qa already exists"), "{agent_status}");
+}
+
+/// Posts `uri` while a watcher launches the item's handler between the request's read of the
+/// item and its turn on `busy`: the session appears and the status turns `working` meanwhile.
+async fn post_racing_a_launch(w: &World, dir: &str, uri: &str, json: &str) -> (StatusCode, String) {
+    let busy = w.state.busy.lock().await;
+    let launch = async {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        w.tmux.run(&["new-session", "-d", "-s", &format!("wi-{dir}"), "-c", w.repo.to_str().unwrap(), "sleep 60"]);
+        let path = w.repo.join(".claude/workitems").join(dir).join("workitem.md");
+        fs::write(&path, fs::read_to_string(&path).unwrap().replace("agent_status: ok", "agent_status: working")).unwrap();
+        drop(busy);
+    };
+    tokio::join!(post(w, uri, json), launch).0
+}
+
+#[tokio::test]
+async fn a_launch_racing_a_watcher_leaves_the_watchers_session_alone() {
+    let w = world();
+    write_item(&w.repo, "T-40-race", "in_review", PR);
+    set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
+
+    let (status, body) = post_racing_a_launch(&w, "T-40-race", "/api/workitems/app/T-40-race/fix", r#"{"kind":"comments"}"#).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(field(&w.repo, "T-40-race", "agent_status"), "working", "the stale ok is not restored");
+    settle(&w).await;
+    assert!(w.tmux.has("wi-T-40-race"), "the dispatcher does not reap the watcher's session");
+    assert!(stub_log(&w.repo).is_empty(), "no fixer ran");
+
+    write_item(&w.repo, "T-41-race", "analyze", "");
+    let (status, _) = post_racing_a_launch(&w, "T-41-race", "/api/workitems/app/T-41-race/session", "").await;
+    assert_eq!((status, field(&w.repo, "T-41-race", "agent_status")), (StatusCode::CONFLICT, "working".into()));
 }

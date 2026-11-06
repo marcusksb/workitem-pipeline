@@ -208,7 +208,7 @@ pub async fn start(
     }
     let instructions = launch::instructions(&state, &project, &item.board, stage.handler.as_deref().unwrap_or_default()).map_err(conflict)?;
     let prompt = launch::handler_prompt(&state, &project, &item, &stage, &instructions);
-    launch_item_session(&state, &project, &path, &item, &prompt).await
+    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
 }
 
 #[derive(Deserialize)]
@@ -255,16 +255,13 @@ pub async fn fix(
     if !item.pr.starts_with("http") {
         return Err(conflict("the workitem has no PR link"));
     }
-    if item.agent_status != "ok" {
-        return Err(conflict(format!("{dir} is {}, not ok", item.agent_status)));
-    }
     let prompt = match kind.as_str() {
         "ci" => launch::ci_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         "conflict" => launch::conflict_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         "comments" => launch::comments_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
-    launch_item_session(&state, &project, &path, &item, &prompt).await
+    launch_item_session(&state, &project, &path, &dir, &prompt, true).await
 }
 
 /// A free-form agent session on the workitem, in any stage: the human drives it from the
@@ -275,7 +272,7 @@ pub async fn start_session(
 ) -> Result<(StatusCode, Json<Launched>)> {
     let (project, path, item) = find(&state, &project, &dir)?;
     let prompt = launch::session_prompt(&dir, &project.repo);
-    launch_item_session(&state, &project, &path, &item, &prompt).await
+    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
 }
 
 /// Like `start_session`, but the agent opens on the brief and plan so the human can discuss
@@ -286,25 +283,36 @@ pub async fn discuss_brief(
 ) -> Result<(StatusCode, Json<Launched>)> {
     let (project, path, item) = find(&state, &project, &dir)?;
     let prompt = launch::brief_prompt(&dir, &project.repo);
-    launch_item_session(&state, &project, &path, &item, &prompt).await
+    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
 }
 
 /// Starts `wi-<dir>` with `prompt`. The status is `working` while it runs: an `ok` item with
-/// a live session is reaped by the dispatcher.
+/// a live session is reaped by the dispatcher. Session and status are checked under `busy`, on
+/// the file as it is now: a copy read before the lock can be stale (a watcher may have started
+/// a handler meanwhile), and restoring it would make the dispatcher kill that handler.
+/// `require_ok` refuses any status but `ok` (fixers only start on an idle item).
 async fn launch_item_session(
     state: &AppState,
     project: &Project,
     path: &Path,
-    item: &Workitem,
+    dir: &str,
     prompt: &str,
+    require_ok: bool,
 ) -> Result<(StatusCode, Json<Launched>)> {
+    let _busy = state.busy.lock().await;
+    if has_session(state, project, dir).await {
+        return Err(conflict(format!("{dir} already has a session")));
+    }
+    let (item, _) = workitem::read(project, dir).ok_or(ApiError::not_found("workitem"))?;
     if item.agent_status.starts_with("blocked") {
         return Err(conflict("clear the blocked status first"));
     }
-    let _busy = state.busy.lock().await;
-    let session = format!("wi-{}", item.dir);
+    if require_ok && item.agent_status != "ok" {
+        return Err(conflict(format!("{dir} is {}, not ok", item.agent_status)));
+    }
+    let session = format!("wi-{dir}");
     set_status(path, "working").map_err(internal)?;
-    if let Err(e) = launch::spawn(state, &session, &project, Some(&item.dir), prompt).await {
+    if let Err(e) = launch::spawn(state, &session, project, Some(dir), prompt).await {
         let _ = set_status(path, &item.agent_status);
         return Err(conflict(e));
     }
