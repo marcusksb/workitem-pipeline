@@ -117,7 +117,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .projects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 main { flex: 1; min-height: 0; display: flex; }
-.left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; }
+.left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; --tabs-h: 36px; }
 .with-detail .left { flex: 0 0 50%; }
 
 .cards { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
@@ -130,7 +130,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .column[data-stage="in_review"] { --tint: #ea580c; }
 .column[data-stage="done"] { --tint: #16a34a; }
 .column.unknown { --tint: var(--blocked); }
-.board-tabs { display: flex; gap: 4px; margin: 8px 0; border-bottom: 1px solid var(--border, currentColor); }
+/* Sticks to the top of .left (whose 16px top padding the -16px cancels); column headers stick below it. */
+.board-tabs { display: flex; gap: 4px; margin: 8px 0; height: var(--tabs-h); border-bottom: 1px solid var(--border, currentColor); position: sticky; top: -16px; z-index: 2; background: var(--bg); }
 .board-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .board-tabs button.active { color: inherit; border-bottom-color: currentColor; font-weight: 600; }
 .view-toggle { margin-left: auto; display: flex; gap: 2px; align-self: center; }
@@ -146,7 +147,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .board.list .card-foot { margin-top: 0; justify-content: flex-end; flex: none; min-height: 0; }
 .board.list .card .chip, .board.list .card .review-strip { margin-top: 0; }
 .count.blocked { --tint: var(--blocked); }
-.column h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; position: sticky; top: -16px; z-index: 1; background: var(--bg); padding: 8px 0; }
+.column h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; position: sticky; top: calc(var(--tabs-h) - 16px); z-index: 1; background: var(--bg); padding: 8px 0; }
 .column h2 .clear { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }
 .column h2 .clear-error { flex-basis: 100%; font-size: 12px; font-weight: 400; white-space: pre-line; margin: 0; }
 .count { border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; background: color-mix(in srgb, var(--tint) 15%, transparent); color: var(--tint); }
