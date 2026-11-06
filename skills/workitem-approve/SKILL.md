@@ -1,6 +1,6 @@
 ---
 name: workitem-approve
-description: Review and approve (or reject) a workitem in `ready_for_development`. Shows the review brief, then either sets `approved: true` and offers to start development, or sends the item back to `analyze` with your comment. Use when asked to "approve workitem X", "review the brief", "reject workitem X".
+description: "Review and approve (or reject) a workitem in `ready_for_development`. Shows the review brief, then either sets `approved: true` and offers to start development, or sends the item back to `analyze` with your comment. Use when asked to \"approve workitem X\", \"review the brief\", \"reject workitem X\"."
 ---
 
 # Workitem Approve
