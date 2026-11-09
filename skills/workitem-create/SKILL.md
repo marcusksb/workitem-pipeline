@@ -33,6 +33,8 @@ If the skill argument matches a Jira ticket key (`[A-Z]+-\d+`), treat it as **Ca
 
 Items live in a workspace folder, not in a repo. `--workspace <folder>` names it (else use `$WORKITEM_WORKSPACE`; with neither, end your turn asking for the workspace folder and write nothing). `--board <name>` is the board the task was filed on; it must be `<workspace>/boards/<name>.json`, stop and say so if it is not (without `--board`, a workspace with one board uses that one, otherwise ask). Each board file names its repo in `"repo"`: an item belongs to the repo of its board. Read every `<workspace>/boards/*.json` now and note each board's name and repo.
 
+A board without `"repo"` holds items that change no code (an intake board, say). On such a board: `worktree_needed: false` and `pr_mode: none` (Steps 4 and 5 are decided), and always exactly one item, never split (Step 6). Its handler skill does the rest, so keep the `## Description` close to the input.
+
 Other optional flags: `--issue <KEY>` links a ticket, `--parent <dir>` marks the new workitem as a child of the workitem with that directory name (use it when splitting a workitem into smaller ones). Callers pass these instead of answering questions.
 
 If no argument was given, end your turn with the question "Give me a Jira ticket ID, a Sentry issue URL, or describe the task." as the final message and write no file.
