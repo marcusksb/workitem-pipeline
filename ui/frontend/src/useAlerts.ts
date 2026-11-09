@@ -73,10 +73,10 @@ export function useAlerts(items: Item[] | undefined) {
     beep();
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     for (const item of fresh) {
-      const note = new Notification(`Workitem blocked (${item.project})`, { body: `${item.dir}: ${item.agent_status}` });
+      const note = new Notification(`Workitem blocked (${item.workspace})`, { body: `${item.dir}: ${item.agent_status}` });
       note.onclick = () => {
         window.focus();
-        location.hash = routeHash({ item: { project: item.project, dir: item.dir } });
+        location.hash = routeHash({ item: { workspace: item.workspace, dir: item.dir } });
       };
     }
   }, [items]);

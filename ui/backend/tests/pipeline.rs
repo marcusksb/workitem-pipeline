@@ -1774,7 +1774,7 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
 
     let repo = serde_json::to_string(&w.repo.display().to_string()).unwrap();
     let (status, body) = post(&w, "/api/workspaces/app/boards", &format!(r#"{{"name":"ui","repo":{repo}}}"#)).await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     assert_eq!(post(&w, "/api/workspaces/app/boards", &format!(r#"{{"name":"ui","repo":{repo}}}"#)).await.0, StatusCode::BAD_REQUEST, "taken");
     assert_eq!(post(&w, "/api/workspaces/app/boards", r#"{"name":"x","repo":"/no/such/repo"}"#).await.0, StatusCode::BAD_REQUEST);
     let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();

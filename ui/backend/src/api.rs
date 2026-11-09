@@ -87,7 +87,7 @@ pub async fn add_board(
     let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     state.add_board(&workspace, body.name.trim(), &body.repo).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
     state.wake.notify_one();
-    Ok(StatusCode::CREATED)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

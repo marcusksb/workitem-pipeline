@@ -1,4 +1,4 @@
-import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Project, StageSource } from "./types";
+import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, StageSource } from "./types";
 
 type Launched = { session: string };
 
@@ -21,28 +21,29 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 }
 
 const segment = encodeURIComponent;
-const itemUrl = (item: Item) => `/api/workitems/${segment(item.project)}/${segment(item.dir)}`;
-const planUrl = (project: string, id: string) => `/api/plans/${segment(project)}/${segment(id)}`;
+const itemUrl = (item: Item) => `/api/workitems/${segment(item.workspace)}/${segment(item.dir)}`;
+const planUrl = (workspace: string, id: string) => `/api/plans/${segment(workspace)}/${segment(id)}`;
 
 export const api = {
   login: (token: string) => request<void>("POST", "/api/login", { token }),
   me: () => request<void>("GET", "/api/me"),
-  projects: () => request<Project[]>("GET", "/api/projects"),
-  addProject: (name: string, repo: string) => request<Project>("POST", "/api/projects", { name, repo }),
-  setAgent: (name: string, agent: string) => request<Project>("PUT", `/api/projects/${segment(name)}`, { agent }),
-  removeProject: (name: string) => request<void>("DELETE", `/api/projects/${segment(name)}`),
+  workspaces: () => request<Workspace[]>("GET", "/api/workspaces"),
+  addWorkspace: (name: string) => request<Workspace>("POST", "/api/workspaces", { name }),
+  setAgent: (name: string, agent: string) => request<Workspace>("PUT", `/api/workspaces/${segment(name)}`, { agent }),
+  addBoard: (workspace: string, name: string, repo: string) =>
+    request<void>("POST", `/api/workspaces/${segment(workspace)}/boards`, { name, repo }),
   pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
-  stageSource: (project: string, board: string, stage: string) =>
-    request<StageSource>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
-  pauseStage: (project: string, board: string, stage: string, paused: boolean) =>
-    request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/stages/${segment(stage)}/paused`, { paused }),
-  learnings: (project: string, board: string) =>
-    request<Learnings>("GET", `/api/projects/${segment(project)}/boards/${segment(board)}/learnings`),
-  saveLearnings: (project: string, board: string, base: string, content: string) =>
-    request<void>("PUT", `/api/projects/${segment(project)}/boards/${segment(board)}/learnings`, { base, content }),
+  stageSource: (workspace: string, board: string, stage: string) =>
+    request<StageSource>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
+  pauseStage: (workspace: string, board: string, stage: string, paused: boolean) =>
+    request<void>("PUT", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/stages/${segment(stage)}/paused`, { paused }),
+  learnings: (workspace: string, board: string) =>
+    request<Learnings>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/learnings`),
+  saveLearnings: (workspace: string, board: string, base: string, content: string) =>
+    request<void>("PUT", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/learnings`, { base, content }),
   items: () => request<Item[]>("GET", "/api/workitems"),
-  detail: (project: string, dir: string) =>
-    request<Detail>("GET", `/api/workitems/${segment(project)}/${segment(dir)}`),
+  detail: (workspace: string, dir: string) =>
+    request<Detail>("GET", `/api/workitems/${segment(workspace)}/${segment(dir)}`),
   files: (item: Item) => request<FileEntry[]>("GET", `${itemUrl(item)}/files`),
   reveal: (item: Item, path: string) => request<void>("POST", `${itemUrl(item)}/reveal`, { path }),
   prConversation: (item: Item) => request<PrConversation>("GET", `${itemUrl(item)}/pr`),
@@ -60,23 +61,23 @@ export const api = {
   merge: (item: Item) => request<void>("POST", `${itemUrl(item)}/merge`),
   rebase: (item: Item) => request<void>("POST", `${itemUrl(item)}/rebase`),
   remove: (item: Item) => request<{ worktree_left: string | null }>("POST", `${itemUrl(item)}/remove`),
-  create: (project: string, input: string, board: string) =>
-    request<Launched>("POST", `/api/projects/${segment(project)}/create`, { input, board }),
+  create: (workspace: string, input: string, board: string) =>
+    request<Launched>("POST", `/api/workspaces/${segment(workspace)}/create`, { input, board }),
   plans: () => request<Plan[]>("GET", "/api/plans"),
-  plan: (project: string, id: string) => request<PlanDetail>("GET", planUrl(project, id)),
-  createPlan: (project: string, input: string) =>
-    request<{ id: string }>("POST", `/api/projects/${segment(project)}/plans`, { input }),
-  resumePlan: (plan: Plan) => request<void>("POST", `${planUrl(plan.project, plan.id)}/resume`),
-  deletePlan: (plan: Plan) => request<void>("DELETE", planUrl(plan.project, plan.id)),
+  plan: (workspace: string, id: string) => request<PlanDetail>("GET", planUrl(workspace, id)),
+  createPlan: (workspace: string, input: string) =>
+    request<{ id: string }>("POST", `/api/workspaces/${segment(workspace)}/plans`, { input }),
+  resumePlan: (plan: Plan) => request<void>("POST", `${planUrl(plan.workspace, plan.id)}/resume`),
+  deletePlan: (plan: Plan) => request<void>("DELETE", planUrl(plan.workspace, plan.id)),
 };
 
 /** URL of one file in a workitem folder; `path` is relative and `/`-separated. */
 export const fileUrl = (item: Item, path: string) => `${itemUrl(item)}/files/${path.split("/").map(segment).join("/")}`;
 
 /** Path of a terminal socket: a workitem's session, or a `wi-new-*` or `wi-plan-*` session. */
-export const itemTerminal = (project: string, dir: string) => `terminal/${segment(project)}/${segment(dir)}`;
-export const agentTerminal = (project: string, name: string) => `session/${segment(project)}/${segment(name)}`;
-export const planTerminal = (plan: Plan) => agentTerminal(plan.project, `wi-plan-${plan.id}`);
+export const itemTerminal = (workspace: string, dir: string) => `terminal/${segment(workspace)}/${segment(dir)}`;
+export const agentTerminal = (workspace: string, name: string) => `session/${segment(workspace)}/${segment(name)}`;
+export const planTerminal = (plan: Plan) => agentTerminal(plan.workspace, `wi-plan-${plan.id}`);
 
 export const terminalUrl = (path: string, cols: number, rows: number) => {
   const scheme = location.protocol === "https:" ? "wss" : "ws";

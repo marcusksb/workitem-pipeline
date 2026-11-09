@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Board } from "./Board";
-import { itemKey, shownBoard } from "./boardState";
+import { boardNames, itemKey, shownBoard } from "./boardState";
 import { DetailPanel } from "./DetailPanel";
 import { ActivityToasts } from "./ActivityToasts";
 import { Login } from "./Login";
 import { PlanPanel } from "./PlanPanel";
 import { Plans } from "./Plans";
-import { Projects } from "./Projects";
+import { Workspaces } from "./Workspaces";
 import { QuickSearch } from "./QuickSearch";
 import { Terminal } from "./Terminal";
 import { useAlerts } from "./useAlerts";
@@ -55,10 +55,13 @@ function isBackground(target: EventTarget): boolean {
   return window.getSelection()?.isCollapsed ?? true;
 }
 
-function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
+function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [route, setRoute] = useState<Route>(readRoute);
-  const project = route.project ?? null;
-  const projects = usePolling(api.projects, 3000, "projects", onUnauthorized);
+  const workspaces = usePolling(api.workspaces, 3000, "workspaces", onUnauthorized);
+  const names = (workspaces.data ?? []).map((w) => w.name);
+  // Exactly one workspace is on screen: the one asked for, else the open item's or plan's, else the first.
+  const wanted = route.workspace ?? route.item?.workspace ?? route.plan?.workspace;
+  const workspace: string | undefined = wanted && names.includes(wanted) ? wanted : names[0];
   const pipelines = usePolling(api.pipelines, 3000, "pipelines", onUnauthorized);
   const items = usePolling(api.items, 3000, "items", onUnauthorized);
   const sessions = usePolling(api.sessions, 3000, "sessions", onUnauthorized);
@@ -87,7 +90,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
 
   /** Navigates to a route, leaving a history entry so Back and Forward walk items and tabs. */
   const navigate = (next: Route) => {
-    const hash = routeHash({ project: route.project, board: route.board, ...next });
+    const hash = routeHash({ workspace, board: route.board, ...next });
     if (hash !== location.hash) {
       history.pushState(null, "", hash || location.pathname + location.search);
     }
@@ -95,40 +98,43 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
   };
 
   const selected = route.item
-    ? (items.data ?? []).find((i) => i.project === route.item!.project && i.dir === route.item!.dir) ?? null
+    ? (items.data ?? []).find((i) => i.workspace === route.item!.workspace && i.dir === route.item!.dir) ?? null
     : null;
   const selectedPlan = route.plan
-    ? (plans.data ?? []).find((p) => p.project === route.plan!.project && p.id === route.plan!.id) ?? null
+    ? (plans.data ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
     : null;
   const detailOpen = !!(selected || selectedPlan);
-  const shown = (items.data ?? []).filter((item) => !project || item.project === project);
-  const error = projects.error ?? items.error ?? pipelines.error;
-  const inView = project ? [project] : (projects.data ?? []).map((p) => p.name);
-  /** Shows a search result: on its board, and on all projects if the filtered one is not its own. */
+  const shown = (items.data ?? []).filter((item) => item.workspace === workspace);
+  const error = workspaces.error ?? items.error ?? pipelines.error;
+  const inView = workspace ? [workspace] : [];
+  const boardsInView = boardNames(pipelines.data, inView);
+  const activeBoard = route.board && boardsInView.includes(route.board) ? route.board : boardsInView[0];
+  /** Opens an item in its workspace, switching to its board only when another one is on screen. */
+  const open = (item: Item) => {
+    const board = shownBoard(item, pipelines.data);
+    const sameView = item.workspace === workspace && board === activeBoard;
+    navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir } });
+  };
   const openFound = (item: Item) => {
     setSearching(false);
-    navigate({
-      project: project === item.project ? project : undefined,
-      board: shownBoard(item, pipelines.data),
-      item: { project: item.project, dir: item.dir },
-    });
+    open(item);
   };
   const onTab = (tab: Tab) =>
-    selected && navigate({ item: { project: selected.project, dir: selected.dir }, tab });
+    selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
   return (
     <div className="app">
       <header className="top">
         <h1 className="brand"><img src="/favicon.svg" alt="" width={22} height={22} />Workload</h1>
-        <Projects
-          projects={projects.data ?? []}
+        <Workspaces
+          workspaces={workspaces.data ?? []}
           pipelines={pipelines.data}
           board={route.board}
-          selected={project}
+          selected={workspace}
           onLaunched={() => void sessions.reload()}
-          onSelect={(name) => navigate({ ...route, project: name ?? undefined })}
+          onSelect={(name) => navigate({ workspace: name, board: undefined })}
           onChanged={() => {
-            void projects.reload();
+            void workspaces.reload();
             void items.reload();
           }}
         />
@@ -140,19 +146,22 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
       <Plans
         plans={plans.data ?? []}
         sessions={sessions.data ?? []}
-        projects={inView}
-        showProject={!project}
+        workspaces={inView}
+        showWorkspace={false}
         selected={selectedPlan}
-        onSelect={(plan) => navigate({ plan: { project: plan.project, id: plan.id } })}
-        onStarted={(planProject, id) => {
+        onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id } })}
+        onStarted={(planWorkspace, id) => {
           void plans.reload();
-          navigate({ plan: { project: planProject, id } });
+          navigate({ plan: { workspace: planWorkspace, id } });
         }}
       />
-      {projects.data?.length === 0 && <p className="empty">No projects yet. Add a repo directory to see its workitems.</p>}
+      {workspaces.data?.length === 0 && <p className="empty">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+      {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
+        <p className="empty">No boards in {workspace} yet. Add one for a repository with + Board.</p>
+      )}
       <main className={detailOpen ? "with-detail" : ""}>
         <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
-          <Board items={shown} pipelines={pipelines.data} projects={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={(item) => navigate({ item })} showProject={!project} onChanged={() => {
+          <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
             void items.reload();
             void pipelines.reload();
           }} />
@@ -161,7 +170,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
           <DetailPanel
             item={selected}
             items={shown}
-            onSelect={(item) => navigate({ item })}
+            onSelect={open}
             tab={route.tab}
             onTab={onTab}
             onClose={() => navigate({})}
@@ -170,9 +179,12 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
         )}
         {selectedPlan && (
           <PlanPanel
-            key={`${selectedPlan.project}/${selectedPlan.id}`}
+            key={`${selectedPlan.workspace}/${selectedPlan.id}`}
             plan={selectedPlan}
-            onWorkitem={(itemProject, dir) => navigate({ item: { project: itemProject, dir } })}
+            onWorkitem={(itemWorkspace, dir) => {
+              const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
+              if (item) open(item);
+            }}
             onClose={() => navigate({})}
             onChanged={() => void plans.reload()}
             onUnauthorized={onUnauthorized}
@@ -180,7 +192,7 @@ function Workspace({ onUnauthorized }: { onUnauthorized: () => void }) {
         )}
       </main>
       <ActivityToasts items={items.data} pipelines={pipelines.data} />
-      {searching && <QuickSearch items={items.data ?? []} showProject={(projects.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
+      {searching && <QuickSearch items={items.data ?? []} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );
 }
@@ -189,7 +201,7 @@ export function App() {
   const session = useSession();
   if (session.state === "checking") return null;
   if (session.state === "out") return <Login onSubmit={session.login} error={session.error} />;
-  return <Workspace onUnauthorized={session.expire} />;
+  return <Main onUnauthorized={session.expire} />;
 }
 
 export function TerminalPage({ path }: { path: string }) {

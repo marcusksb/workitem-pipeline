@@ -17,9 +17,9 @@ Open the printed `http://127.0.0.1:7373/#token=…` URL once. `workload --rotate
 
 Blocked items raise a browser notification with a beep while the UI tab is open. Click anywhere on the page once after loading it, so the browser allows sound and asks for notification permission. The backend needs your login environment (`claude`, `tmux`, `python3` on `PATH`), so start it from your shell.
 
-The dispatcher only runs while the backend runs. It starts `claude` sessions for `backlog` and `analyze` items as soon as the backend runs, so turn off `/loop /workitem-run` for those stages first. `WORKITEM_UI_DISPATCH=off` disables it.
+The dispatcher only runs while the backend runs. It starts `claude` sessions for `backlog` and `analyze` items as soon as the backend runs. `WORKITEM_UI_DISPATCH=off` disables it.
 
-Config: `~/.config/workitem-ui/config.toml` (override with `WORKITEM_UI_CONFIG`). Port: `WORKITEM_UI_PORT`. Other tmux server: `WORKITEM_UI_TMUX_SOCKET`.
+Everything lives in `~/.workitems-pipeline/` (override with `WORKITEM_UI_HOME`): `config.toml` (token, port), `paused.json`, `watch.json` and `workspaces/<name>/` with the items, boards and plans. Port: `WORKITEM_UI_PORT`. Other tmux server: `WORKITEM_UI_TMUX_SOCKET`.
 
 ## Test
 

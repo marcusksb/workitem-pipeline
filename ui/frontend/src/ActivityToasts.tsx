@@ -51,7 +51,7 @@ export function ActivityToasts({ items, pipelines }: { items: Item[] | undefined
   };
   const open = (toast: Toast, item: Item) => {
     dismiss(toast.id);
-    location.hash = routeHash({ item: { project: item.project, dir: item.dir } });
+    location.hash = routeHash({ item: { workspace: item.workspace, dir: item.dir } });
   };
 
   if (toasts.length === 0) return null;
@@ -104,7 +104,7 @@ function ToastBody({ event, quip, onOpen }: { event: ActivityEvent; quip: string
     <>
       <span className="toast-text">{event.text}</span>
       <span className="toast-item">
-        {event.item.title} <span className="toast-project">· {event.item.project}</span>
+        {event.item.title} <span className="toast-workspace">· {event.item.workspace}</span>
       </span>
       <span className="toast-quip">{quip}</span>
     </>

@@ -1,66 +1,61 @@
 import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { Dialog } from "./Dialog";
-import { DEFAULT_BOARD } from "./boardState";
 import { Learnings } from "./Learnings";
-import { Pipelines, Project } from "./types";
+import { Pipelines, Workspace } from "./types";
 
 type Props = {
-  projects: Project[];
+  workspaces: Workspace[];
   pipelines: Pipelines | undefined;
   /** Board on screen, pre-selected for a new workitem. */
   board: string | undefined;
-  selected: string | null;
-  onSelect: (name: string | null) => void;
+  /** The workspace on screen; there is always exactly one once any exists. */
+  selected: string | undefined;
+  onSelect: (name: string) => void;
   onChanged: () => void;
   onLaunched: () => void;
 };
 
-export function Projects({ projects, pipelines, board: shown, selected, onSelect, onChanged, onLaunched }: Props) {
+export function Workspaces({ workspaces, pipelines, board: shown, selected, onSelect, onChanged, onLaunched }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  const [repo, setRepo] = useState("");
   const [error, setError] = useState<string>();
   const [creating, setCreating] = useState(false);
   const [learning, setLearning] = useState(false);
   const [editingAgent, setEditingAgent] = useState(false);
   const [agent, setAgent] = useState("");
   const [input, setInput] = useState("");
-  const target = selected ?? projects[0]?.name;
-  const boards = (pipelines?.[target] ?? []).map((b) => b.name);
-  const [board, setBoard] = useState(DEFAULT_BOARD);
+  const boards = (selected ? (pipelines?.[selected] ?? []) : []).map((b) => b.name);
+  const onScreen = shown && boards.includes(shown) ? shown : boards[0];
+  const [board, setBoard] = useState("");
 
-  const launch = async (action: () => Promise<unknown>) => {
-    try {
-      await action();
-      setError(undefined);
-      onLaunched();
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return false;
-    }
-  };
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
-    if (await launch(() => api.create(target, input, board))) {
+    if (!selected) return;
+    try {
+      await api.create(selected, input, board);
+      setError(undefined);
+      onLaunched();
       setInput("");
       setCreating(false);
+    } catch (e) {
+      fail(e);
     }
   };
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await api.addProject(name, repo);
+      const workspace = await api.addWorkspace(name);
       setName("");
-      setRepo("");
       setAdding(false);
       setError(undefined);
       onChanged();
+      onSelect(workspace.name);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      fail(e);
     }
   };
 
@@ -73,38 +68,27 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
       setError(undefined);
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      fail(e);
     }
   };
 
-  const selectedAgent = projects.find((p) => p.name === selected)?.agent;
-
-  const remove = async () => {
-    if (!selected || !confirm(`Remove project "${selected}" from the UI? The repo is not touched.`)) return;
-    await api.removeProject(selected);
-    onSelect(null);
-    onChanged();
-  };
+  const selectedAgent = workspaces.find((w) => w.name === selected)?.agent;
 
   return (
-    <div className="projects">
-      <select value={selected ?? ""} onChange={(e) => onSelect(e.target.value || null)}>
-        <option value="">All projects</option>
-        {projects.map((project) => (
-          <option key={project.name} value={project.name}>
-            {project.name}
-          </option>
-        ))}
-      </select>
-      {selected && (
-        <button className="link" onClick={remove}>
-          Remove
-        </button>
+    <div className="workspaces">
+      {workspaces.length > 0 && (
+        <select value={selected ?? ""} onChange={(e) => onSelect(e.target.value)} aria-label="Workspace">
+          {workspaces.map((workspace) => (
+            <option key={workspace.name} value={workspace.name}>
+              {workspace.name}
+            </option>
+          ))}
+        </select>
       )}
       {selected && (
         <button
           className="link"
-          title="Executable that runs this project's agent sessions"
+          title="Executable that runs this workspace's agent sessions"
           onClick={() => {
             setError(undefined);
             setAgent(selectedAgent ?? "");
@@ -121,30 +105,28 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
           setAdding(true);
         }}
       >
-        Add project
+        Add workspace
       </button>
-      {target && (
+      {selected && onScreen && (
         <button
           className="link"
           onClick={() => {
             setError(undefined);
-            setBoard(shown && boards.includes(shown) ? shown : DEFAULT_BOARD);
+            setBoard(onScreen);
             setCreating(true);
           }}
         >
           New workitem
         </button>
       )}
-      {target && (
+      {selected && onScreen && (
         <button className="link" onClick={() => setLearning(true)}>
           Learnings
         </button>
       )}
-      {learning && target && (
-        <Learnings project={target} board={shown && boards.includes(shown) ? shown : DEFAULT_BOARD} onClose={() => setLearning(false)} />
-      )}
-      {creating && target && (
-        <Dialog title={`New workitem in ${target}`} onClose={() => setCreating(false)}>
+      {learning && selected && onScreen && <Learnings workspace={selected} board={onScreen} onClose={() => setLearning(false)} />}
+      {creating && selected && (
+        <Dialog title={`New workitem in ${selected}`} onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={create}>
             <label>
               Task
@@ -168,6 +150,7 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
                 </select>
               </label>
             )}
+            <span className="hint">A task that needs changes in the repos of several boards becomes one linked item per board.</span>
             <button type="submit">Create</button>
             {error && <span className="error">{error}</span>}
           </form>
@@ -190,16 +173,13 @@ export function Projects({ projects, pipelines, board: shown, selected, onSelect
         </Dialog>
       )}
       {adding && (
-        <Dialog title="Add project" onClose={() => setAdding(false)}>
+        <Dialog title="Add workspace" onClose={() => setAdding(false)}>
           <form className="dialog-form" onSubmit={add}>
             <label>
               Name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="name" required />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="content-delivery" pattern="[A-Za-z0-9_-]+" required autoFocus />
             </label>
-            <label>
-              Repository path
-              <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="/absolute/path/to/repo" required />
-            </label>
+            <span className="hint">Creates ~/.workitems-pipeline/workspaces/{name || "<name>"}. Add a board per repository next.</span>
             <button type="submit">Add</button>
             {error && <span className="error">{error}</span>}
           </form>

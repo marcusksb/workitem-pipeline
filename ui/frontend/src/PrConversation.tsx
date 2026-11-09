@@ -24,7 +24,7 @@ function Note({ note }: { note: PrNote }) {
 
 /** PR description, then comments, review summaries and inline comments, newest first. */
 export function PrConversation({ item, onUnauthorized }: { item: Item; onUnauthorized: () => void }) {
-  const { data, error } = usePolling(() => api.prConversation(item), 30000, `${item.project}/${item.dir}/${item.pr}`, onUnauthorized);
+  const { data, error } = usePolling(() => api.prConversation(item), 30000, `${item.workspace}/${item.dir}/${item.pr}`, onUnauthorized);
   if (error) return <p className="error">{error}</p>;
   if (!data) return <p>Loading…</p>;
   return (

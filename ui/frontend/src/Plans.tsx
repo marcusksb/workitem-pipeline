@@ -26,22 +26,22 @@ type Props = {
   plans: Plan[];
   /** `wi-new-*` sessions (workitem create), shown as links at the end. */
   sessions: AgentSession[];
-  /** Projects in view; new plans go to the first unless the dialog picks another. */
-  projects: string[];
-  showProject: boolean;
+  /** Workspaces in view; new plans go to the first unless the dialog picks another. */
+  workspaces: string[];
+  showWorkspace: boolean;
   selected: Plan | null;
   onSelect: (plan: Plan) => void;
-  onStarted: (project: string, id: string) => void;
+  onStarted: (workspace: string, id: string) => void;
 };
 
-/** The planning sessions of the projects in view, above the board (decision 36). */
-export function Plans({ plans, sessions, projects, showProject, selected, onSelect, onStarted }: Props) {
+/** The planning sessions of the workspaces in view, above the board (decision 36). */
+export function Plans({ plans, sessions, workspaces, showWorkspace, selected, onSelect, onStarted }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [showDone, setShowDone] = useState(false);
   const [creating, setCreating] = useState(false);
-  const { open, done } = groupPlans(plans, projects);
-  const shownSessions = sessions.filter((session) => projects.includes(session.project));
-  if (!projects.length) return null;
+  const { open, done } = groupPlans(plans, workspaces);
+  const shownSessions = sessions.filter((session) => workspaces.includes(session.workspace));
+  if (!workspaces.length) return null;
 
   const toggle = () => {
     setCollapsed(!collapsed);
@@ -49,18 +49,20 @@ export function Plans({ plans, sessions, projects, showProject, selected, onSele
   };
   const card = (plan: Plan) => {
     const status = planStatus(plan);
-    const isSelected = selected?.project === plan.project && selected.id === plan.id;
+    const isSelected = selected?.workspace === plan.workspace && selected.id === plan.id;
     return (
-      <button key={`${plan.project}/${plan.id}`} className={`plan-card ${status}${isSelected ? " selected" : ""}`} onClick={() => onSelect(plan)}>
+      <button key={`${plan.workspace}/${plan.id}`} className={`plan-card ${status}${isSelected ? " selected" : ""}`} onClick={() => onSelect(plan)}>
         <span className="plan-topic">
           <span className={`plan-dot ${status}`} title={planLabel(status)} />
           {plan.topic || plan.id}
         </span>
         <span className="plan-summary">{plan.summary || (status === "ended" ? "No summary" : "Starting…")}</span>
-        {(showProject || plan.workitem) && (
+        {(showWorkspace || plan.workitems.length > 0) && (
           <span className="plan-meta">
-            {showProject && <span className="badge">{plan.project}</span>}
-            {plan.workitem && <span className="badge">→ {plan.workitem}</span>}
+            {showWorkspace && <span className="badge">{plan.workspace}</span>}
+            {plan.workitems.map((dir) => (
+              <span key={dir} className="badge">→ {dir}</span>
+            ))}
           </span>
         )}
       </button>
@@ -78,14 +80,14 @@ export function Plans({ plans, sessions, projects, showProject, selected, onSele
         </button>
         {shownSessions.map((session) => (
           <a
-            key={`${session.project}/${session.name}`}
+            key={`${session.workspace}/${session.name}`}
             className="plans-session"
-            href={`/?terminal=${encodeURIComponent(agentTerminal(session.project, session.name))}`}
+            href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
             target="_blank"
             rel="noreferrer"
             title="A workitem is being created; a blocked one can only be answered here"
           >
-            {session.project} · {session.name} ↗
+            {session.workspace} · {session.name} ↗
           </a>
         ))}
       </div>
@@ -102,11 +104,11 @@ export function Plans({ plans, sessions, projects, showProject, selected, onSele
       )}
       {creating && (
         <NewPlan
-          projects={projects}
+          workspaces={workspaces}
           onClose={() => setCreating(false)}
-          onStarted={(project, id) => {
+          onStarted={(workspace, id) => {
             setCreating(false);
-            onStarted(project, id);
+            onStarted(workspace, id);
           }}
         />
       )}
@@ -114,8 +116,8 @@ export function Plans({ plans, sessions, projects, showProject, selected, onSele
   );
 }
 
-function NewPlan({ projects, onClose, onStarted }: { projects: string[]; onClose: () => void; onStarted: (project: string, id: string) => void }) {
-  const [project, setProject] = useState(projects[0]);
+function NewPlan({ workspaces, onClose, onStarted }: { workspaces: string[]; onClose: () => void; onStarted: (workspace: string, id: string) => void }) {
+  const [workspace, setWorkspace] = useState(workspaces[0]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -124,8 +126,8 @@ function NewPlan({ projects, onClose, onStarted }: { projects: string[]; onClose
     event.preventDefault();
     setBusy(true);
     try {
-      const { id } = await api.createPlan(project, input);
-      onStarted(project, id);
+      const { id } = await api.createPlan(workspace, input);
+      onStarted(workspace, id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -135,11 +137,11 @@ function NewPlan({ projects, onClose, onStarted }: { projects: string[]; onClose
   return (
     <Dialog title="New planning session" onClose={onClose}>
       <form className="dialog-form" onSubmit={submit}>
-        {projects.length > 1 && (
+        {workspaces.length > 1 && (
           <label>
-            Project
-            <select value={project} onChange={(e) => setProject(e.target.value)}>
-              {projects.map((name) => (
+            Workspace
+            <select value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
+              {workspaces.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>

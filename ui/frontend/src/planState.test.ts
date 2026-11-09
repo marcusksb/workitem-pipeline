@@ -3,12 +3,12 @@ import { groupPlans, planCounts, planStatus } from "./planState";
 import { Plan } from "./types";
 
 const plan = (over: Partial<Plan>): Plan => ({
-  project: "app",
+  workspace: "app",
   id: "a",
   topic: "t",
   summary: "",
   status: "working",
-  workitem: "",
+  workitems: [],
   created: 0,
   has_plan: false,
   live: true,
@@ -24,13 +24,13 @@ describe("planStatus", () => {
 });
 
 describe("groupPlans", () => {
-  it("keeps the shown projects, newest first, and sets done plans apart", () => {
+  it("keeps the shown workspaces, newest first, and sets done plans apart", () => {
     const plans = [
       plan({ id: "old", created: 1 }),
       plan({ id: "new", created: 2 }),
-      plan({ id: "other", project: "web" }),
-      plan({ id: "done", workitem: "X-1", live: false }),
-      plan({ id: "made-but-running", workitem: "X-2" }),
+      plan({ id: "other", workspace: "web" }),
+      plan({ id: "done", workitems: ["X-1"], live: false }),
+      plan({ id: "made-but-running", workitems: ["X-2"] }),
     ];
     const { open, done } = groupPlans(plans, ["app"]);
     expect(open.map((p) => p.id)).toEqual(["new", "old", "made-but-running"]);

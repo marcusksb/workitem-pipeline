@@ -22,7 +22,7 @@ import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, I
 
 type Props = {
   item: Item;
-  /** Items of the visible projects, used to find the parent and children. */
+  /** Items of the visible workspaces, used to find the parent and children. */
   items: Item[];
   onSelect: (item: Item) => void;
   /** Tab from the URL hash; unset falls back to the state-dependent default. */
@@ -33,12 +33,12 @@ type Props = {
 };
 
 export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClose, onUnauthorized }: Props) {
-  const key = `${item.project}/${item.dir}`;
+  const key = `${item.workspace}/${item.dir}`;
   const {
     data: detail,
     error,
     reload,
-  } = usePolling(() => api.detail(item.project, item.dir), 3000, key, onUnauthorized);
+  } = usePolling(() => api.detail(item.workspace, item.dir), 3000, key, onUnauthorized);
   const live = detail ?? item;
   /** The body the editor started from; set while the brief is being edited. */
   const [editing, setEditing] = useState<string>();
@@ -51,11 +51,11 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
     setJump(false);
     document.getElementById("follow-ups")?.scrollIntoView({ block: "start" });
   }, [jump, tab, editing, detail]);
-  const path = itemTerminal(item.project, item.dir);
+  const path = itemTerminal(item.workspace, item.dir);
   const popOut = `/?terminal=${encodeURIComponent(path)}`;
   const kindIcon = KIND_ICONS[live.kind.trim().toLowerCase()];
 
-  const family = items.filter((i) => i.project === item.project);
+  const family = items.filter((i) => i.workspace === item.workspace);
   const parent = family.find((i) => i.dir === live.parent);
   const children = family.filter((i) => i.parent === item.dir);
 
@@ -65,7 +65,7 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
         <div>
           <h2>{live.title}</h2>
           <div className="meta">
-            <span className="badge">{live.project}</span>
+            <span className="badge">{live.workspace}</span>
             <span className="badge">{stageLabel(live.stage)}</span>
             <span className="badge">{kindIcon && `${kindIcon} `}{live.kind}</span>
             <LinkBadges item={live} />
@@ -157,7 +157,7 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
           {detail ? <BriefView item={live} body={stripFrontmatter(detail.content)} onSaved={() => void reload()} /> : "Loading…"}
         </div>
       )}
-      {tab === "info" && <div className="brief">{detail ? <Info item={live} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
+      {tab === "info" && <div className="brief">{detail ? <Info item={live} items={items} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
       {tab === "files" && <Files item={live} onUnauthorized={onUnauthorized} />}
       {tab === "pr" && live.pr && (
         <div className="brief">

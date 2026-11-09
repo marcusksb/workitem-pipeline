@@ -4,7 +4,7 @@ import { api } from "./api";
 import { Dialog } from "./Dialog";
 import { Source, StageSource as Sources } from "./types";
 
-type Props = { label: string; stage: string; board: string; projects: string[]; onClose: () => void };
+type Props = { label: string; stage: string; board: string; workspaces: string[]; onClose: () => void };
 
 function File({ source }: { source: Source }) {
   const where = [source.origin, source.note].filter(Boolean).join(", ");
@@ -21,8 +21,8 @@ function File({ source }: { source: Source }) {
 }
 
 /** What a stage runs, read-only: its watch scripts and its handler skill (or inline prompt). */
-export function StageSource({ label, stage, board, projects, onClose }: Props) {
-  const [project, setProject] = useState(projects[0]);
+export function StageSource({ label, stage, board, workspaces, onClose }: Props) {
+  const [workspace, setWorkspace] = useState(workspaces[0]);
   const [sources, setSources] = useState<Sources>();
   const [error, setError] = useState<string>();
   const [tab, setTab] = useState<"script" | "prose">();
@@ -30,17 +30,17 @@ export function StageSource({ label, stage, board, projects, onClose }: Props) {
   useEffect(() => {
     setSources(undefined);
     setError(undefined);
-    api.stageSource(project, board, stage).then(setSources, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, [project, board, stage]);
+    api.stageSource(workspace, board, stage).then(setSources, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, [workspace, board, stage]);
 
   const hasScript = !!sources?.scripts.length;
   const hasProse = !!sources?.prose;
   const shown = tab === "script" && hasScript ? "script" : tab === "prose" && hasProse ? "prose" : hasProse ? "prose" : "script";
   return (
     <Dialog title={`${label}: what runs`} onClose={onClose}>
-      {projects.length > 1 && (
-        <select value={project} onChange={(e) => setProject(e.target.value)} aria-label="Project">
-          {projects.map((name) => <option key={name}>{name}</option>)}
+      {workspaces.length > 1 && (
+        <select value={workspace} onChange={(e) => setWorkspace(e.target.value)} aria-label="Workspace">
+          {workspaces.map((name) => <option key={name}>{name}</option>)}
         </select>
       )}
       <div className="tabs" role="tablist">

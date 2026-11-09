@@ -5,10 +5,10 @@ import { Item } from "./types";
 
 const LIMIT = 20;
 
-type Props = { items: Item[]; showProject: boolean; onOpen: (item: Item) => void; onClose: () => void };
+type Props = { items: Item[]; showWorkspace: boolean; onOpen: (item: Item) => void; onClose: () => void };
 
 /** Finds a workitem by title, Jira key or PR number. Arrows pick a result, Enter opens it. */
-export function QuickSearch({ items, showProject, onOpen, onClose }: Props) {
+export function QuickSearch({ items, showWorkspace, onOpen, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const list = useRef<HTMLUListElement>(null);
@@ -55,7 +55,7 @@ export function QuickSearch({ items, showProject, onOpen, onClose }: Props) {
             const pr = prNumber(item.pr);
             return (
               <li
-                key={`${item.project}/${item.dir}`}
+                key={`${item.workspace}/${item.dir}`}
                 id={`quick-search-${index}`}
                 role="option"
                 aria-selected={index === current}
@@ -65,7 +65,7 @@ export function QuickSearch({ items, showProject, onOpen, onClose }: Props) {
               >
                 <span className="quick-search-title">{item.title}</span>
                 <span className="quick-search-meta">
-                  {showProject && <span className="badge">{item.project}</span>}
+                  {showWorkspace && <span className="badge">{item.workspace}</span>}
                   <span className="badge">{stageLabel(item.stage)}</span>
                   {ticket(item.issue) && <span className="badge">{ticket(item.issue)!.key}</span>}
                   {pr && <span className="badge">PR #{pr}</span>}

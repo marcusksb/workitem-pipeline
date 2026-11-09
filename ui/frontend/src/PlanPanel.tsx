@@ -11,7 +11,7 @@ import { usePolling } from "./usePolling";
 type Props = {
   plan: Plan;
   /** Opens the workitem made from this plan. */
-  onWorkitem: (project: string, dir: string) => void;
+  onWorkitem: (workspace: string, dir: string) => void;
   onClose: () => void;
   onChanged: () => void;
   onUnauthorized: () => void;
@@ -19,8 +19,8 @@ type Props = {
 
 /** Right panel for one planning session: its terminal (or Resume) and the saved plan. */
 export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized }: Props) {
-  const key = `${plan.project}/${plan.id}`;
-  const { data: detail, error: loadError, reload } = usePolling(() => api.plan(plan.project, plan.id), 3000, key, onUnauthorized);
+  const key = `${plan.workspace}/${plan.id}`;
+  const { data: detail, error: loadError, reload } = usePolling(() => api.plan(plan.workspace, plan.id), 3000, key, onUnauthorized);
   const live = detail ?? plan;
   const status = planStatus(live);
   const [tab, setTab] = useState<"terminal" | "plan">();
@@ -61,13 +61,13 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
         <div>
           <h2>{live.topic || live.id}</h2>
           <div className="meta">
-            <span className="badge">{live.project}</span>
+            <span className="badge">{live.workspace}</span>
             <span className={`chip plan-status ${status}`}>{planLabel(status)}</span>
-            {live.workitem && (
-              <button className="link" onClick={() => onWorkitem(live.project, live.workitem)}>
-                → {live.workitem}
+            {live.workitems.map((dir) => (
+              <button key={dir} className="link" onClick={() => onWorkitem(live.workspace, dir)}>
+                → {dir}
               </button>
-            )}
+            ))}
           </div>
           {live.summary && <p className="plan-panel-summary">{live.summary}</p>}
         </div>

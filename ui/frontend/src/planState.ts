@@ -8,11 +8,11 @@ export function planStatus(plan: Plan): PlanStatus {
   return plan.live ? (plan.status === "ended" ? "working" : plan.status) : "ended";
 }
 
-/** Plans of the shown projects: open ones first, newest first, and done ones (a workitem was made)
+/** Plans of the shown workspaces: open ones first, newest first, and done ones (a workitem was made)
  * apart, unless their session still runs. */
-export function groupPlans(plans: Plan[], projects: string[]) {
-  const shown = plans.filter((plan) => projects.includes(plan.project)).sort((a, b) => b.created - a.created);
-  const isDone = (plan: Plan) => !!plan.workitem && !plan.live;
+export function groupPlans(plans: Plan[], workspaces: string[]) {
+  const shown = plans.filter((plan) => workspaces.includes(plan.workspace)).sort((a, b) => b.created - a.created);
+  const isDone = (plan: Plan) => plan.workitems.length > 0 && !plan.live;
   return { open: shown.filter((plan) => !isDone(plan)), done: shown.filter(isDone) };
 }
 

@@ -2,7 +2,7 @@ import { Item } from "./types";
 
 /** An item with every field empty or off, overridden by `over`. */
 export const item = (over: Partial<Item>): Item => ({
-  project: "app",
+  workspace: "app",
   dir: "x",
   title: "x",
   kind: "bug",
@@ -15,6 +15,7 @@ export const item = (over: Partial<Item>): Item => ({
   issue_status_category: "",
   pr: "",
   parent: "",
+  depends_on: [],
   created: "",
   session: false,
   gate: null,

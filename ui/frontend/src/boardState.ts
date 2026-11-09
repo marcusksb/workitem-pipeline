@@ -30,52 +30,68 @@ export function newlyMatching(seen: Set<string>, items: Item[], matches: (item: 
 
 /** The item's stage is final on its board: no stage follows it. */
 export function isFinal(item: Item, pipelines: Pipelines | undefined): boolean {
-  const stage = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
+  const stage = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
   return !!stage && stage.next.length === 0;
 }
-
-export const DEFAULT_BOARD = "default";
 
 /** Key of the column for items whose stage is not on their board. */
 export const UNKNOWN_STAGE = "unknown stage";
 
-/** `final`: no stage follows it on any of the projects (`next` is empty), so its items can be cleared. */
+/** `final`: no stage follows it on any of the workspaces (`next` is empty), so its items can be cleared. */
 export type Column = { name: string; label: string; final: boolean };
 
-const boardOfProject = (pipelines: Pipelines | undefined, project: string, board: string) =>
-  pipelines?.[project]?.find((b) => b.name === board);
+const boardOfWorkspace = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
+  pipelines?.[workspace]?.find((b) => b.name === board);
 
 /** Column title of the item's stage: its `label` on the item's board, else the name with `_` as a space. */
 export function stageTitle(item: Item, pipelines: Pipelines | undefined): string {
-  const stage = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
+  const stage = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
   return stage?.label ?? stageLabel(item.stage);
 }
 
 /**
- * The projects among `projects` where stage `stage` of board `board` has a watcher, and whether
- * all of them have paused it. A column shows these projects merged, so it pauses them together.
+ * The workspaces among `workspaces` where stage `stage` of board `board` has a watcher, and whether
+ * all of them have paused it. A column shows these workspaces merged, so it pauses them together.
  */
-export function pauseState(pipelines: Pipelines | undefined, projects: string[], board: string, stage: string): { projects: string[]; paused: boolean } {
-  const watching = projects.flatMap((project) => {
-    const found = boardOfProject(pipelines, project, board);
-    return found?.watched.includes(stage) ? [{ project, paused: found.paused.includes(stage) }] : [];
+export function pauseState(pipelines: Pipelines | undefined, workspaces: string[], board: string, stage: string): { workspaces: string[]; paused: boolean } {
+  const watching = workspaces.flatMap((workspace) => {
+    const found = boardOfWorkspace(pipelines, workspace, board);
+    return found?.watched.includes(stage) ? [{ workspace, paused: found.paused.includes(stage) }] : [];
   });
-  return { projects: watching.map((w) => w.project), paused: watching.length > 0 && watching.every((w) => w.paused) };
+  return { workspaces: watching.map((w) => w.workspace), paused: watching.length > 0 && watching.every((w) => w.paused) };
 }
 
-/** Board names of `projects`, `default` first, then by name. */
-export function boardNames(pipelines: Pipelines | undefined, projects: string[]): string[] {
+/** Board names of `workspaces`, by name. */
+export function boardNames(pipelines: Pipelines | undefined, workspaces: string[]): string[] {
   const names = new Set<string>();
-  for (const project of projects) for (const board of pipelines?.[project] ?? []) names.add(board.name);
-  return [...names].sort((a, b) => (a === DEFAULT_BOARD ? -1 : b === DEFAULT_BOARD ? 1 : a.localeCompare(b)));
+  for (const workspace of workspaces) for (const board of pipelines?.[workspace] ?? []) names.add(board.name);
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * The board an item is shown on. An item whose board has no file is shown on `default`,
- * in the unknown column; the file may be missing from the project's listing.
+ * The board an item is shown on. An item without a board, or whose board has no file, is shown on
+ * the workspace's first board, in the unknown column, so it never disappears.
  */
 export function shownBoard(item: Item, pipelines: Pipelines | undefined): string {
-  return boardOfProject(pipelines, item.project, item.board) ? item.board : DEFAULT_BOARD;
+  if (boardOfWorkspace(pipelines, item.workspace, item.board)) return item.board;
+  return pipelines?.[item.workspace]?.[0]?.name ?? item.board;
+}
+
+/** The last folder of a repo path, which is how a board's repo is shown. */
+export const repoName = (repo: string) => repo.replace(/\/+$/, "").split("/").pop() ?? repo;
+
+/**
+ * The items `item` depends on that are not merged yet: neither their PR is merged nor are they in
+ * the stage their board's `on_merge` names. A dependency that is gone counts as merged, as in
+ * `workitem-move`.
+ */
+export function openDependencies(item: Item, items: Item[], pipelines: Pipelines | undefined): Item[] {
+  return item.depends_on.flatMap((dir) => {
+    const other = items.find((i) => i.workspace === item.workspace && i.dir === dir);
+    if (!other || other.review?.state === "merged") return [];
+    const stages = boardOfWorkspace(pipelines, other.workspace, other.board)?.pipeline?.stages ?? [];
+    return stages.some((s) => s.on_merge && s.on_merge === other.stage) ? [] : [other];
+  });
 }
 
 /** Number of blocked items on each board of `items`. */
@@ -86,13 +102,13 @@ export function blockedByBoard(items: Item[], pipelines: Pipelines | undefined):
 }
 
 /**
- * Columns of board `board` for `projects`, left to right: each project's stages in order, a stage name
- * seen on an earlier project keeping its place. Projects without a valid file for it add none.
+ * Columns of board `board` for `workspaces`, left to right: each workspace's stages in order, a stage name
+ * seen on an earlier workspace keeping its place. Workspaces without a valid file for it add none.
  */
-export function columnsFor(pipelines: Pipelines | undefined, projects: string[], board: string): Column[] {
+export function columnsFor(pipelines: Pipelines | undefined, workspaces: string[], board: string): Column[] {
   const columns: Column[] = [];
-  for (const project of projects) {
-    for (const stage of boardOfProject(pipelines, project, board)?.pipeline?.stages ?? []) {
+  for (const workspace of workspaces) {
+    for (const stage of boardOfWorkspace(pipelines, workspace, board)?.pipeline?.stages ?? []) {
       const final = stage.next.length === 0;
       const seen = columns.find((c) => c.name === stage.name);
       if (seen) seen.final &&= final;
@@ -110,7 +126,7 @@ export function byStage(items: Item[], pipelines: Pipelines | undefined, board: 
   const columns: Record<string, Item[]> = { [UNKNOWN_STAGE]: [] };
   for (const item of items) {
     if (shownBoard(item, pipelines) !== board) continue;
-    const known = boardOfProject(pipelines, item.project, item.board)?.pipeline?.stages.some((s) => s.name === item.stage);
+    const known = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.stages.some((s) => s.name === item.stage);
     (columns[known ? item.stage : UNKNOWN_STAGE] ??= []).push(item);
   }
   return columns;
@@ -118,10 +134,10 @@ export function byStage(items: Item[], pipelines: Pipelines | undefined, board: 
 
 /**
  * How column `stage` of board `board` is sorted: the stage's `order`, else the board's, from the first of
- * `projects` whose file has one.
+ * `workspaces` whose file has one.
  */
-export function orderFor(pipelines: Pipelines | undefined, projects: string[], board: string, stage: string): string[] {
-  const pipelinesOf = projects.map((project) => boardOfProject(pipelines, project, board)?.pipeline);
+export function orderFor(pipelines: Pipelines | undefined, workspaces: string[], board: string, stage: string): string[] {
+  const pipelinesOf = workspaces.map((workspace) => boardOfWorkspace(pipelines, workspace, board)?.pipeline);
   for (const pipeline of pipelinesOf) {
     const order = pipeline?.stages.find((s) => s.name === stage)?.order ?? [];
     if (order.length) return order;
@@ -162,8 +178,8 @@ export function treeOrder(unsorted: Item[], order: string[] = []): { item: Item;
     }
     return 0;
   });
-  const dirs = new Set(items.map((i) => `${i.project}/${i.dir}`));
-  const hasParent = (i: Item) => i.parent !== "" && i.parent !== i.dir && dirs.has(`${i.project}/${i.parent}`);
+  const dirs = new Set(items.map((i) => `${i.workspace}/${i.dir}`));
+  const hasParent = (i: Item) => i.parent !== "" && i.parent !== i.dir && dirs.has(`${i.workspace}/${i.parent}`);
   const out: { item: Item; depth: number }[] = [];
   const seen = new Set<Item>();
   const visit = (item: Item, depth: number) => {
@@ -171,7 +187,7 @@ export function treeOrder(unsorted: Item[], order: string[] = []): { item: Item;
     seen.add(item);
     out.push({ item, depth });
     for (const child of items) {
-      if (child.project === item.project && child.parent === item.dir) visit(child, depth + 1);
+      if (child.workspace === item.workspace && child.parent === item.dir) visit(child, depth + 1);
     }
   };
   for (const item of items) if (!hasParent(item)) visit(item, 0);
@@ -179,7 +195,7 @@ export function treeOrder(unsorted: Item[], order: string[] = []): { item: Item;
   return out;
 }
 
-export const itemKey = (item: Item) => `${item.project}/${item.dir}`;
+export const itemKey = (item: Item) => `${item.workspace}/${item.dir}`;
 
 /** `issue:` is `KEY (url)` or `none`. */
 export function ticket(issue: string): { key: string; url?: string } | null {

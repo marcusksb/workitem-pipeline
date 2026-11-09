@@ -91,7 +91,7 @@ button.danger {
 button.danger:hover:not(:disabled) { background: var(--blocked); border-color: var(--blocked); color: var(--panel); }
 button.link, .tabs a { background: none; border: 0; color: var(--accent); padding: 4px; border-radius: 6px; text-decoration: none; transition: background-color 0.15s, color 0.15s; }
 button.link:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.projects select {
+.workspaces select {
   appearance: none;
   background-color: color-mix(in srgb, var(--text) 5%, var(--panel));
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%239a9a9a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
@@ -105,8 +105,8 @@ button.link:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 
   cursor: pointer;
   transition: border-color 0.15s, background-color 0.15s;
 }
-.projects select:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.projects select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.workspaces select:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.workspaces select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 button:disabled { cursor: not-allowed; opacity: 0.5; }
 .error { color: var(--blocked); }
 .empty { color: var(--muted); }
@@ -115,7 +115,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .app { height: 100vh; display: flex; flex-direction: column; }
 .top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.projects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.workspaces { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 main { flex: 1; min-height: 0; display: flex; }
 .left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; --tabs-h: 36px; }
 .with-detail .left { flex: 0 0 50%; }
@@ -134,6 +134,10 @@ main { flex: 1; min-height: 0; display: flex; }
 .board-tabs { display: flex; gap: 4px; margin: 8px 0; height: var(--tabs-h); border-bottom: 1px solid var(--border, currentColor); position: sticky; top: -16px; z-index: 2; background: var(--bg); }
 .board-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; cursor: pointer; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .board-tabs button.active { color: inherit; border-bottom-color: currentColor; font-weight: 600; }
+.board-tabs .repo-name { font-size: 12px; font-weight: 400; color: var(--muted); }
+.board-tabs .add-board { margin-left: 4px; }
+.chip.waits-on { --tint: var(--muted); border: 1px dashed currentColor; background: none; color: var(--muted); cursor: pointer; margin-top: 6px; text-align: left; }
+.chip.waits-on:hover { color: inherit; }
 .view-toggle { margin-left: auto; display: flex; gap: 2px; align-self: center; }
 .view-toggle button { border-bottom-width: 0; border-radius: 6px; padding: 2px 10px; font-size: 12px; text-transform: capitalize; }
 .view-toggle button.active { background: color-mix(in srgb, var(--text) 8%, transparent); }
@@ -508,7 +512,7 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 button.toast-body { cursor: pointer; }
 .toast-text { font-weight: 600; }
 .toast-item { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.toast-project { color: var(--muted); }
+.toast-workspace { color: var(--muted); }
 .toast-quip { color: var(--muted); font-size: 12px; font-style: italic; }
 .toast-list { margin: 4px 0 0; padding: 0; list-style: none; max-height: 160px; overflow-y: auto; }
 .toast-list button { width: 100%; overflow: hidden; padding: 2px 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
@@ -560,3 +564,8 @@ button.toast-body { cursor: pointer; }
   .toast-wrap { animation-timing-function: ease-out; }
   .toast-icon { animation: none !important; }
 }
+
+.dependencies { margin: 8px 0 12px; }
+.dependencies h3 { font-size: 13px; margin: 0 0 4px; color: var(--muted); font-weight: 600; }
+.dependencies ul { list-style: none; padding: 0; margin: 0 0 6px; }
+.dependencies li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }

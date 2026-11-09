@@ -24,9 +24,59 @@ function Value({ name, value, category }: { name: string; value: string; categor
   return <>{value}</>;
 }
 
+/** The items this one waits for (`depends_on`), with a picker over the other items of its
+ * workspace. A stage that requires it holds the item back until they are merged. */
+function Dependencies({ item, items, onSaved }: { item: Item; items: Item[]; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const others = items.filter((i) => i.workspace === item.workspace && i.dir !== item.dir && !item.depends_on.includes(i.dir));
+  const save = async (next: string[]) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api.editFrontmatter(item, { depends_on: next.join(", ") });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
+  return (
+    <section className="dependencies">
+      <h3>Depends on</h3>
+      {item.depends_on.length === 0 && <span className="empty">nothing</span>}
+      <ul>
+        {item.depends_on.map((dir) => {
+          const other = items.find((i) => i.workspace === item.workspace && i.dir === dir);
+          return (
+            <li key={dir}>
+              {dir}
+              {other ? <span className="badge">{other.board} · {other.stage}</span> : <span className="empty">gone, counts as merged</span>}
+              <button className="link" disabled={busy} aria-label={`Remove ${dir}`} onClick={() => void save(item.depends_on.filter((d) => d !== dir))}>
+                <IconX />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {others.length > 0 && (
+        <select value="" disabled={busy} aria-label="Add a dependency" onChange={(e) => e.target.value && void save([...item.depends_on, e.target.value])}>
+          <option value="">Add a dependency…</option>
+          {others.map((other) => (
+            <option key={other.dir} value={other.dir}>
+              {other.dir} ({other.board})
+            </option>
+          ))}
+        </select>
+      )}
+      {error && <span className="error">{error}</span>}
+    </section>
+  );
+}
+
 /** The frontmatter of a workitem as labelled fields; Edit turns the values into inputs. Only
  * the changed fields are saved, so an agent's edit to another field is never overwritten. */
-export function Info({ item, content, onSaved }: { item: Item; content: string; onSaved: () => void }) {
+export function Info({ item, items, content, onSaved }: { item: Item; items: Item[]; content: string; onSaved: () => void }) {
   const fields = frontmatterFields(content);
   const category = fields.find(([name]) => name === "issue_status_category")?.[1] ?? "";
   const [draft, setDraft] = useState<Record<string, string>>();
@@ -74,6 +124,7 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
         )}
         {error && <span className="error">{error}</span>}
       </div>
+      <Dependencies item={item} items={items} onSaved={onSaved} />
       <dl className="info">
         {fields.map(([name, value], i) => (
           <div key={`${name}-${i}`}>

@@ -13,16 +13,16 @@ export type StageConfig = {
   order: string[];
 };
 
-/** `order`: item fields each column is sorted by, first one first; title breaks ties. */
-export type Pipeline = { entry: string; stages: StageConfig[]; order: string[] };
+/** `repo`: the repo every item of the board belongs to. `order`: item fields each column is sorted by, first one first; title breaks ties. */
+export type Pipeline = { repo: string; entry: string; stages: StageConfig[]; order: string[] };
 
 /**
- * A board of a project: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.
+ * A board of a workspace: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.
  * `watched` are the stages with a watcher, `paused` the ones whose watchers are paused.
  */
 export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[] };
 
-/** Boards of every project, by project name; `default` comes first. */
+/** Boards of every workspace, by workspace name, by board name. */
 export type Pipelines = Record<string, BoardInfo[]>;
 
 export type Review = {
@@ -37,7 +37,7 @@ export type Review = {
 };
 
 export type Item = {
-  project: string;
+  workspace: string;
   dir: string;
   title: string;
   kind: string;
@@ -52,6 +52,8 @@ export type Item = {
   issue_status_category: string;
   pr: string;
   parent: string;
+  /** Items that must be merged before this one may enter a stage that requires it. */
+  depends_on: string[];
   created: string;
   session: boolean;
   /** What the board allows in the item's current stage. */
@@ -78,21 +80,21 @@ export type PrNote = {
 
 export type PrConversation = { body: string; notes: PrNote[] };
 
-/** `agent`: executable that runs this project's sessions instead of the default `claude`. */
-export type Project = { name: string; repo: string; agent?: string };
+/** A folder in `~/.workitems-pipeline/workspaces`. `agent`: executable that runs its sessions instead of the default `claude`. */
+export type Workspace = { name: string; dir: string; agent?: string };
 
-export type AgentSession = { project: string; name: string };
+export type AgentSession = { workspace: string; name: string };
 
-/** A planning session's record (`<workitems dir>/plans/<id>.md`). `status` is what the record says;
+/** A planning session's record (`<workspace>/plans/<id>.md`). `status` is what the record says;
  * see `planStatus` for what to show. */
 export type Plan = {
-  project: string;
+  workspace: string;
   id: string;
   topic: string;
   summary: string;
   status: "working" | "waiting" | "ended";
-  /** Directory of the workitem made from it, or "". */
-  workitem: string;
+  /** Directories of the workitems made from it. */
+  workitems: string[];
   /** Epoch seconds. */
   created: number;
   has_plan: boolean;
@@ -105,7 +107,7 @@ export type PlanDetail = Plan & { prompt: string; text: string | null };
 export type Source = {
   name: string;
   path: string | null;
-  origin: "board" | "project" | "bundled" | null;
+  origin: "board" | "workspace" | "bundled" | null;
   content: string;
   note: string | null;
   error: string | null;
@@ -113,7 +115,7 @@ export type Source = {
 
 export type StageSource = { scripts: Source[]; prose: Source | null };
 
-/** A project's `learnings.md`; `content` is empty while the file does not exist. */
+/** A workspace's `learnings.md`; `content` is empty while the file does not exist. */
 export type Learnings = { path: string; content: string };
 
 /** A file in a workitem folder; `path` is relative to it. */

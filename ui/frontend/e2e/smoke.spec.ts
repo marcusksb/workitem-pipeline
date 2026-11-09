@@ -1,7 +1,7 @@
 // Runs the built backend against a real tmux session; needs `cargo build` and `npm run build` first.
 import { expect, test } from "@playwright/test";
 import { ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -10,79 +10,83 @@ const socket = `wi-e2e-${process.pid}`;
 let server: ChildProcess;
 let base = "";
 let repo = "";
+/** The workspace folder; the first test creates it in the UI, then `seed` fills it. */
+let ws = "";
+let home = "";
+
+/** Items, a second board, learnings and plans, written into the workspace once the UI created it. */
+function seed() {
+  const write = (path: string, text: string) => {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, text);
+  };
+  write(
+    join(ws, "T-1-demo/workitem.md"),
+    "---\ntitle: Demo blocked item\ntype: bug\nstage: analyze\nboard: default\napproved: false\nagent_status: blocked: need your answer\nissue: T-1\npr: https://github.com/demo/repo/pull/42\n---\n\n# Demo\n\nHello brief text.\n",
+  );
+  write(
+    join(ws, "T-2-gate/workitem.md"),
+    "---\ntitle: Brief waiting\ntype: feature\nstage: ready_for_development\nboard: default\napproved: false\nagent_status: ok\nissue: T-2\n---\n\n# Gate\n",
+  );
+  write(join(ws, "T-2-gate/notes/findings.md"), "# Findings\n\n- the cache is stale\n");
+  write(join(ws, "T-2-gate/log.txt"), "line one\nline two\n");
+  write(
+    join(ws, "T-3-approve/workitem.md"),
+    "---\ntitle: Approve me\ntype: feature\nstage: ready_for_development\nboard: default\napproved: false\nagent_status: ok\nissue: T-3\n---\n\n# Approve\n",
+  );
+  write(
+    join(ws, "boards/research.json"),
+    JSON.stringify({ repo, brief_sections: [], entry: "idea", stages: [{ name: "idea", next: ["findings"] }, { name: "findings", next: [] }] }),
+  );
+  write(
+    join(ws, "T-4-research/workitem.md"),
+    "---\ntitle: Research item\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nissue: T-4\n---\n\n# Research\n",
+  );
+  const findings = Array.from({ length: 6 }, (_, i) => `- [ ] **Finding ${i}**\\\n  What is wrong and how to fix it.\n`).join("\n");
+  write(
+    join(ws, "T-5-tasks/workitem.md"),
+    `---\ntitle: Task list\ntype: review\nstage: done\nboard: default\nagent_status: ok\nissue: T-5\n---\n\n# Review\n\n${"A paragraph.\n\n".repeat(30)}${findings}`,
+  );
+  write(
+    join(ws, "T-6-follow-ups/workitem.md"),
+    `---\ntitle: Merged with follow-ups\ntype: feature\nstage: done\nboard: default\nagent_status: ok\nissue: T-6\n---\n\n# Done\n\n${"A paragraph.\n\n".repeat(40)}## Follow-ups\n\n- [ ] Deploy to prod\n- [x] Tell support\n- [ ] Remove the flag\n`,
+  );
+  write(
+    join(ws, "T-7-ui/workitem.md"),
+    "---\ntitle: Show the new field\ntype: feature\nstage: backlog\nboard: research\nagent_status: ok\nissue: T-7\ndepends_on: T-1-demo\n---\n\n# UI\n",
+  );
+  write(
+    join(ws, "boards/default/learnings.md"),
+    "# Learnings\n\n- Never mock tmux in tests. (source: https://github.com/demo/repo/pull/42#discussion_r1)\n",
+  );
+  write(
+    join(ws, "plans/abc123.md"),
+    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
+  );
+  write(
+    join(ws, "plans/def456.md"),
+    "---\ntopic: Old idea\nsummary: Parked\nstatus: ended\nclaude_session: 2\ncreated: 1\n---\n\n## Prompt\n\nOld idea\n",
+  );
+}
 
 test.beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "wi-e2e-"));
   repo = join(dir, "repo");
-  const item = join(repo, ".claude/workitems/T-1-demo");
-  mkdirSync(item, { recursive: true });
-  writeFileSync(
-    join(item, "workitem.md"),
-    "---\ntitle: Demo blocked item\ntype: bug\nstage: analyze\napproved: false\nagent_status: blocked: need your answer\nissue: T-1\npr: https://github.com/demo/repo/pull/42\n---\n\n# Demo\n\nHello brief text.\n",
-  );
-  const gate = join(repo, ".claude/workitems/T-2-gate");
-  mkdirSync(gate, { recursive: true });
-  writeFileSync(
-    join(gate, "workitem.md"),
-    "---\ntitle: Brief waiting\ntype: feature\nstage: ready_for_development\napproved: false\nagent_status: ok\nissue: T-2\n---\n\n# Gate\n",
-  );
-  mkdirSync(join(gate, "notes"), { recursive: true });
-  writeFileSync(join(gate, "notes/findings.md"), "# Findings\n\n- the cache is stale\n");
-  writeFileSync(join(gate, "log.txt"), "line one\nline two\n");
-  const approve = join(repo, ".claude/workitems/T-3-approve");
-  mkdirSync(approve, { recursive: true });
-  writeFileSync(
-    join(approve, "workitem.md"),
-    "---\ntitle: Approve me\ntype: feature\nstage: ready_for_development\napproved: false\nagent_status: ok\nissue: T-3\n---\n\n# Approve\n",
-  );
-  mkdirSync(join(repo, ".claude/workitems/boards"), { recursive: true });
-  writeFileSync(
-    join(repo, ".claude/workitems/boards/research.json"),
-    JSON.stringify({ brief_sections: [], entry: "idea", stages: [{ name: "idea", next: ["findings"] }, { name: "findings", next: [] }] }),
-  );
-  const research = join(repo, ".claude/workitems/T-4-research");
-  mkdirSync(research, { recursive: true });
-  writeFileSync(
-    join(research, "workitem.md"),
-    "---\ntitle: Research item\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nissue: T-4\n---\n\n# Research\n",
-  );
-  const tasks = join(repo, ".claude/workitems/T-5-tasks");
-  mkdirSync(tasks, { recursive: true });
-  const findings = Array.from({ length: 6 }, (_, i) => `- [ ] **Finding ${i}**\\\n  What is wrong and how to fix it.\n`).join("\n");
-  writeFileSync(
-    join(tasks, "workitem.md"),
-    `---\ntitle: Task list\ntype: review\nstage: done\nagent_status: ok\nissue: T-5\n---\n\n# Review\n\n${"A paragraph.\n\n".repeat(30)}${findings}`,
-  );
-  const followUps = join(repo, ".claude/workitems/T-6-follow-ups");
-  mkdirSync(followUps, { recursive: true });
-  writeFileSync(
-    join(followUps, "workitem.md"),
-    `---\ntitle: Merged with follow-ups\ntype: feature\nstage: done\nagent_status: ok\nissue: T-6\n---\n\n# Done\n\n${"A paragraph.\n\n".repeat(40)}## Follow-ups\n\n- [ ] Deploy to prod\n- [x] Tell support\n- [ ] Remove the flag\n`,
-  );
-  writeFileSync(
-    join(repo, ".claude/workitems/learnings.md"),
-    "# Learnings\n\n- Never mock tmux in tests. (source: https://github.com/demo/repo/pull/42#discussion_r1)\n",
-  );
-  const plans = join(repo, ".claude/workitems/plans");
-  mkdirSync(plans, { recursive: true });
-  writeFileSync(
-    join(plans, "abc123.md"),
-    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
-  );
-  writeFileSync(
-    join(plans, "def456.md"),
-    "---\ntopic: Old idea\nsummary: Parked\nstatus: ended\nclaude_session: 2\ncreated: 1\n---\n\n## Prompt\n\nOld idea\n",
-  );
-  execFileSync("tmux", ["-L", socket, "new-session", "-d", "-s", "wi-plan-abc123", "-c", repo, "echo planning-agent-ready; sleep 600"]);
+  mkdirSync(repo, { recursive: true });
+  home = join(dir, "home");
+  ws = join(home, "workspaces/demo");
+  // Sessions the UI started carry their workspace folder; the folder does not have to exist yet.
+  const tag = [";", "set-option", "@workitem_workspace", ws];
+  execFileSync("tmux", ["-L", socket, "new-session", "-d", "-s", "wi-plan-abc123", "-c", repo, "echo planning-agent-ready; sleep 600", ...tag]);
   execFileSync("tmux", [
     "-L", socket, "new-session", "-d", "-s", "wi-T-1-demo", "-c", repo,
-    "echo 'agent: which db do you want?'; read a; echo got:$a; sleep 600",
+    "echo 'agent: which db do you want?'; read a; echo got:$a; sleep 600", ...tag,
   ]);
 
   server = spawn(resolve("../backend/target/debug/workload"), [], {
     env: {
       ...process.env,
-      WORKITEM_UI_CONFIG: join(dir, "config.toml"),
+      WORKITEM_UI_HOME: home,
       WORKITEM_UI_PORT: String(port),
       WORKITEM_UI_TMUX_SOCKET: socket,
       WORKITEM_UI_DISPATCH: "off",
@@ -106,18 +110,26 @@ test.afterAll(() => {
 
 test.describe.configure({ mode: "serial" });
 
-test("add a project, find the blocked item, answer the agent in the browser terminal", async ({ page }) => {
+test("add a workspace, find the blocked item, answer the agent in the browser terminal", async ({ page }) => {
   await page.goto(base);
-  await expect(page.getByText("No projects yet")).toBeVisible();
+  await expect(page.getByText("No workspaces yet")).toBeVisible();
   expect(page.url()).not.toContain("token");
 
-  await page.getByRole("button", { name: "Add project" }).click();
-  await page.getByPlaceholder("name").fill("demo");
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  await page.getByPlaceholder("content-delivery").fill("demo");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText("No boards in demo yet")).toBeVisible();
+  seed();
+
+  // The default board is the bundled one for the repo.
+  await page.getByRole("button", { name: "+ Board" }).click();
+  await page.getByPlaceholder("backend").fill("default");
   await page.getByPlaceholder("/absolute/path/to/repo").fill(repo);
   await page.getByRole("button", { name: "Add", exact: true }).click();
 
   const board = page.locator(".board");
   await expect(board.getByText("Demo blocked item")).toBeVisible();
+  expect(JSON.parse(readFileSync(join(ws, "boards/default.json"), "utf8")).repo).toBe(realpathSync(repo));
   await expect(board.locator(".card.blocked", { hasText: "Demo blocked item" })).toBeVisible();
   await board.getByText("Demo blocked item").click();
 
@@ -183,33 +195,60 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await expect(page.locator(".detail")).toHaveCount(0);
 });
 
-test("a project's boards are tabs and the chosen board stays in the URL", async ({ page }) => {
+test("a workspace's boards are tabs and the chosen board stays in the URL", async ({ page }) => {
   await page.goto(base);
   const tabs = page.getByRole("tablist");
-  await expect(tabs.getByRole("tab", { name: "default" })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".column", { hasText: "idea" })).toHaveCount(0);
 
-  await tabs.getByRole("tab", { name: "research" }).click();
-  await expect(page).toHaveURL(/#\?board=research$/);
+  await expect(tabs.getByRole("tab", { name: "default" })).toContainText("repo");
+  await tabs.getByRole("tab", { name: /research/ }).click();
+  await expect(page).toHaveURL(/#\?workspace=demo&board=research$/);
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
   await expect(page.locator(".column", { hasText: "backlog" })).toHaveCount(0);
 
   // The choice survives a reload, and an item's deep link keeps it.
   await page.reload();
-  await expect(tabs.getByRole("tab", { name: "research" })).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.getByRole("tab", { name: /research/ })).toHaveAttribute("aria-selected", "true");
   await page.locator(".column", { hasText: "idea" }).getByText("Research item").click();
   await expect(page).toHaveURL(/#demo\/T-4-research\?board=research$/);
 });
 
-test("the selected project stays in the URL and survives a reload", async ({ page }) => {
+test("the selected workspace stays in the URL and survives a reload", async ({ page }) => {
   await page.goto(base);
-  const select = page.locator(".projects select");
-  await select.selectOption("demo");
-  await expect(page).toHaveURL(/#\?project=demo$/);
+  await page.getByRole("button", { name: "Add workspace" }).click();
+  await page.getByPlaceholder("content-delivery").fill("other");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const select = page.locator(".workspaces select");
+  await expect(select).toHaveValue("other");
+  await expect(page).toHaveURL(/#\?workspace=other$/);
+  await expect(page.locator(".board")).not.toContainText("Demo blocked item");
   await page.reload();
-  await expect(select).toHaveValue("demo");
-  await select.selectOption("");
-  await expect(page).not.toHaveURL(/project=/);
+  await expect(select).toHaveValue("other");
+  await select.selectOption("demo");
+  await expect(page).toHaveURL(/#\?workspace=demo$/);
+  await expect(page.locator(".board")).toContainText("Demo blocked item");
+});
+
+test("a card that waits on an unmerged item opens it on its own board", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Demo blocked item");
+  await page.goto(`${base.split("#")[0]}#?workspace=demo&board=research`);
+  const chip = page.locator(".card", { hasText: "Show the new field" }).locator(".chip.waits-on");
+  await expect(chip).toHaveText("waits on T-1-demo · default · analyze");
+  await chip.click();
+  await expect(page).toHaveURL(/#demo\/T-1-demo\?board=default$/);
+  await expect(page.getByRole("tablist").getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
+
+  // The Info tab edits the list.
+  await page.goto(`${base.split("#")[0]}#demo/T-7-ui/info`);
+  const deps = page.locator(".dependencies");
+  await expect(deps).toContainText("T-1-demo");
+  await deps.getByRole("button", { name: "Remove T-1-demo" }).click();
+  await expect(deps).toContainText("nothing");
+  await deps.getByRole("combobox", { name: "Add a dependency" }).selectOption("T-2-gate");
+  await expect(deps.locator("li")).toContainText("T-2-gate");
+  expect(readFileSync(join(ws, "T-7-ui/workitem.md"), "utf8")).toContain("depends_on: T-2-gate\n");
 });
 
 test("quick search opens an item by Jira key, PR number or title, on its own board", async ({ page }) => {
@@ -235,7 +274,7 @@ test("quick search opens an item by Jira key, PR number or title, on its own boa
   await page.getByRole("button", { name: /Search/ }).click();
   await search.fill("approve");
   await page.getByRole("option", { name: /Approve me/ }).click();
-  await expect(page).toHaveURL(/#demo\/T-3-approve\?board=default$/);
+  await expect(page).toHaveURL(/#demo\/T-3-approve$/);
 });
 
 test("the Files tab lists the workitem folder and previews a file", async ({ page }) => {
@@ -260,14 +299,14 @@ test("the Learnings button shows and edits the learnings of the board on screen"
   await page.goto(base);
   await expect(page.locator(".board")).toContainText("Brief waiting");
   await page.getByRole("button", { name: "Learnings", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Learnings in demo" });
+  const dialog = page.getByRole("dialog", { name: "Learnings in demo · default" });
   await expect(dialog.getByRole("listitem")).toContainText("Never mock tmux in tests.");
   await expect(dialog.getByRole("link", { name: /pull\/42/ })).toHaveAttribute("target", "_blank");
   await expect(dialog.locator(".source-path code")).toContainText("learnings.md");
   await dialog.getByRole("button", { name: "Close" }).click();
 
   // Another board has its own file, empty until you add a rule.
-  await page.getByRole("tablist").getByRole("tab", { name: "research" }).click();
+  await page.getByRole("tablist").getByRole("tab", { name: /research/ }).click();
   await page.getByRole("button", { name: "Learnings", exact: true }).click();
   const research = page.getByRole("dialog", { name: "Learnings in demo · research" });
   await expect(research.locator(".source-path code")).toContainText("boards/research/learnings.md");
@@ -278,7 +317,7 @@ test("the Learnings button shows and edits the learnings of the board on screen"
   await editor.fill("# Learnings\n\n- Flag only real bugs.\n");
   await research.getByRole("button", { name: "Save" }).click();
   await expect(research.getByRole("listitem")).toHaveText("Flag only real bugs.");
-  expect(readFileSync(join(repo, ".claude/workitems/boards/research/learnings.md"), "utf8")).toBe("# Learnings\n\n- Flag only real bugs.\n");
+  expect(readFileSync(join(ws, "boards/research/learnings.md"), "utf8")).toBe("# Learnings\n\n- Flag only real bugs.\n");
   await page.screenshot({ path: process.env.LEARNINGS_SHOT ?? join(tmpdir(), "learnings.png") });
 });
 
@@ -349,9 +388,9 @@ test("planning sessions show above the board and open in the side panel", async 
 
 test("moving an item into a final stage shows a toast that opens it", async ({ page }) => {
   await page.goto(base);
-  await page.getByRole("tablist").getByRole("tab", { name: "research" }).click();
+  await page.getByRole("tablist").getByRole("tab", { name: /research/ }).click();
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
-  execFileSync("python3", [resolve("../../skills/workitem-pipeline/bin/workitem-move"), join(repo, ".claude/workitems/T-4-research/workitem.md"), "findings"]);
+  execFileSync("python3", [resolve("../../skills/workitem-pipeline/bin/workitem-move"), join(ws, "T-4-research/workitem.md"), "findings"]);
 
   const toast = page.locator(".toast", { hasText: "Research item" });
   await expect(toast).toContainText("Done");
@@ -364,7 +403,7 @@ test("moving an item into a final stage shows a toast that opens it", async ({ p
 test("a newly blocked item gets a toast that stays until it is dismissed", async ({ page }) => {
   await page.goto(base);
   await expect(page.locator(".board")).toContainText("Approve me");
-  const file = join(repo, ".claude/workitems/T-3-approve/workitem.md");
+  const file = join(ws, "T-3-approve/workitem.md");
   writeFileSync(file, readFileSync(file, "utf8").replace(/^agent_status: .*$/m, "agent_status: blocked: which flag?"));
 
   const toast = page.locator(".toast", { hasText: "Approve me" });

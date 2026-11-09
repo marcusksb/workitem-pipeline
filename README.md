@@ -9,8 +9,10 @@ backlog → analyze → ready_for_development → in_development → in_review �
 
 Two parts live in this repo:
 
-- **The pipeline:** Claude Code skills plus a few small scripts. It works on its own, from the terminal.
-- **Workload (`ui/`):** a local web UI that shows the board, runs the handlers for you, watches PRs, and opens a browser terminal into any agent session.
+- **The pipeline:** Claude Code skills plus a few small scripts.
+- **Workload (`ui/`):** a local web UI that shows the boards, runs the handlers for you, watches PRs, and opens a browser terminal into any agent session.
+
+Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/<name>/`. A workspace has one board per repository (a frontend and a backend board, say), so one feature can be split into linked items, one per repo.
 
 ## Requirements
 
@@ -25,25 +27,19 @@ Two parts live in this repo:
    ```sh
    ./install.sh
    ```
-2. In a repo you want to work on, create a workitem from Claude Code:
-   ```
-   /workitem-create PROJ-123
-   ```
-3. Run the board, either with the UI:
+2. Build and start the UI:
    ```sh
    cd ui && npm install && npm run build
    ./backend/target/release/workload
    ```
-   Open the printed `http://127.0.0.1:7373/#token=…` URL and add the repo as a project. Or without the UI, from Claude Code in that repo:
-   ```
-   /loop 10m /workitem-run
-   ```
+3. Open the printed `http://127.0.0.1:7373/#token=…` URL. Add a workspace, then a board for each repository with **+ Board**, then use **New workitem**.
 
 `./uninstall.sh` removes the symlinks and restores any folders `install.sh` backed up.
 
 ## How it works
 
-- **A workitem** is `<repo>/.workitems/<dir>/workitem.md` with flat `key: value` frontmatter. `stage:` is the source of truth.
+- **A workitem** is `<workspace>/<dir>/workitem.md` with flat `key: value` frontmatter. `stage:` is the source of truth, and `board:` names its board, whose `repo` is where its code lives.
+- **Links:** `depends_on: <dir>, ...` names items (on any board of the workspace) that must be merged first. A stage with `"require": {"depends_on": "merged"}` holds the item until they are.
 - **Stage changes** go through `skills/workitem-pipeline/bin/workitem-move` only. It enforces the board's rules: allowed transitions, `require` checks (a linked issue, a complete review brief), stage limits and `on_enter` fields. Never edit `stage:` by hand.
 - **Agent status** is `agent_status: working | ok | blocked: <reason>`. "Blocked" is a flag, not a stage. A session that waits for your input is marked blocked through `hooks.json`.
 - **Sessions** are tmux sessions named `wi-<dir>`. The session is the lock: one item, one agent. Attach with `tmux attach -t wi-<dir>` or from the UI.
@@ -61,27 +57,25 @@ Two parts live in this repo:
 
 ### Custom boards
 
-A project can replace the bundled board (`skills/workitem-pipeline/pipeline.json`) with its own `.workitems/boards/default.json`, and add more boards as `.workitems/boards/<name>.json`. An item picks its board with `board: <name>` in its frontmatter. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board or per project. Details: [`workitem-pipeline.md`](workitem-pipeline.md).
+Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **+ Board** starts it as a copy of the bundled `skills/workitem-pipeline/pipeline.json`. Edit the file to change it. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, a `require`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board (`boards/<name>/skills/`) or per workspace (`skills/`). Details: [`workitem-pipeline.md`](workitem-pipeline.md).
 
 ## Skills
 
 | Skill | Use |
 |---|---|
-| `workitem-create` | Create a workitem from a Jira key, a Sentry URL or text |
+| `workitem-create` | Create a workitem from a Jira key, a Sentry URL or text; one linked item per repo when the task spans several |
 | `workitem-triage`, `workitem-analyze` | Handlers for `backlog` and `analyze` |
 | `workitem-approve` | Review the brief and approve or reject (terminal-only flow; the UI has a button) |
 | `workitem-start` | Implement an approved item and open the PR |
-| `workitem-run` | One pass of the pipeline without the UI, meant for `/loop` |
-| `workitem-watch` | Watch PRs without the UI, meant for `/loop` |
 | `workitem-remove` | Delete a workitem and its worktree |
 
-Use either the UI or the `/loop` skills on a repo, not both: two runners race each other.
+The UI runs the pipeline: it starts the handlers and watches the PRs. The skills get the item's path from it.
 
 ## Workload UI
 
-A Rust (axum) backend with a React frontend embedded in one binary. It binds to `127.0.0.1` only and guards every request with a token from `~/.config/workitem-ui/config.toml`.
+A Rust (axum) backend with a React frontend embedded in one binary. It binds to `127.0.0.1` only and guards every request with a token from `~/.workitems-pipeline/config.toml`.
 
-- Kanban per project and board, with a detail panel: brief, files, PR conversation, actions, and a live terminal (xterm.js) into the item's tmux session
+- Kanban per workspace and board, with a chip on cards that wait for another item, with a detail panel: brief, files, PR conversation, actions, and a live terminal (xterm.js) into the item's tmux session
 - Runs handlers automatically, retries up to 3 times, then blocks the item
 - Watches PRs: CI, conflicts, review comments, merge
 - Browser notification when an item becomes blocked
@@ -95,7 +89,7 @@ npm test        # cargo test + vitest
 npm run build   # release binary at backend/target/release/workload
 ```
 
-Settings come from env vars: `WORKITEM_UI_PORT`, `WORKITEM_UI_CONFIG`, `WORKITEM_UI_TMUX_SOCKET`, `WORKITEM_UI_SKILLS`, `WORKITEM_UI_CLAUDE`, `WORKITEM_UI_GH`, `WORKITEM_UI_DISPATCH=off`. Design and decisions: [`workitem-pipeline-ui.md`](workitem-pipeline-ui.md).
+Settings come from env vars: `WORKITEM_UI_HOME` (default `~/.workitems-pipeline`), `WORKITEM_UI_PORT`, `WORKITEM_UI_TMUX_SOCKET`, `WORKITEM_UI_SKILLS`, `WORKITEM_UI_CLAUDE`, `WORKITEM_UI_GH`, `WORKITEM_UI_DISPATCH=off`. Design and decisions: [`workitem-pipeline-ui.md`](workitem-pipeline-ui.md).
 
 ## Tests
 
@@ -106,10 +100,12 @@ cd ui && npm test
 
 Backend integration tests run against a real tmux server on an isolated socket and a stub `claude`.
 
-## Migrating older repos
+## Migrating repos to a workspace
 
-Repos that keep items in `.claude/workitems/` still work. To move them to `.workitems/`:
+Items that live in a repo (`.workitems/` or `.claude/workitems/`) are no longer read. Move each repo into a workspace, once per repo; two repos can share one workspace:
 
 ```sh
-skills/workitem-pipeline/bin/workitem-migrate
+skills/workitem-pipeline/bin/workitem-migrate --to-workspace <workspace> --board <board> <repo>
 ```
+
+The repo's default board becomes `<board>`, its other boards `<board>-<name>`. End the repo's `wi-*` sessions first. The first start of the UI takes the token and port over from `~/.config/workitem-ui/config.toml`.

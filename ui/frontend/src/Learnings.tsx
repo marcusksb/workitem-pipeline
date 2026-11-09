@@ -3,29 +3,28 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api } from "./api";
-import { DEFAULT_BOARD } from "./boardState";
 import { Dialog } from "./Dialog";
 import { IconCheck, IconX } from "./icons";
 import { markdownLinks } from "./markdownLinks";
 import { Learnings as Data } from "./types";
 
-type Props = { project: string; board: string; onClose: () => void };
+type Props = { workspace: string; board: string; onClose: () => void };
 
 const NEW_FILE = "# Learnings\n\n";
 
 /** A board's `learnings.md`: the rules review fixers wrote down, and the human adds or prunes.
  * Saving sends the text the editor started from; the backend refuses if a fixer changed it since. */
-export function Learnings({ project, board, onClose }: Props) {
+export function Learnings({ workspace, board, onClose }: Props) {
   const [data, setData] = useState<Data>();
   const [error, setError] = useState<string>();
   const [text, setText] = useState<string>();
   const [busy, setBusy] = useState(false);
 
   const load = () =>
-    api.learnings(project, board).then(setData, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    api.learnings(workspace, board).then(setData, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   useEffect(() => {
     void load();
-  }, [project, board]);
+  }, [workspace, board]);
 
   const editing = text !== undefined && data !== undefined;
   const changed = editing && text !== (data.content || NEW_FILE);
@@ -34,7 +33,7 @@ export function Learnings({ project, board, onClose }: Props) {
     setBusy(true);
     setError(undefined);
     try {
-      await api.saveLearnings(project, board, data.content, text);
+      await api.saveLearnings(workspace, board, data.content, text);
       setText(undefined);
       await load();
     } catch (e) {
@@ -46,7 +45,7 @@ export function Learnings({ project, board, onClose }: Props) {
     if (!changed || confirm("Discard your changes to the learnings?")) onClose();
   };
 
-  const title = board === DEFAULT_BOARD ? `Learnings in ${project}` : `Learnings in ${project} · ${board}`;
+  const title = `Learnings in ${workspace} · ${board}`;
   return (
     <Dialog title={title} onClose={close}>
       <div className="source learnings">

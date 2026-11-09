@@ -103,7 +103,7 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
 
 /** The files of the workitem folder: a list, and a preview of the one picked. */
 export function Files({ item, onUnauthorized }: { item: Item; onUnauthorized: () => void }) {
-  const key = `${item.project}/${item.dir}`;
+  const key = `${item.workspace}/${item.dir}`;
   const { data: files, error } = usePolling(() => api.files(item), 3000, key, onUnauthorized);
   const [picked, setPicked] = useState<string>();
   useEffect(() => setPicked(undefined), [key]);
