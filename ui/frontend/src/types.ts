@@ -80,8 +80,12 @@ export type PrNote = {
 
 export type PrConversation = { body: string; notes: PrNote[] };
 
-/** A folder in `~/.workitems-pipeline/workspaces`. `agent`: executable that runs its sessions instead of the default `claude`. */
-export type Workspace = { name: string; dir: string; agent?: string };
+/** A script that runs once for the whole workspace on a timer; `implicit` ones are not in `workspace.toml`. */
+export type WorkspaceWatch = { every: string; command: string; args: string[]; implicit: boolean };
+
+/** A folder in `~/.workitems-pipeline/workspaces`. `agent`: executable that runs its sessions instead of the default `claude`.
+ * `watch`: its watchers (only in the list). `error`: why `workspace.toml` is not in use; its last valid version is. */
+export type Workspace = { name: string; dir: string; agent?: string; watch?: WorkspaceWatch[]; error?: string };
 
 export type AgentSession = { workspace: string; name: string };
 

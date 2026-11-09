@@ -1330,6 +1330,44 @@ async fn a_board_watcher_gets_every_item_of_the_board_and_no_stage() {
 }
 
 #[tokio::test]
+async fn a_workspace_watcher_runs_once_for_every_board_in_the_workspace_folder() {
+    let w = world();
+    write_item(&w.ws, "T-37-default", "queue", "");
+    write_item(&w.ws, "T-38-side", "queue", "board: side\n");
+    write_watch_script(&w.ws, "record", "echo \"[$WORKITEM_BOARD] [$WORKITEM_STAGE] [${WORKITEM_REPO-unset}] $1\" >> .watch-log\ncat >> .watch-items");
+    let stages = board(&w, r#"[{"name":"queue","next":["other"]},{"name":"other"}]"#).replace(r#""entry": "qa""#, r#""entry": "queue""#);
+    fs::write(w.ws.join("boards/default.json"), &stages).unwrap();
+    fs::write(w.ws.join("boards/side.json"), &stages).unwrap();
+    fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"1d\"\ncommand = \"record\"\nargs = [\"hi\"]\n").unwrap();
+
+    dispatch::pass(&w.state).await;
+    eventually("the watcher ran", || w.ws.join(".watch-items").exists()).await;
+    dispatch::pass(&w.state).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    assert_eq!(fs::read_to_string(w.ws.join(".watch-log")).unwrap(), "[] [] [unset] hi\n", "once, not per board or pass");
+    let items = fs::read_to_string(w.ws.join(".watch-items")).unwrap();
+    assert!(items.contains("T-37-default") && items.contains("T-38-side"), "every board: {items}");
+    let workspaces: serde_json::Value = serde_json::from_str(&get(&w, "/api/workspaces").await).unwrap();
+    assert_eq!(workspaces[0]["watch"], serde_json::json!([{ "every": "1d", "command": "record", "args": ["hi"], "implicit": false }]), "no board reads PRs");
+}
+
+#[tokio::test]
+async fn a_board_with_a_pr_stage_gives_the_workspace_one_pr_status_unless_it_lists_its_own() {
+    let w = world();
+    let template = fs::read_to_string(w.ws.join("boards/default.json")).unwrap();
+    fs::write(w.ws.join("boards/second.json"), &template).unwrap();
+    let watch = || async { serde_json::from_str::<serde_json::Value>(&get(&w, "/api/workspaces").await).unwrap()[0]["watch"].clone() };
+    assert_eq!(watch().await, serde_json::json!([{ "every": "1m", "command": "pr-status", "args": [], "implicit": true }]), "one for both boards");
+    fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"2m\"\ncommand = \"pr-status\"\n").unwrap();
+    assert_eq!(watch().await, serde_json::json!([{ "every": "2m", "command": "pr-status", "args": [], "implicit": false }]));
+    fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"oops\"\n").unwrap();
+    let workspaces: serde_json::Value = serde_json::from_str(&get(&w, "/api/workspaces").await).unwrap();
+    assert!(workspaces[0]["error"].as_str().unwrap().contains("workspace.toml"));
+    assert_eq!(workspaces[0]["watch"][0]["every"], "2m", "the last valid file stays in use");
+}
+
+#[tokio::test]
 async fn a_paused_column_starts_no_watcher_until_it_is_resumed() {
     let w = world();
     write_item(&w.ws, "T-33-in", "queue", "");

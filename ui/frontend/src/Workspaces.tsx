@@ -23,6 +23,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
   const [creating, setCreating] = useState(false);
   const [editingAgent, setEditingAgent] = useState(false);
   const [agent, setAgent] = useState("");
+  const [showingWatchers, setShowingWatchers] = useState(false);
   const [input, setInput] = useState("");
   const boards = (selected ? (pipelines?.[selected] ?? []) : []).map((b) => b.name);
   const onScreen = shown && boards.includes(shown) ? shown : boards[0];
@@ -71,7 +72,8 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
     }
   };
 
-  const selectedAgent = workspaces.find((w) => w.name === selected)?.agent;
+  const current = workspaces.find((w) => w.name === selected);
+  const selectedAgent = current?.agent;
 
   return (
     <div className="workspaces">
@@ -95,6 +97,15 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
           }}
         >
           Agent: {selectedAgent || "default"}
+        </button>
+      )}
+      {current && (
+        <button
+          className={current.error ? "link error" : "link"}
+          title={current.error ?? "Scripts that run once for the whole workspace, from workspace.toml"}
+          onClick={() => setShowingWatchers(true)}
+        >
+          Watchers{current.error ? ": invalid workspace.toml" : ""}
         </button>
       )}
       <button
@@ -163,6 +174,29 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
             <button type="submit">Save</button>
             {error && <span className="error">{error}</span>}
           </form>
+        </Dialog>
+      )}
+      {showingWatchers && current && (
+        <Dialog title={`Watchers of ${current.name}`} onClose={() => setShowingWatchers(false)}>
+          <div className="dialog-form">
+            {current.error && <span className="error">{current.error}. The last valid version is in use.</span>}
+            {current.watch?.length ? (
+              <ul className="workspace-watchers">
+                {current.watch.map((watch, index) => (
+                  <li key={index}>
+                    <code>{[watch.command, ...watch.args].join(" ")}</code> every {watch.every}
+                    {watch.implicit && <span className="hint"> (implicit: a board reads PRs)</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="hint">None.</span>
+            )}
+            <span className="hint">
+              Edit {current.dir}/workspace.toml to change them, e.g. <code>[[watch]]</code> with <code>every = "5m"</code> and{" "}
+              <code>command = "issue-status"</code>. They get every item of the workspace on stdin and run in the workspace folder.
+            </span>
+          </div>
         </Dialog>
       )}
       {adding && (

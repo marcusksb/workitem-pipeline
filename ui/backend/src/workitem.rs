@@ -196,7 +196,7 @@ mod tests {
     use super::*;
 
     fn workspace(dir: &std::path::Path) -> Workspace {
-        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None }
+        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None, watch: vec![], error: None }
     }
 
     #[test]

@@ -348,9 +348,9 @@ async fn launch_item_session(
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs `gh pr <subcommand> <pr url> <args>` in the repo of the item's board, then makes the board's
-/// watchers (`pr-status` among them) and the stage's due and wakes the dispatcher, so the next
-/// pass reads the PR at once.
+/// Runs `gh pr <subcommand> <pr url> <args>` in the repo of the item's board, then makes the
+/// workspace's `pr-status` and the stage's watchers due and wakes the dispatcher, so the next pass
+/// reads the PR at once.
 async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &[&str]) -> Result<()> {
     if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
@@ -365,7 +365,7 @@ async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &
     if !output.status.success() {
         return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
     }
-    crate::watch::forget(state, workspace, &item.board, crate::watch::BOARD);
+    crate::watch::forget_workspace(state, workspace, "pr-status");
     crate::watch::forget(state, workspace, &item.board, &item.stage);
     state.wake.notify_one();
     Ok(())

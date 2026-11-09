@@ -23,22 +23,23 @@ pub struct Gate {
 
 /// How often the watcher runs for a stage written the old way (`auto` and no `watch`).
 const LEGACY_EVERY: Duration = Duration::from_secs(5);
-/// How often the implicit `pr-status` board watcher reads the PRs.
-const PR_STATUS_EVERY: Duration = Duration::from_secs(60);
+/// Watchers that read facts for every item of a workspace in one call, so they run once per
+/// workspace (`workspace.toml`, see `watch::workspace_watchers`) and never in a board file.
+pub const WORKSPACE_ONLY: &[&str] = &["pr-status", "issue-status"];
 
 /// A script the backend runs on a timer for a column, whether or not items are in it.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Watch {
     /// How often it runs: a number and `s`, `m`, `h` or `d`, like `30s` or `1d`.
-    #[serde(deserialize_with = "every")]
+    #[serde(deserialize_with = "every", serialize_with = "every_text")]
     pub every: Duration,
     /// Script name (`[a-z0-9._-]+`), see `watch::resolve`.
     pub command: String,
     /// Arguments for the script, passed as they are.
     #[serde(default)]
     pub args: Vec<String>,
-    /// Not in the file: added for a stage written the old way.
-    #[serde(skip)]
+    /// Not in the file: added for a stage written the old way, or `pr-status` for a workspace.
+    #[serde(skip_deserializing)]
     pub implicit: bool,
 }
 
@@ -60,7 +61,7 @@ pub fn parse_every(text: &str) -> Result<Duration, String> {
     }
 }
 
-fn watchers<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Watch>, D::Error> {
+pub fn watchers<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Watch>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum OneOrMany {
@@ -75,6 +76,13 @@ fn watchers<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Wat
 
 fn every<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
     parse_every(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+}
+
+/// The largest unit that divides `every` evenly: 60s is `1m`, 90s stays `90s`.
+fn every_text<S: serde::Serializer>(every: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    let seconds = every.as_secs();
+    let (count, unit) = [(86400, 'd'), (3600, 'h'), (60, 'm')].into_iter().find(|(size, _)| seconds.is_multiple_of(*size)).map_or((seconds, 's'), |(size, unit)| (seconds / size, unit));
+    serializer.serialize_str(&format!("{count}{unit}"))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -103,8 +111,8 @@ pub struct Stage {
     /// How this column is sorted, like the board's `order`, which it replaces when not empty.
     #[serde(default)]
     pub order: Vec<String>,
-    /// Read the PRs of the board with the `pr-status` board watcher, for the chips, even without a
-    /// stage that reacts to them. Older files; a board now lists `pr-status` in its `watch`.
+    /// Read the PRs of the board with the workspace's `pr-status` watcher, for the chips, even
+    /// without a stage that reacts to them. Older files; a workspace now lists `pr-status` itself.
     #[serde(default, skip_serializing)]
     pub pr_status: bool,
     /// Start the handler at most once per entry into the stage.
@@ -180,6 +188,11 @@ impl Pipeline {
         self.stages.iter().find(|stage| stage.name == name)
     }
 
+    /// Its PRs must be read: a stage reacts to them, or asks for their chips with `pr_status`.
+    pub fn reads_prs(&self) -> bool {
+        self.stages.iter().any(|s| s.pr_status || s.watches_prs())
+    }
+
     pub fn parse(text: &str) -> Result<Pipeline, String> {
         let mut pipeline: Pipeline = serde_json::from_str(text).map_err(|e| e.to_string())?;
         // Older files have no `watch`: `auto` plus a handler or prompt is `run-items`, `auto` with
@@ -196,18 +209,16 @@ impl Pipeline {
                 }
             }
         }
-        // `pr-review` only reacts to what `pr-status` wrote, so a board that reacts to PRs (or asks
-        // for their chips with `pr_status`) and does not read them gets the reader.
-        let reads_prs = pipeline.watch.iter().chain(pipeline.stages.iter().flat_map(|s| &s.watch)).any(|w| w.command == "pr-status");
-        if !reads_prs && pipeline.stages.iter().any(|s| s.pr_status || s.watches_prs()) {
-            pipeline.watch.push(legacy("pr-status", PR_STATUS_EVERY));
+        let all = pipeline.watch.iter().chain(pipeline.stages.iter().flat_map(|s| &s.watch));
+        if let Some(watch) = all.into_iter().find(|w| WORKSPACE_ONLY.contains(&w.command.as_str())) {
+            return Err(format!("'{}' runs once per workspace: list it in workspace.toml, not in a board", watch.command));
         }
         match &pipeline.repo {
             Some(repo) if !repo.is_absolute() || !repo.is_dir() => {
                 return Err(format!("repo '{}' is not an absolute path to a directory", repo.display()));
             }
-            None if pipeline.watch.iter().any(|w| w.command == "pr-status") || pipeline.stages.iter().any(|s| s.watches_prs() || s.watch.iter().any(|w| w.command == "pr-status")) => {
-                return Err("a board without a repo has no PRs, so no PR stage and no pr-status".into());
+            None if pipeline.reads_prs() => {
+                return Err("a board without a repo has no PRs, so no PR stage and no pr_status".into());
             }
             _ => {}
         }
@@ -464,19 +475,33 @@ mod tests {
         assert_eq!((commands("a"), commands("b")), (vec!["run-items"], vec!["run-items"]));
         assert_eq!(commands("c"), vec!["pr-review"], "the PR handler is the pr-review script");
         assert!(commands("d").is_empty(), "a manual stage is not watched");
-        assert_eq!(pipeline.watch.iter().map(|w| (w.command.as_str(), w.every.as_secs(), w.implicit)).collect::<Vec<_>>(), [("pr-status", 60, true)], "and its PRs are read");
+        assert!(pipeline.watch.is_empty() && pipeline.reads_prs(), "its PRs are read by the workspace, not the board");
     }
 
     #[test]
-    fn watch_is_one_object_or_a_list_and_pr_status_adds_the_board_reader() {
+    fn watch_is_one_object_or_a_list_and_pr_status_asks_for_the_reader() {
         let list = parse(r#"[{"name":"a","watch":[{"every":"5s","command":"x"},{"every":"1m","command":"y","args":["-z"]}]}]"#, "a").unwrap();
         assert_eq!(list.stage("a").unwrap().watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["x", "y"]);
-        assert!(list.watch.is_empty(), "no PR stage, no reader");
+        assert!(!list.reads_prs(), "no PR stage, no reader");
         let status = parse(r#"[{"name":"a","handler":"h","auto":true,"pr_status":true}]"#, "a").unwrap();
         assert_eq!(status.stage("a").unwrap().watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["run-items"]);
-        assert_eq!(status.watch.iter().map(|w| w.command.as_str()).collect::<Vec<_>>(), ["pr-status"]);
-        let own = parse(r#"[{"name":"a","on_merge":"b","next":["b"],"watch":[{"every":"5s","command":"pr-review"},{"every":"2m","command":"pr-status"}]},{"name":"b"}]"#, "a").unwrap();
-        assert!(own.watch.is_empty(), "a board that reads its PRs itself gets no second reader");
+        assert!(status.reads_prs());
+    }
+
+    #[test]
+    fn workspace_watchers_are_refused_in_a_board() {
+        for command in WORKSPACE_ONLY {
+            let on_stage = parse(&format!(r#"[{{"name":"a","watch":{{"every":"1m","command":"{command}"}}}}]"#), "a");
+            assert!(on_stage.unwrap_err().contains("workspace.toml"), "{command}");
+            let on_board = Pipeline::parse(&format!(r#"{{ {BRIEF}, "entry": "a", "stages": [{{"name":"a"}}], "watch": {{"every":"1m","command":"{command}"}} }}"#));
+            assert!(on_board.unwrap_err().contains("workspace.toml"), "{command}");
+        }
+    }
+
+    #[test]
+    fn every_is_written_in_its_largest_whole_unit() {
+        let text = |every: &str| serde_json::to_value(Watch { every: parse_every(every).unwrap(), command: "x".into(), args: vec![], implicit: false }).unwrap()["every"].clone();
+        assert_eq!([text("60s"), text("90s"), text("120m"), text("1d")], ["1m", "90s", "2h", "1d"]);
     }
 
     #[test]
@@ -488,7 +513,7 @@ mod tests {
         assert!(pipeline.stage("ready_for_development").unwrap().gate.is_some());
         assert!(pipeline.stage("in_review").unwrap().watches_prs());
         assert!(pipeline.stage("in_development").unwrap().develops());
-        assert!(pipeline.watch.iter().any(|w| w.command == "pr-status" && !w.implicit), "the bundled board reads its PRs itself");
+        assert!(pipeline.watch.is_empty() && pipeline.reads_prs(), "the workspace reads the bundled board's PRs");
     }
 
     #[test]
@@ -511,8 +536,6 @@ mod tests {
         let reviews = r#"[{"name":"a","next":["b"],"watch":{"every":"5s","command":"pr-review"},"on_merge":"b"},{"name":"b"}]"#;
         assert!(without(reviews, "").unwrap_err().contains("without a repo"));
         assert!(without(r#"[{"name":"a","pr_status":true}]"#, "").unwrap_err().contains("without a repo"));
-        assert!(without(r#"[{"name":"a"}]"#, r#", "watch": {"every":"1m","command":"pr-status"}"#).unwrap_err().contains("without a repo"));
-        assert!(without(r#"[{"name":"a","watch":{"every":"1m","command":"pr-status"}}]"#, "").unwrap_err().contains("without a repo"));
     }
 
     #[test]

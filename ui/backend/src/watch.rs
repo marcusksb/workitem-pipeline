@@ -1,5 +1,7 @@
 //! Column watchers: a script per stage that runs every `watch.every`, whether or not the column
-//! has items. A board can carry watchers too; they get every item of the board and no stage. The backend only schedules it and hands over the context; what it does (move,
+//! has items. A board can carry watchers too; they get every item of the board and no stage. A
+//! workspace's `workspace.toml` can too; they get every item of the workspace, no board and no
+//! repo, and run once however many boards there are. The backend only schedules it and hands over the context; what it does (move,
 //! delete, create) is the script's business, through `workitem-move` and the workitem files.
 //! Costs no tokens. The script is a file run directly, never through a shell.
 use std::{collections::{HashMap, HashSet}, fs, io, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Stdio, time::{Duration, SystemTime, UNIX_EPOCH}};
@@ -18,6 +20,12 @@ use crate::{
 /// Stands in for the stage in the key of a board watcher; `@` is never in a stage name.
 pub const BOARD: &str = "@board";
 
+/// Stands in for the board in the key of a workspace watcher; `@` is never in a board name.
+const WORKSPACE: &str = "@workspace";
+
+/// How often the implicit `pr-status` workspace watcher reads the PRs.
+const PR_STATUS_EVERY: Duration = Duration::from_secs(60);
+
 /// A script that runs longer than this is killed.
 const TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -26,10 +34,22 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 /// The script `name` for a stage on `board`. The first of these wins: the board's
-/// `watch/<name>`, the workspace's `watch/<name>`, the bundled one.
+/// `watch/<name>`, the workspace's `watch/<name>`, the bundled one. A workspace watcher passes an
+/// empty `board`, which skips the first.
 pub fn resolve(state: &AppState, workspace: &Workspace, board: &str, name: &str) -> Result<Found, String> {
     let places = locate::places(workspace, board, "watch", state.skills_dir.join("workitem-pipeline/watch"));
     locate::find(&places, Path::new(name)).ok_or_else(|| format!("watch script '{name}' not found in {}", locate::looked(&places)))
+}
+
+/// The watchers of `workspace.toml`, plus `pr-status` when it does not list it and a board needs
+/// its PRs read: `pr-review` only reacts to what `pr-status` wrote.
+pub fn workspace_watchers(state: &AppState, workspace: &Workspace) -> Vec<Watch> {
+    let mut watchers = workspace.watch.clone();
+    let reads_prs = || state.board_names(workspace).iter().any(|b| state.pipeline(workspace, b).pipeline.is_some_and(|p| p.reads_prs()));
+    if !watchers.iter().any(|w| w.command == "pr-status") && reads_prs() {
+        watchers.push(Watch { every: PR_STATUS_EVERY, command: "pr-status".into(), args: vec![], implicit: true });
+    }
+    watchers
 }
 
 fn now() -> u64 {
@@ -51,6 +71,21 @@ pub fn forget(state: &AppState, workspace: &Workspace, board: &str, stage: &str)
     let mut runs = last_runs(state);
     let prefix = format!("{}/{board}/{stage}/", workspace.name);
     runs.retain(|key, _| !key.starts_with(&prefix));
+    if let Ok(text) = serde_json::to_string_pretty(&runs) {
+        let _ = fs::write(runs_file(state), text);
+    }
+}
+
+/// Makes the workspace watchers running `command` due now, so the next pass runs them.
+pub fn forget_workspace(state: &AppState, workspace: &Workspace, command: &str) {
+    let keys: HashSet<String> = workspace_watchers(state, workspace)
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w.command == command)
+        .map(|(index, _)| format!("{}/{WORKSPACE}/{index}", workspace.name))
+        .collect();
+    let mut runs = last_runs(state);
+    runs.retain(|key, _| !keys.contains(key));
     if let Ok(text) = serde_json::to_string_pretty(&runs) {
         let _ = fs::write(runs_file(state), text);
     }
@@ -93,6 +128,11 @@ pub async fn pass(state: &AppState) {
     let paused = state.paused.lock().unwrap().clone();
     for workspace in state.store.workspaces() {
         let items = workitem::list(&workspace);
+        for (index, watch) in workspace_watchers(state, &workspace).iter().enumerate() {
+            let key = format!("{}/{WORKSPACE}/{index}", workspace.name);
+            let job = |script| Job::new(state, &workspace, None, None, None, watch, script, &items.iter().collect::<Vec<_>>(), &sessions);
+            started |= start(state, &mut runs, key, watch, &workspace, "", job);
+        }
         for board in state.board_names(&workspace) {
             let Some(pipeline) = state.pipeline(&workspace, &board).pipeline else {
                 continue;
@@ -102,30 +142,11 @@ pub async fn pass(state: &AppState) {
             let watchers = pipeline.watch.iter().enumerate().map(|(i, w)| (None, i, w));
             for (stage, index, watch) in watchers.chain(stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (Some(s), i, w)))) {
                 let key = format!("{}/{board}/{}/{index}", workspace.name, stage.map_or(BOARD, |s| s.name.as_str()));
-                if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
-                    continue;
-                }
-                let script = match resolve(state, &workspace, &board, &watch.command) {
-                    Ok(found) => found.path,
-                    Err(e) => {
-                        eprintln!("workitem-ui: {key}: {e}");
-                        continue;
-                    }
+                let job = |script| {
+                    let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
+                    Job::new(state, &workspace, Some(&board), pipeline.repo.as_deref(), stage, watch, script, &here, &sessions)
                 };
-                if !state.watching.lock().unwrap().insert(key.clone()) {
-                    continue;
-                }
-                runs.insert(key.clone(), now());
-                started = true;
-                let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
-                let job = Job::new(state, &workspace, &board, pipeline.repo.as_deref(), stage, watch, script, &here, &sessions);
-                let running = state.watching.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = job.run().await {
-                        eprintln!("workitem-ui: watcher {key}: {e}");
-                    }
-                    running.lock().unwrap().remove(&key);
-                });
+                started |= start(state, &mut runs, key, watch, &workspace, &board, job);
             }
         }
     }
@@ -134,6 +155,34 @@ pub async fn pass(state: &AppState) {
             let _ = fs::write(runs_file(state), text);
         }
     }
+}
+
+/// Runs the job `job` makes for the script in a task of its own when the watcher under `key` is due
+/// and not running; whether it did.
+fn start(state: &AppState, runs: &mut HashMap<String, u64>, key: String, watch: &Watch, workspace: &Workspace, board: &str, job: impl FnOnce(PathBuf) -> Job) -> bool {
+    if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
+        return false;
+    }
+    let script = match resolve(state, workspace, board, &watch.command) {
+        Ok(found) => found.path,
+        Err(e) => {
+            eprintln!("workitem-ui: {key}: {e}");
+            return false;
+        }
+    };
+    if !state.watching.lock().unwrap().insert(key.clone()) {
+        return false;
+    }
+    runs.insert(key.clone(), now());
+    let job = job(script);
+    let running = state.watching.clone();
+    tokio::spawn(async move {
+        if let Err(e) = job.run().await {
+            eprintln!("workitem-ui: watcher {key}: {e}");
+        }
+        running.lock().unwrap().remove(&key);
+    });
+    true
 }
 
 /// Everything one run needs, owned so it can outlive the pass.
@@ -147,12 +196,13 @@ struct Job {
 }
 
 impl Job {
+    /// `board` is `None` for a workspace watcher.
     #[allow(clippy::too_many_arguments)]
-    fn new(state: &AppState, workspace: &Workspace, board: &str, repo: Option<&Path>, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
+    fn new(state: &AppState, workspace: &Workspace, board: Option<&str>, repo: Option<&Path>, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
         let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, workspace, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
         let mut env = vec![
             ("WORKITEM_DIR_ROOT", workspace.dir.display().to_string()),
-            ("WORKITEM_BOARD", board.to_string()),
+            ("WORKITEM_BOARD", board.unwrap_or_default().to_string()),
             ("WORKITEM_STAGE", stage.map(|s| s.name.clone()).unwrap_or_default()),
             ("WORKITEM_WORKSPACE", workspace.name.clone()),
             ("WORKITEM_UI_PORT", state.port.to_string()),
@@ -165,7 +215,8 @@ impl Job {
             ("WORKITEM_WHEN", stage.and_then(|s| serde_json::to_string(&s.when).ok()).unwrap_or_else(|| "{}".into())),
             ("WORKITEM_MOVE", state.skills_dir.join("workitem-pipeline/bin/workitem-move").display().to_string()),
         ];
-        // A board without a repo has no WORKITEM_REPO; its scripts run in the workspace folder.
+        // A board without a repo, and the workspace, have no WORKITEM_REPO; their scripts run in
+        // the workspace folder.
         if let Some(repo) = repo {
             env.push(("WORKITEM_REPO", repo.display().to_string()));
         }

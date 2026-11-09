@@ -2,12 +2,15 @@ use std::{
     fs, io,
     io::Write,
     os::unix::fs::OpenOptionsExt,
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+
+use crate::pipeline::Watch;
 
 pub const DEFAULT_PORT: u16 = 7373;
 
@@ -21,6 +24,12 @@ pub struct Workspace {
     /// from `workspace.toml`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// Scripts that run once for the whole workspace on a timer (`watch.rs`), from `workspace.toml`.
+    #[serde(skip)]
+    pub watch: Vec<Watch>,
+    /// Why `workspace.toml` is not in use, if so; its last valid version is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -31,10 +40,23 @@ struct Config {
 }
 
 /// `<workspace>/workspace.toml`.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 struct Settings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     agent: Option<String>,
+    /// `[[watch]]` tables (or one `[watch]`), each with `every`, `command` and optional `args`.
+    #[serde(default, deserialize_with = "crate::pipeline::watchers")]
+    watch: Vec<Watch>,
+}
+
+impl Settings {
+    fn parse(text: &str) -> Result<Settings, String> {
+        let settings: Settings = toml::from_str(text).map_err(|e| e.message().to_string())?;
+        if let Some(watch) = settings.watch.iter().find(|w| !crate::watch::valid_name(&w.command)) {
+            return Err(format!("watch command '{}' is not a script name (lowercase letters, digits, . _ - only)", watch.command));
+        }
+        Ok(settings)
+    }
 }
 
 fn default_port() -> u16 {
@@ -54,6 +76,8 @@ pub fn valid_name(name: &str) -> bool {
 pub struct Store {
     root: PathBuf,
     config: Mutex<Config>,
+    /// Last valid `workspace.toml` per workspace, so a typo in it stops nothing.
+    settings: Mutex<HashMap<String, Settings>>,
 }
 
 impl Store {
@@ -91,7 +115,7 @@ impl Store {
             Err(e) => return Err(e),
         };
         fs::create_dir_all(root.join("workspaces"))?;
-        Ok(Store { root, config: Mutex::new(config) })
+        Ok(Store { root, config: Mutex::new(config), settings: Default::default() })
     }
 
     /// The config file, which holds the token.
@@ -112,10 +136,28 @@ impl Store {
         self.config.lock().unwrap().port
     }
 
+    /// Reads the workspace. When its `workspace.toml` is invalid the last valid one stays in use
+    /// and `error` says why; no file is an empty one.
     fn load(&self, name: &str) -> Workspace {
         let dir = self.root.join("workspaces").join(name);
-        let settings: Settings = fs::read_to_string(dir.join("workspace.toml")).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default();
-        Workspace { name: name.to_string(), dir, agent: settings.agent }
+        let path = dir.join("workspace.toml");
+        let read = match fs::read_to_string(&path) {
+            Ok(text) => Settings::parse(&text).map_err(|e| format!("{}: {e}", path.display())),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Settings::default()),
+            Err(e) => Err(format!("{}: {e}", path.display())),
+        };
+        let mut known = self.settings.lock().unwrap();
+        let (settings, error) = match read {
+            Ok(settings) => {
+                known.insert(name.to_string(), settings.clone());
+                (settings, None)
+            }
+            Err(error) => {
+                eprintln!("workitem-ui: {name}: {error}");
+                (known.get(name).cloned().unwrap_or_default(), Some(error))
+            }
+        };
+        Workspace { name: name.to_string(), dir, agent: settings.agent, watch: settings.watch, error }
     }
 
     /// Every folder in `workspaces/` with a plain name, by name.
@@ -166,9 +208,18 @@ impl Store {
         let Some(workspace) = self.workspace(name) else {
             return Ok(None);
         };
-        let settings = Settings { agent: (!agent.is_empty()).then(|| agent.to_string()) };
-        let text = toml::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-        fs::write(workspace.dir.join("workspace.toml"), text).map_err(|e| e.to_string())?;
+        if let Some(error) = workspace.error {
+            return Err(format!("fix workspace.toml first: {error}"));
+        }
+        // Only `agent` changes; the rest of the file (its watchers) stays, though not its comments.
+        let path = workspace.dir.join("workspace.toml");
+        let mut table: toml::Table = fs::read_to_string(&path).ok().map(|t| t.parse()).transpose().map_err(|e: toml::de::Error| e.to_string())?.unwrap_or_default();
+        if agent.is_empty() {
+            table.remove("agent");
+        } else {
+            table.insert("agent".into(), agent.into());
+        }
+        fs::write(&path, toml::to_string_pretty(&table).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         Ok(Some(self.load(name)))
     }
 }
@@ -257,6 +308,28 @@ mod tests {
         assert!(store.set_agent("nope", "sh").unwrap().is_none());
         assert_eq!(store.set_agent("app", "").unwrap().unwrap().agent, None);
         assert!(!fs::read_to_string(dir.path().join("workspaces/app/workspace.toml")).unwrap().contains("agent"));
+    }
+
+    #[test]
+    fn watchers_come_from_the_last_valid_file_and_survive_an_agent_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        let file = store.add_workspace("app").unwrap().dir.join("workspace.toml");
+        assert!(store.workspace("app").unwrap().watch.is_empty());
+        fs::write(&file, "[[watch]]\nevery = \"5m\"\ncommand = \"issue-status\"\n").unwrap();
+        let watch = |store: &Store| store.workspace("app").unwrap().watch.iter().map(|w| (w.command.clone(), w.every.as_secs())).collect::<Vec<_>>();
+        assert_eq!(watch(&store), [("issue-status".to_string(), 300)]);
+        store.set_agent("app", "/bin/sh").unwrap();
+        assert_eq!(watch(&store), [("issue-status".to_string(), 300)], "setting the agent keeps the watchers");
+        for bad in ["[[watch]]\nevery = \"5x\"\ncommand = \"a\"\n", "[[watch]]\nevery = \"5m\"\ncommand = \"../a\"\n", "agent = "] {
+            fs::write(&file, bad).unwrap();
+            let workspace = store.workspace("app").unwrap();
+            assert!(workspace.error.is_some(), "{bad}");
+            assert_eq!((watch(&store), workspace.agent.as_deref()), (vec![("issue-status".to_string(), 300)], Some("/bin/sh")), "{bad}: the last valid file stays");
+            assert!(store.set_agent("app", "").err().unwrap().contains("workspace.toml"), "an invalid file is not overwritten");
+        }
+        let fresh = Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap();
+        assert!(fresh.error.is_some() && fresh.watch.is_empty(), "nothing valid was ever read");
     }
 
     #[test]

@@ -476,6 +476,7 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .plan-panel-summary { margin: 8px 0 0; color: var(--muted); }
 .tabs button.plan-delete { margin-left: auto; color: var(--blocked); }
 .hint { margin: 0; font-size: 13px; color: var(--muted); }
+.workspace-watchers { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
 
 .activity-toasts {
   position: fixed;

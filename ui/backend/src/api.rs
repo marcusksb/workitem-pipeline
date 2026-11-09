@@ -54,8 +54,17 @@ pub async fn me() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<Workspace>> {
-    Json(state.store.workspaces())
+#[derive(Serialize)]
+pub struct WorkspaceInfo {
+    #[serde(flatten)]
+    workspace: Workspace,
+    /// What runs once for the whole workspace, the implicit `pr-status` included.
+    watch: Vec<crate::pipeline::Watch>,
+}
+
+pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
+    let info = |workspace: Workspace| WorkspaceInfo { watch: crate::watch::workspace_watchers(&state, &workspace), workspace };
+    Json(state.store.workspaces().into_iter().map(info).collect())
 }
 
 #[derive(Deserialize)]
