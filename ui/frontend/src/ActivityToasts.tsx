@@ -3,7 +3,6 @@ import { AnimationEvent, useEffect, useRef, useState } from "react";
 import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
 import { QUIPS, quipFor } from "./quips";
 import { Item, Pipelines } from "./types";
-import { routeHash } from "./url";
 
 /** Toasts on screen at once; older ones wait behind "+N more". */
 const SHOWN = 4;
@@ -18,9 +17,9 @@ const tone = (kind: ActivityKind) => (GOOD.includes(kind) ? "tone-good" : BAD.in
 
 /**
  * A toast for each change between two polls (see `activityEvents`), top right below the header, newest on top, with confetti when an
- * item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay.
+ * item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  */
-export function ActivityToasts({ items, pipelines }: { items: Item[] | undefined; pipelines: Pipelines | undefined }) {
+export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
   const before = useRef<Item[]>(undefined);
   const nextId = useRef(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -51,7 +50,7 @@ export function ActivityToasts({ items, pipelines }: { items: Item[] | undefined
   };
   const open = (toast: Toast, item: Item) => {
     dismiss(toast.id);
-    location.hash = routeHash({ item: { workspace: item.workspace, dir: item.dir } });
+    onOpen(item);
   };
 
   if (toasts.length === 0) return null;
