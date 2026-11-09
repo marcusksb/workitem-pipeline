@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "./api";
 import { Board } from "./Board";
 import { boardNames, itemKey, shownBoard } from "./boardState";
@@ -55,6 +55,27 @@ function isBackground(target: EventTarget): boolean {
   return window.getSelection()?.isCollapsed ?? true;
 }
 
+/** Keeps the last non-null value on screen after it goes away, until `done` is called (when its slide-out ends). */
+function useLeaving<T>(value: T | null) {
+  const last = useRef<T | null>(null);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  if (value) last.current = value;
+  const done = () => {
+    last.current = null;
+    rerender();
+  };
+  return { shown: last.current, leaving: !value && !!last.current, done };
+}
+
+/** Wraps a `.detail` panel so it slides out before it unmounts. */
+function Leaving({ leaving, onDone, children }: { leaving: boolean; onDone: () => void; children: ReactNode }) {
+  return (
+    <div className={leaving ? "panel-slot leaving" : "panel-slot"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
+      {children}
+    </div>
+  );
+}
+
 function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [route, setRoute] = useState<Route>(readRoute);
   const workspaces = usePolling(api.workspaces, 3000, "workspaces", onUnauthorized);
@@ -103,6 +124,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     ? (plans.data ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
     : null;
   const detailOpen = !!(selected || selectedPlan);
+  const itemPanel = useLeaving(selected);
+  const planPanel = useLeaving(selectedPlan);
   const shown = (items.data ?? []).filter((item) => item.workspace === workspace);
   const error = workspaces.error ?? items.error ?? pipelines.error;
   const inView = workspace ? [workspace] : [];
@@ -166,30 +189,34 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
             void pipelines.reload();
           }} />
         </div>
-        {selected && (
-          <DetailPanel
-            item={selected}
-            items={shown}
-            pipelines={pipelines.data}
-            onSelect={open}
-            tab={route.tab}
-            onTab={onTab}
-            onClose={() => navigate({})}
-            onUnauthorized={onUnauthorized}
-          />
+        {itemPanel.shown && (
+          <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
+            <DetailPanel
+              item={itemPanel.shown}
+              items={shown}
+              pipelines={pipelines.data}
+              onSelect={open}
+              tab={route.tab}
+              onTab={onTab}
+              onClose={() => navigate({})}
+              onUnauthorized={onUnauthorized}
+            />
+          </Leaving>
         )}
-        {selectedPlan && (
-          <PlanPanel
-            key={`${selectedPlan.workspace}/${selectedPlan.id}`}
-            plan={selectedPlan}
-            onWorkitem={(itemWorkspace, dir) => {
-              const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
-              if (item) open(item);
-            }}
-            onClose={() => navigate({})}
-            onChanged={() => void plans.reload()}
-            onUnauthorized={onUnauthorized}
-          />
+        {planPanel.shown && (
+          <Leaving leaving={planPanel.leaving} onDone={planPanel.done}>
+            <PlanPanel
+              key={`${planPanel.shown.workspace}/${planPanel.shown.id}`}
+              plan={planPanel.shown}
+              onWorkitem={(itemWorkspace, dir) => {
+                const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
+                if (item) open(item);
+              }}
+              onClose={() => navigate({})}
+              onChanged={() => void plans.reload()}
+              onUnauthorized={onUnauthorized}
+            />
+          </Leaving>
         )}
       </main>
       <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} />
