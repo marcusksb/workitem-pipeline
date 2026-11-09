@@ -36,16 +36,7 @@ This skill is the handler for the pipeline stage `in_development`. It only start
 
 ### Step 1 — Locate the workitem
 
-1. Repo root: `git rev-parse --show-toplevel`.
-2. List candidates: `<repo-root>/.workitems/*/workitem.md` (`.claude/workitems/` if that exists and `.workitems/` does not).
-3. Resolve the argument:
-   - A Jira ticket key (`[A-Z]+-\d+`) → match the directory that starts with it.
-   - A directory/slug name → match by substring.
-   - Empty:
-     - Exactly one workitem with `stage: ready_for_development` and `approved: true` → use it.
-     - Multiple → list them (title + stage) and ask which one.
-     - None approved → say so, list any `in_development` ones in case the user means "resume", and stop. Point to `/workitem-approve` for items still waiting.
-4. If nothing matches the argument, say so and stop — do not guess or create one.
+Items live in a workspace folder, outside the repo. The workitem file is the one your prompt names ("Workitem file:"), else `$WORKITEM_FILE`, else the path given as the argument. The repo is the one your prompt names, else `$WORKITEM_REPO`, else the `repo` of the item's board (`<workspace>/boards/<board>.json`, where `<workspace>` is the folder that holds the item's folder). With none of these, ask for the path to the `workitem.md` and stop — do not search for one or guess.
 
 ### Step 2 — Read and validate
 
@@ -54,15 +45,14 @@ Read the matched `workitem.md` and parse the frontmatter.
 - If `stage` is `backlog`, `analyze` or `ready_for_development` with `approved: false`, stop: it is not approved. Tell the user which stage it is in.
 - If `stage` is already `in_development`, `in_review`, or `done`, tell the user and ask whether to resume as-is or restart — do not silently reset it.
   - If it's `in_development` and a `session:` field is present, that's a previously spawned background agent (see Step 4b) — offer to reconnect to it (Step 6) instead of restarting.
-- If `repo:` is present and doesn't match the current repo root, warn before continuing — the workitem may belong to a different checkout.
 
 ### Step 3 — Move it to in_development
 
-If your prompt says the item is already in the development stage (approving at the gate moves it there), skip this move. If the stage is `ready_for_development`, run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> in_development` **before** doing any other work, so the state is durable even if the session is interrupted. It refuses when `approved` is not `true`: report that and stop. Do not edit `stage:` by hand. Then set `agent_status: working` — a sibling field to `status:` that the `workitem-watch` skill later reuses: `working` while an agent is actively on it, `blocked: <reason>` when it's stopped for a human decision, `ok` once it's clean and handed off. This is what lets anyone check a workitem's real-time state without reading this session's scrollback.
+If your prompt says the item is already in the development stage (approving at the gate moves it there), skip this move. If the stage is `ready_for_development`, run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> in_development` **before** doing any other work, so the state is durable even if the session is interrupted. It refuses when `approved` is not `true`: report that and stop. Do not edit `stage:` by hand. Then set `agent_status: working`: `working` while an agent is actively on it, `blocked: <reason>` when it's stopped for a human decision, `ok` once it's clean and handed off. This is what lets anyone check a workitem's real-time state without reading this session's scrollback.
 
 Also record who's doing the work, regardless of inline vs. background: call `ListAgents` — its result always states "This session is `<name>` [ref]", even for a plain inline run with no spawned agent. Write that name into the frontmatter as `session:`. This makes every workitem joinable via `SendMessage` to that name, not just the ones launched through Step 4b. (Step 4b overwrites this with the spawned agent's own name once it exists — that agent, not this launching session, is now the one doing the work.)
 
-Then move the linked Jira issue into development, using the Atlassian Rovo MCP tools (not the `jira` CLI). Skip this if `issue:` is `none`.
+Then move the linked Jira issue into development, using the Atlassian Rovo MCP tools (not the `jira` CLI). Skip this if `issue:` is `none`, and skip it when another item of the workspace depends on this one (`grep -l '^depends_on:.*\b<this dir>\b' <workspace>/*/workitem.md` finds one): only the last item of a chain moves the shared ticket.
 
 1. Get the `cloudId` with `getAccessibleAtlassianResources`, then read the issue's current status with `getJiraIssue`. If it is already `In development` or `In Progress`, do nothing.
 2. Call `getTransitionsForJiraIssue` and pick the transition whose target status is `In development`; if there is none, use `In Progress`. Run it with `transitionJiraIssue`.
@@ -129,9 +119,9 @@ Read `pr_mode` from the frontmatter.
 
 - `none` → skip this step.
 - `draft` or `ready` → this repo's own rule is to **always** create PRs as drafts regardless of `pr_mode`; if `pr_mode: ready`, tell the user about the conflict and default to draft unless they explicitly override.
-- As soon as the PR is opened, write its URL into the workitem frontmatter as a new `pr:` field — the `workitem-watch` skill needs it to find this PR later.
-- Start `/monitor-pr {pr}` per AGENTS.md. While it idles until CI finishes, keep `agent_status: waiting: CI on PR #{pr}`; set `agent_status: working` whenever it acts. Once it reports CI green and comments addressed, mark the PR ready for review and request the `backend` team as reviewer (`gh pr ready {pr} && gh pr edit {pr} --add-reviewer "$(gh repo view --json owner -q .owner.login)/backend"`; if adding the team fails, say so in your report but still move on), then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` (the stage marked `(default)` under "Allowed next stages" in your prompt; `in_review` on the bundled board; it also sets `agent_status: ok`) — from here, `workitem-watch` takes over monitoring.
-- Right after marking the PR ready, move the linked Jira issue to `In Review` the same way as in Step 3 (Rovo MCP tools; skip if `issue:` is `none`; do nothing if it is already `In Review`). If there is no `In Review` transition or the call fails, do not stop: list the available transitions in the report.
+- As soon as the PR is opened, write its URL into the workitem frontmatter as a new `pr:` field — the board's PR watchers need it to find this PR later.
+- Start `/monitor-pr {pr}` per AGENTS.md. While it idles until CI finishes, keep `agent_status: waiting: CI on PR #{pr}`; set `agent_status: working` whenever it acts. Once it reports CI green and comments addressed, mark the PR ready for review and request the `backend` team as reviewer (`gh pr ready {pr} && gh pr edit {pr} --add-reviewer "$(gh repo view --json owner -q .owner.login)/backend"`; if adding the team fails, say so in your report but still move on), then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` (the stage marked `(default)` under "Allowed next stages" in your prompt; `in_review` on the bundled board; it also sets `agent_status: ok`) — from here, the board's PR watchers take over monitoring.
+- Right after marking the PR ready, move the linked Jira issue to `In Review` the same way as in Step 3 (Rovo MCP tools; skip if `issue:` is `none` or another item depends on this one; do nothing if it is already `In Review`). If there is no `In Review` transition or the call fails, do not stop: list the available transitions in the report.
 
 ### Step 8 — Report
 
@@ -139,4 +129,4 @@ Tell the user: which workitem was picked up, the branch/worktree it's running in
 
 ## Splitting
 
-If asked to split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir>` (plus `--repo` and `--issue` as needed). Do not write child `workitem.md` files by hand.
+If asked to split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir> --workspace <workspace> --board <board>` (plus `--issue` as needed). Do not write child `workitem.md` files by hand.

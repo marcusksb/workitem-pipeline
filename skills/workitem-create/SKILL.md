@@ -1,7 +1,7 @@
 ---
 name: workitem-create
 version: 1.0.0
-description: Generate a structured workitem file from a Jira ticket or a plain task description — classifies it as bug/analysis/feature, decides whether a worktree and a PR (and which PR mode) are needed, and links the Jira ticket if one exists. Use when asked to "create a workitem", "generate a workitem for X", "make a workitem from this ticket/task".
+description: Generate structured workitem files in a workspace from a Jira ticket or a plain task description — classifies it as bug/analysis/feature, decides whether a worktree and a PR (and which PR mode) are needed, links the Jira ticket if one exists, and splits a task that spans several repos into one linked item per board. Use when asked to "create a workitem", "generate a workitem for X", "make a workitem from this ticket/task".
 triggers:
   - "create a workitem"
   - "generate a workitem"
@@ -23,7 +23,7 @@ Examples:
 - "Create a workitem for: the CDN cache header is missing on 404 responses"
 - "Make a workitem for SHAPE-456"
 
-This skill only **generates** the file. It does not implement anything and does not spawn the implementing agent.
+This skill only **generates** the files. It does not implement anything and does not spawn the implementing agent.
 
 ## Workflow
 
@@ -31,11 +31,13 @@ This skill only **generates** the file. It does not implement anything and does 
 
 If the skill argument matches a Jira ticket key (`[A-Z]+-\d+`), treat it as **Case A**. If it is a Sentry issue URL (contains `sentry.io`), treat it as **Case C**. Otherwise treat the argument as free text — **Case B**.
 
-Optional flags: `--issue <KEY>` links a ticket, `--repo <path>` sets the repo root, `--parent <dir>` marks the new workitem as a child of the workitem with that directory name (use it when splitting a workitem into smaller ones), `--board <name>` puts it on that board (default `default`; the board must be `<workitems dir>/boards/<name>.json`, stop and say so if it is not). Callers pass these instead of answering questions.
+Items live in a workspace folder, not in a repo. `--workspace <folder>` names it (else use `$WORKITEM_WORKSPACE`; with neither, end your turn asking for the workspace folder and write nothing). `--board <name>` is the board the task was filed on; it must be `<workspace>/boards/<name>.json`, stop and say so if it is not (without `--board`, a workspace with one board uses that one, otherwise ask). Each board file names its repo in `"repo"`: an item belongs to the repo of its board. Read every `<workspace>/boards/*.json` now and note each board's name and repo.
+
+Other optional flags: `--issue <KEY>` links a ticket, `--parent <dir>` marks the new workitem as a child of the workitem with that directory name (use it when splitting a workitem into smaller ones). Callers pass these instead of answering questions.
 
 If no argument was given, end your turn with the question "Give me a Jira ticket ID, a Sentry issue URL, or describe the task." as the final message and write no file.
 
-The new workitem always starts in the `entry` stage of its board (`entry` in the board file: `<workitems dir>/boards/default.json` or `<workitems dir>/pipeline.json` for `default`, else the bundled `workitem-pipeline/pipeline.json`; `<workitems dir>/boards/<name>.json` for the others; `backlog` in the bundled one). `workitem-run` triages it from there.
+A new workitem always starts in the `entry` stage of its board (`entry` in `<workspace>/boards/<name>.json`). The UI's dispatcher triages it from there.
 
 ### Step 2 — Resolve title, summary, and description
 
@@ -107,18 +109,28 @@ One of `none`, `draft`, `ready`:
 - every type except `analysis` → `draft` by default — prefer opening PRs as drafts unless the project's own conventions say otherwise.
 - `ready` → only pick this if the input explicitly says the change is pre-approved or should skip review. This should be rare; state why when chosen.
 
-Check the current repo's own CLAUDE.md/AGENTS.md for a stated PR convention (e.g. "always create PRs as drafts") and defer to it over the default above.
+Check the board's repo's own CLAUDE.md/AGENTS.md for a stated PR convention (e.g. "always create PRs as drafts") and defer to it over the default above.
 
 State the rationale.
 
-### Step 6 — Derive slug and path
+### Step 6 — Decide which boards get an item
+
+Most tasks touch one repo: one item, on the `--board` board. When the task clearly needs changes in the repos of several boards (an API change and the frontend that uses it), create one item per board that needs work, each describing only its repo's part. Look at the repos (read only) when the text alone does not say which parts exist where. Do not split on a guess: when it is unclear whether a second repo is involved, create one item and mention the possible second one in its `## Description`.
+
+When you split, decide the order: an item that another one needs first (the API before its consumer) is a dependency. Each dependent item gets `depends_on: <dir of the item it needs>` (comma-separated for several). Boards hold a dependent item back until its dependencies are merged when they ask for it. Only the last item of the chain (the one no other item depends on) moves the Jira ticket; say so in each other item's `## Jira` section.
+
+State the decision and its rationale in one sentence.
+
+### Step 7 — Derive slug and path
 
 1. Take `title`, lowercase it, replace spaces with `-`, strip all characters that are not `a-z`, `0-9`, or `-`, truncate to 50 characters, strip trailing `-`.
-2. Directory name: `<TICKET-ID>-<slug>` if a Jira ticket is linked, otherwise just `<slug>`.
-3. Find the current repo root: `git rev-parse --show-toplevel`. Full path: `<repo-root>/.workitems/<dir>/` (`.claude/workitems/` if that exists and `.workitems/` does not). Use `--repo <path>` as the root if given. If not inside a git repo and no `--repo`, end your turn asking where to write the file, and write nothing.
+2. Directory name: `<TICKET-ID>-<slug>` if a Jira ticket is linked, otherwise just `<slug>`. When you split, add the board name: `<TICKET-ID>-<slug>-<board>`.
+3. Full path: `<workspace>/<dir>/`. Directory names are unique in the workspace: if one exists, stop and say so.
 4. `mkdir -p` that directory.
 
-### Step 7 — Write `workitem.md`
+### Step 8 — Write `workitem.md`
+
+One file per item, dependencies first.
 
 ```markdown
 ---
@@ -127,15 +139,15 @@ type: bug | feature | analysis | refactor | docs | style | perf | test | build |
 source: issue | system_error | text
 issue: <TICKET-ID> (<url>) | none
 system_error: <error url> | none
-repo: <repo-root absolute path>
 worktree_needed: true | false
 pr_mode: none | draft | ready
 stage: <entry stage of the board>
-board: <name>   # only with --board other than default; omit the line otherwise
+board: <name>
 approved: false
 agent_status: ok
 created: <today's date, YYYY-MM-DD>
 parent: <parent workitem dir>   # only with --parent; omit the line otherwise
+depends_on: <dir>, <dir>   # only for an item that needs others merged first; omit the line otherwise
 ---
 
 # <title>
@@ -169,8 +181,8 @@ parent: <parent workitem dir>   # only with --parent; omit the line otherwise
 <issue URL, or "None">
 ```
 
-If `--parent` was given, check that `<repo-root>/.workitems/<dir>/workitem.md` exists; if not, stop and write nothing. A child is an independent workitem with its own stage; the parent is not changed.
+If `--parent` was given, check that `<workspace>/<parent dir>/workitem.md` exists; if not, stop and write nothing. A child is an independent workitem with its own stage; the parent is not changed.
 
-### Step 8 — Report
+### Step 9 — Report
 
-Tell the user the file path, and one line each for type, worktree, PR mode, and Jira link (or "none").
+Tell the user each file path with its board, and one line each for type, worktree, PR mode, Jira link (or "none") and, when split, which item depends on which.

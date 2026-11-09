@@ -1,11 +1,11 @@
 ---
 name: workitem-analyze
-description: Handler for the `analyze` stage of the workitem pipeline. Reads one workitem, works in the mode set by triage (validate, root_cause, clarify), writes the `## Review brief` and moves it to `ready_for_development`. Use when asked to "analyze workitem X"; normally dispatched by `workitem-run`.
+description: Handler for the `analyze` stage of the workitem pipeline. Reads one workitem, works in the mode set by triage (validate, root_cause, clarify), writes the `## Review brief` and moves it to `ready_for_development`. Use when asked to "analyze workitem X"; normally started by the UI's dispatcher.
 ---
 
 # Workitem Analyze
 
-Handles ONE workitem in stage `analyze`. Input: the workitem directory name (or path).
+Handles ONE workitem in stage `analyze`. Input: the workitem file your prompt names ("Workitem file:"), else `$WORKITEM_FILE`, else the path given. Its code is in the repo your prompt names (`$WORKITEM_REPO`).
 
 Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only). Do not change code, do not query production data, do not create branches or PRs.
 
@@ -28,13 +28,13 @@ Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only)
 5. If the frontmatter `issue:` is `none`, the item cannot be ready for development. Do not move it yet.
    - When a human is attached to your tmux session, ask: "No Jira ticket is linked. Create one from this workitem, or give me an existing key?" Only create a ticket after an explicit yes: use `mcp__claude_ai_Atlassian_Rovo__createJiraIssue` (title and description from the workitem; ask for the project if unknown). Then set `jira: <KEY> (<url>)` in the frontmatter, update `### Links` in the brief, and go on to step 6.
    - Without an attached human, set `agent_status: blocked: no Jira ticket linked, needs a ticket key`, call `PushNotification` with that reason, and stop. The user links or creates a ticket, sets `issue: <KEY> (<url>)` and `agent_status: ok`.
-6. Otherwise move it: `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>`, where `<next>` is the default next stage: the one marked `(default)` under "Allowed next stages" in your prompt (`ready_for_development` on the bundled board when run by hand). If it refuses, fix what it names and try once more. Do not edit `stage:` by hand.
+6. Otherwise move it: `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem file> <next>`, where `<next>` is the default next stage: the one marked `(default)` under "Allowed next stages" in your prompt (`ready_for_development` on the bundled board when run by hand). If it refuses, fix what it names and try once more. Do not edit `stage:` by hand.
 7. Report one line: `<dir>: analyze -> ready_for_development (<size>)` or `<dir>: blocked (<reason>)`.
 
 ## Rules
 
 - Prove claims with code you read. Label anything else as an assumption.
-- If the item is not actionable at all (wrong repo, duplicate, already fixed), move it back with `workitem-move <dir> <earlier stage>` (the other allowed next stage that sends it back, `backlog` on the bundled board) and set `agent_status: blocked: <reason>`.
+- If the item is not actionable at all (wrong repo, duplicate, already fixed), move it back with `workitem-move <workitem file> <earlier stage>` (the other allowed next stage that sends it back, `backlog` on the bundled board) and set `agent_status: blocked: <reason>`.
 - Never remove the user's own text from the workitem.
 - If something has to happen after the item is done (a deploy step, a cleanup after a rollout, telling someone), add it as a `- [ ]` line under `## Follow-ups`, the last section of the file; create the section if it is missing. Do not work on follow-ups. Only append: never delete, reword or untick a line, and skip one that is already listed.
-- To split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir>` (plus `--repo` and `--issue` as needed). Do not write child `workitem.md` files by hand.
+- To split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir> --workspace <workspace> --board <board>` (plus `--issue` as needed). Do not write child `workitem.md` files by hand.

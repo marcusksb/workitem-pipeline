@@ -5,15 +5,15 @@ description: "Review and approve (or reject) a workitem in `ready_for_developmen
 
 # Workitem Approve
 
-Manual gate before any code is written. Input: workitem directory name or Jira key. If none is given, list items whose stage has a `gate` (title, size from the brief) and ask which one.
+Manual gate before any code is written. Input: workitem directory name or Jira key, in the workspace folder (`$WORKITEM_WORKSPACE`, else ask; items are `<workspace>/<dir>/workitem.md`). If none is given, list items whose stage has a `gate` (title, size from the brief) and ask which one.
 
 ## Steps
 
-1. Read `<repo>/.workitems/<dir>/workitem.md` (`.claude/workitems/` if that exists and `.workitems/` does not). The board is `<workitems dir>/boards/default.json`, else `<workitems dir>/pipeline.json`, else the bundled `workitem-pipeline/pipeline.json`. Confirm the item's stage has a `gate` there and note its `approve_to` and `reject_to`. If not, say which stage it is in and stop.
+1. Read `<workspace>/<dir>/workitem.md`. Its board is `<workspace>/boards/<board>.json`, named by `board:` in the frontmatter. Confirm the item's stage has a `gate` there and note its `approve_to` and `reject_to`. If not, say which stage it is in and stop.
 2. Print the brief for the user: title, `source`, links, then `### Findings`, `### Plan`, `### Risk`, `### Size`, `### Test plan`, `### Assumptions`. Put `### Risk` and `### Assumptions` first if they are not `None`.
 3. Ask: approve, reject, or leave it. Do not decide for the user.
-4. **Approve:** set `approved: true` and `approved_at: <today, YYYY-MM-DD>` in the frontmatter, then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <approve_to>`. If the move is refused, set `approved: false` again and report the reason. Then offer to start development now (`workitem-start <dir>`). Start only if the user says yes.
-5. **Reject:** ask for the comment. Add it to the workitem as `## Rejection` (replace an older one, keep it short). Then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <reject_to>`. The handler of that stage picks it up on the next run.
+4. **Approve:** set `approved: true` and `approved_at: <today, YYYY-MM-DD>` in the frontmatter, then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workspace>/<dir> <approve_to>`. If the move is refused, set `approved: false` again and report the reason. Then offer to start development now (`workitem-start <workspace>/<dir>/workitem.md`). Start only if the user says yes.
+5. **Reject:** ask for the comment. Add it to the workitem as `## Rejection` (replace an older one, keep it short). Then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workspace>/<dir> <reject_to>`. The handler of that stage picks it up on the next run.
 6. Report one line: `<dir>: approved` or `<dir>: rejected -> <reject_to>`.
 
 ## Rules
