@@ -4,6 +4,7 @@ import { api } from "./api";
 import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, shownBoard, stageTitle, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
+import { Learnings } from "./Learnings";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
@@ -217,6 +218,7 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
     }
   };
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
+  const [learning, setLearning] = useState(false);
   const card = (item: Item, depth = 0) => (
     <Card
       key={itemKey(item)}
@@ -245,6 +247,11 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
           );
         })}
         {workspaces.length === 1 && <AddBoard workspace={workspaces[0]} onDone={onChanged} />}
+        {workspaces.length === 1 && active && (
+          <button className="link learnings-button" onClick={() => setLearning(true)}>
+            Learnings
+          </button>
+        )}
         <div className="view-toggle" role="group" aria-label="View">
           {(["board", "list"] as const).map((v) => (
             <button key={v} aria-pressed={view === v} className={view === v ? "active" : ""} onClick={() => chooseView(v)}>
@@ -253,6 +260,9 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
           ))}
         </div>
       </nav>
+      {learning && workspaces.length === 1 && active && (
+        <Learnings workspace={workspaces[0]} board={active} label={boardLabel(pipelines, workspaces[0], active)} onClose={() => setLearning(false)} />
+      )}
       {broken.map(({ workspace, pipeline, error }) => (
         <p className="error" key={workspace}>
           {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}

@@ -2,7 +2,6 @@ import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { Dialog } from "./Dialog";
 import { boardLabel } from "./boardState";
-import { Learnings } from "./Learnings";
 import { Pipelines, Workspace } from "./types";
 
 type Props = {
@@ -22,7 +21,6 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
   const [creating, setCreating] = useState(false);
-  const [learning, setLearning] = useState(false);
   const [editingAgent, setEditingAgent] = useState(false);
   const [agent, setAgent] = useState("");
   const [input, setInput] = useState("");
@@ -120,12 +118,6 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
           New workitem
         </button>
       )}
-      {selected && onScreen && (
-        <button className="link" onClick={() => setLearning(true)}>
-          Learnings
-        </button>
-      )}
-      {learning && selected && onScreen && <Learnings workspace={selected} board={onScreen} label={boardLabel(pipelines, selected, onScreen)} onClose={() => setLearning(false)} />}
       {creating && selected && (
         <Dialog title={`New workitem in ${selected}`} onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={create}>
