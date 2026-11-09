@@ -43,8 +43,9 @@ def problems(config):
                 found.append(f"'{stage.get('name')}' has next '{target}', which is not a stage")
     if not isinstance(config.get("brief_sections"), list):
         found.append("'brief_sections' must be a list")
+    # A board without a repo (an intake board that writes no code) is valid; a given one must exist.
     repo = config.get("repo")
-    if not isinstance(repo, str) or not Path(repo).expanduser().is_absolute() or not Path(repo).expanduser().is_dir():
+    if "repo" in config and not (isinstance(repo, str) and Path(repo).expanduser().is_absolute() and Path(repo).expanduser().is_dir()):
         found.append(f"'repo' ({repo!r}) must be an absolute path to a directory")
     return found
 

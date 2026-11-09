@@ -23,11 +23,11 @@ pub enum Scope<'a> {
     Workspace,
 }
 
-/// Where a workitem lives: its folder in the workspace and the repo of its board.
+/// Where a workitem lives: its folder in the workspace and the repo of its board, if it has one.
 pub struct Place<'a> {
     pub dir: &'a str,
     pub workspace: &'a Path,
-    pub repo: &'a Path,
+    pub repo: Option<&'a Path>,
     pub board: &'a str,
 }
 
@@ -35,28 +35,46 @@ impl Place<'_> {
     fn file(&self) -> PathBuf {
         workitem::file(self.workspace, self.dir)
     }
+
+    /// Where the item works, for prompts: `in repo <path>`, or a note that its board has none.
+    fn in_repo(&self) -> String {
+        match self.repo {
+            Some(repo) => format!("in repo {}", repo.display()),
+            None => "on a board without a repo (no worktree, no code changes; the workspace's repos are added for reading)".into(),
+        }
+    }
 }
 
 /// Starts `claude` with a prompt in a detached tmux session: `remain-on-exit` keeps a crashed
 /// session visible, and the pipeline hooks mark a session that waits for input as blocked. The
 /// prompt goes to `claude` as one argv element (see `start`), never interpreted by a shell. A
 /// workitem's session starts in its worktree when it has one, else in the repo, with the workspace
-/// folder added so the agent can edit `workitem.md` (decision 46). A workspace session starts in
-/// the workspace folder with every board's repo added.
+/// folder added so the agent can edit `workitem.md` (decision 46); on a board without a repo it
+/// starts in the item folder with the workspace and every board's repo added. A workspace session
+/// starts in the workspace folder with every board's repo added.
 pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope: Scope<'_>, prompt: &str) -> Result<(), String> {
     let mut env = vec![format!("WORKITEM_WORKSPACE={}", workspace.dir.display())];
     let mut dirs: Vec<PathBuf> = vec![];
     let cwd = match scope {
         Scope::Item(place) => {
-            let worktree = git::worktree_for(&git::worktrees(place.repo).await, place.repo, place.dir).cloned();
             env.push(format!("WORKITEM={}", place.dir));
             env.push(format!("WORKITEM_FILE={}", place.file().display()));
-            env.push(format!("WORKITEM_REPO={}", place.repo.display()));
             dirs.push(workspace.dir.clone());
-            if worktree.is_some() {
-                dirs.push(place.repo.to_path_buf());
+            match place.repo {
+                Some(repo) => {
+                    let worktree = git::worktree_for(&git::worktrees(repo).await, repo, place.dir).cloned();
+                    env.push(format!("WORKITEM_REPO={}", repo.display()));
+                    if worktree.is_some() {
+                        dirs.push(repo.to_path_buf());
+                    }
+                    worktree.unwrap_or_else(|| repo.to_path_buf())
+                }
+                None => {
+                    env.push(CLAUDE_MD_OF_ADDED_DIRS.into());
+                    dirs.extend(state.repos(workspace));
+                    workspace.dir.join(place.dir)
+                }
             }
-            worktree.unwrap_or_else(|| place.repo.to_path_buf())
         }
         Scope::Workspace => {
             env.push(CLAUDE_MD_OF_ADDED_DIRS.into());
@@ -70,7 +88,7 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
     start(state, session, workspace, &cwd, &env, &args, Some(prompt)).await
 }
 
-/// A workspace or plan session starts outside every repo, so Claude Code would not read the repos'
+/// A workspace, plan or repo-less item session starts outside every repo, so Claude Code would not read the repos'
 /// `CLAUDE.md` files; this makes it read them from the `--add-dir` folders too.
 const CLAUDE_MD_OF_ADDED_DIRS: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1";
 
@@ -228,13 +246,13 @@ fn stage_context(state: &AppState, place: &Place, stage: &Stage) -> String {
         None => "none".into(),
     };
     format!(
-        "Workitem {dir} in repo {repo}, on board {board}.\n\
+        "Workitem {dir} {repo}, on board {board}.\n\
 Workitem file: {file} (in the workspace folder, outside the repo)\n\
 Current stage: {stage}\n\
 Allowed next stages: {next}. The first is the default forward move.\n\
 Move it with python3 {mv} {file} <stage>. Only workitem-move changes stage:.\n",
         dir = place.dir,
-        repo = place.repo.display(),
+        repo = place.in_repo(),
         board = place.board,
         file = place.file().display(),
         stage = stage.name,
@@ -306,16 +324,17 @@ When you are done, make sure agent_status is ok (a stage move does this).{kill}"
 /// Prompt for a session the human opens from the detail panel and then drives by hand.
 pub fn session_prompt(place: &Place) -> String {
     let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(place.repo, place.dir);
+    let worktree = match place.repo {
+        Some(repo) => format!("If the workitem has a worktree {}, work there (the session starts in it when it exists).\n", git::worktree_path(repo, place.dir).display()),
+        None => String::new(),
+    };
     format!(
-        "You are working on workitem {dir} in repo {repo}. Read {file} first (in the workspace folder, outside the repo).\n\
-If the workitem has a worktree {worktree}, work there (the session starts in it when it exists).\n\
-Never change stage: and do not run the stage handler skill; a human drives this session and tells you what to do.\n\
+        "You are working on workitem {dir} {repo}. Read {file} first (in the workspace folder, outside the repo).\n\
+{worktree}Never change stage: and do not run the stage handler skill; a human drives this session and tells you what to do.\n\
 {protocol}",
         dir = place.dir,
         file = place.file().display(),
-        worktree = worktree.display(),
-        repo = place.repo.display(),
+        repo = place.in_repo(),
         protocol = protocol(&session),
     )
 }
@@ -324,7 +343,7 @@ Never change stage: and do not run the stage handler skill; a human drives this 
 pub fn brief_prompt(place: &Place) -> String {
     let session = format!("wi-{}", place.dir);
     format!(
-        "You are discussing the brief and plan of workitem {dir} in repo {repo} with a human. Read {file} first, \
+        "You are discussing the brief and plan of workitem {dir} {repo} with a human. Read {file} first, \
 in particular its ## Review brief (### Plan, ### Risk, ### Test plan, ...).\n\
 Start with a two or three line summary of the plan, then wait for the human. Answer questions, check claims against the code, \
 and change the brief only when the human asks you to: edit the workitem.md text in place and keep every ### section of the brief non-empty.\n\
@@ -333,15 +352,15 @@ If the brief changes while the workitem is approved, say so: the human decides w
 {protocol}",
         dir = place.dir,
         file = place.file().display(),
-        repo = place.repo.display(),
+        repo = place.in_repo(),
         protocol = protocol(&session),
     )
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR has red CI.
-pub fn ci_fix_prompt(place: &Place, pr: &str) -> String {
+pub fn ci_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
     let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(place.repo, place.dir);
+    let worktree = git::worktree_path(repo, place.dir);
     format!(
         "CI is failing on {pr}, the PR of workitem {dir} in repo {repo}.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
@@ -356,16 +375,16 @@ Never change stage:.\n\
         dir = place.dir,
         file = place.file().display(),
         worktree = worktree.display(),
-        repo = place.repo.display(),
+        repo = repo.display(),
         learnings = learnings(place.workspace, place.board),
         protocol = protocol(&session),
     )
 }
 
 /// Prompt for the fixer `pr-review` starts when an in-review PR gets new comments or reviews that ask for a change.
-pub fn comments_fix_prompt(place: &Place, pr: &str) -> String {
+pub fn comments_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
     let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(place.repo, place.dir);
+    let worktree = git::worktree_path(repo, place.dir);
     format!(
         "New review comments or a review requesting changes on {pr}, the PR of workitem {dir} in repo {repo}.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
@@ -389,7 +408,7 @@ Never change stage:.\n\
         dir = place.dir,
         file = place.file().display(),
         worktree = worktree.display(),
-        repo = place.repo.display(),
+        repo = repo.display(),
         record = record_learnings(place),
         learnings = learnings(place.workspace, place.board),
         protocol = protocol(&session),
@@ -397,9 +416,9 @@ Never change stage:.\n\
 }
 
 /// Prompt for the fixer the dispatcher starts when an in-review PR conflicts with its base.
-pub fn conflict_fix_prompt(place: &Place, pr: &str) -> String {
+pub fn conflict_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
     let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(place.repo, place.dir);
+    let worktree = git::worktree_path(repo, place.dir);
     format!(
         "{pr}, the PR of workitem {dir} in repo {repo}, conflicts with its base branch.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
@@ -416,7 +435,7 @@ Never change stage:.\n\
         dir = place.dir,
         file = place.file().display(),
         worktree = worktree.display(),
-        repo = place.repo.display(),
+        repo = repo.display(),
         learnings = learnings(place.workspace, place.board),
         protocol = protocol(&session),
     )
@@ -429,7 +448,8 @@ pub fn board_list(state: &AppState, workspace: &Workspace) -> String {
         .board_names(workspace)
         .iter()
         .map(|board| match state.repo_of(workspace, board) {
-            Ok(repo) => format!("- {board}: repo {}\n", repo.display()),
+            Ok(Some(repo)) => format!("- {board}: repo {}\n", repo.display()),
+            Ok(None) => format!("- {board}: no repo (items there change no code)\n"),
             Err(e) => format!("- {board}: unusable ({e})\n"),
         })
         .collect()
@@ -455,7 +475,7 @@ mod tests {
     use super::*;
 
     fn place<'a>(workspace: &'a Path, board: &'a str) -> Place<'a> {
-        Place { dir: "item-1", workspace, repo: Path::new("/r/proj"), board }
+        Place { dir: "item-1", workspace, repo: Some(Path::new("/r/proj")), board }
     }
 
     #[test]
@@ -463,9 +483,20 @@ mod tests {
         let workspace = Path::new("/w/main");
         let want = "/w/main/item-1/workitem.md";
         let place = place(workspace, "dev");
-        for prompt in [ci_fix_prompt(&place, "#7"), comments_fix_prompt(&place, "#7"), conflict_fix_prompt(&place, "#7"), session_prompt(&place), brief_prompt(&place)] {
+        let repo = Path::new("/r/proj");
+        for prompt in [ci_fix_prompt(&place, repo, "#7"), comments_fix_prompt(&place, repo, "#7"), conflict_fix_prompt(&place, repo, "#7"), session_prompt(&place), brief_prompt(&place)] {
             assert!(prompt.contains(want), "missing workitem path in: {prompt}");
             assert!(prompt.contains("/r/proj"), "missing repo in: {prompt}");
+        }
+    }
+
+    #[test]
+    fn prompts_of_an_item_without_a_repo_say_so_and_name_no_worktree() {
+        let place = Place { repo: None, ..place(Path::new("/w/main"), "sdb") };
+        for prompt in [session_prompt(&place), brief_prompt(&place)] {
+            assert!(prompt.contains("/w/main/item-1/workitem.md"), "{prompt}");
+            assert!(prompt.contains("board without a repo"), "{prompt}");
+            assert!(!prompt.contains("worktree /"), "{prompt}");
         }
     }
 
@@ -495,8 +526,9 @@ mod tests {
         }
         let file = workspace.path().join("boards/ops/learnings.md").display().to_string();
         let place = place(workspace.path(), "ops");
-        let review = [comments_fix_prompt(&place, "#7")];
-        let other = [ci_fix_prompt(&place, "#7"), conflict_fix_prompt(&place, "#7")];
+        let repo = Path::new("/r/proj");
+        let review = [comments_fix_prompt(&place, repo, "#7")];
+        let other = [ci_fix_prompt(&place, repo, "#7"), conflict_fix_prompt(&place, repo, "#7")];
         for prompt in review.iter().chain(&other) {
             assert!(prompt.contains("--- learnings ---\n# Learnings\n\n- Never mock tmux.\n--- end of learnings ---"), "{prompt}");
             assert!(!prompt.contains("Dev rule"), "{prompt}");

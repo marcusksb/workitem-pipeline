@@ -20,6 +20,7 @@ const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
 { echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; } > "$LOGDIR/args-$(date +%s%N)"
+[ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
   echo "$WORKITEM $stage" >> "$repo/.stub-log"
@@ -1431,6 +1432,31 @@ async fn run_starts_the_stage_handler_of_an_idle_item_for_a_script_with_the_toke
     let (status, body) = post_bearer(&w, "/api/workitems/app/T-52-manual/run").await;
     assert_eq!(status, StatusCode::CONFLICT, "a stage without a handler has nothing to run");
     assert!(body.contains("no handler"), "{body}");
+}
+
+#[tokio::test]
+async fn an_item_on_a_board_without_a_repo_runs_in_its_folder_with_every_repo_added() {
+    let w = world();
+    fs::write(
+        w.ws.join("boards/intake.json"),
+        r#"{ "brief_sections": [], "entry": "analyze", "stages": [{"name":"analyze","handler":"my-analyze","next":["done"]},{"name":"done"}] }"#,
+    )
+    .unwrap();
+    write_skill(&w.ws.join("skills"), "my-analyze", "ANALYZE STEPS\n");
+    write_item(&w.ws, "T-60-idea", "analyze", "board: intake\n");
+
+    let (status, body) = post_bearer(&w, "/api/workitems/app/T-60-idea/run").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let cwd = w.dir.path().join("cwd-T-60-idea");
+    eventually("the handler ran", || cwd.exists()).await;
+    let (pwd, repo) = fs::read_to_string(&cwd).unwrap().trim_end().split_once('|').map(|(a, b)| (a.to_string(), b.to_string())).unwrap();
+    assert_eq!(Path::new(&pwd).canonicalize().unwrap(), w.ws.join("T-60-idea").canonicalize().unwrap(), "starts in the item folder");
+    assert_eq!(repo, "", "no WORKITEM_REPO");
+    let log = args_log(&w);
+    assert!(log.starts_with("argc=6\nclaude_md=1\n"), "--add-dir, workspace, the other boards' repo, --settings, hooks, prompt: {log}");
+    assert!(log.contains("ANALYZE STEPS") && log.contains("board without a repo"), "{log}");
+    let pipelines = get(&w, "/api/pipelines").await;
+    assert!(pipelines.contains(r#""name":"intake""#) && !pipelines.contains(r#""repo":null"#), "{pipelines}");
 }
 
 async fn post_json_bearer(w: &World, uri: &str, body: &str) -> (StatusCode, String) {

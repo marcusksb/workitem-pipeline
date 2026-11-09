@@ -28,7 +28,7 @@ def start_intake():
     with open(INTAKE_LOG.format(board=board), "a") as log:
         subprocess.Popen(["claude", "-p", prompt, "--add-dir", os.environ["WORKITEM_DIR_ROOT"],
                           "--permission-mode", "bypassPermissions"],
-                         cwd=os.environ["WORKITEM_REPO"], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         cwd=os.environ.get("WORKITEM_REPO") or os.environ["WORKITEM_DIR_ROOT"], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True)
 
 def main():

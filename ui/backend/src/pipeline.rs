@@ -142,19 +142,21 @@ fn valid_order(entry: &str) -> bool {
 }
 
 /// A board's `repo`: `~/` is the home folder.
-fn repo_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<PathBuf, D::Error> {
+fn repo_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<PathBuf>, D::Error> {
     let text = String::deserialize(deserializer)?;
-    Ok(match (text.strip_prefix("~/"), std::env::var_os("HOME")) {
+    Ok(Some(match (text.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => Path::new(&home).join(rest),
         _ => PathBuf::from(text),
-    })
+    }))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Pipeline {
-    /// The repo every item of the board belongs to (decision 45).
-    #[serde(deserialize_with = "repo_path")]
-    pub repo: PathBuf,
+    /// The repo every item of the board belongs to (decision 45). A board without one (an intake
+    /// board that writes no code) has no worktrees and no PRs; its sessions start in the item folder
+    /// with every board's repo added.
+    #[serde(default, deserialize_with = "repo_path", skip_serializing_if = "Option::is_none")]
+    pub repo: Option<PathBuf>,
     /// Tab title; the board's name (its file name) when absent.
     #[serde(default)]
     pub label: Option<String>,
@@ -200,8 +202,14 @@ impl Pipeline {
         if !reads_prs && pipeline.stages.iter().any(|s| s.pr_status || s.watches_prs()) {
             pipeline.watch.push(legacy("pr-status", PR_STATUS_EVERY));
         }
-        if !pipeline.repo.is_absolute() || !pipeline.repo.is_dir() {
-            return Err(format!("repo '{}' is not an absolute path to a directory", pipeline.repo.display()));
+        match &pipeline.repo {
+            Some(repo) if !repo.is_absolute() || !repo.is_dir() => {
+                return Err(format!("repo '{}' is not an absolute path to a directory", repo.display()));
+            }
+            None if pipeline.watch.iter().any(|w| w.command == "pr-status") || pipeline.stages.iter().any(|s| s.watches_prs() || s.watch.iter().any(|w| w.command == "pr-status")) => {
+                return Err("a board without a repo has no PRs, so no PR stage and no pr-status".into());
+            }
+            _ => {}
         }
         let names: HashSet<&str> = pipeline.stages.iter().map(|s| s.name.as_str()).collect();
         if names.contains("") {
@@ -305,14 +313,14 @@ impl AppState {
         names
     }
 
-    /// The repo of `board`, from its last valid file.
-    pub fn repo_of(&self, workspace: &Workspace, board: &str) -> Result<PathBuf, String> {
+    /// The repo of `board`, from its last valid file; `None` for a board without one.
+    pub fn repo_of(&self, workspace: &Workspace, board: &str) -> Result<Option<PathBuf>, String> {
         self.pipeline(workspace, board).pipeline.map(|p| p.repo).ok_or_else(|| format!("board '{board}' has no valid file"))
     }
 
     /// The distinct repos of the workspace's boards, for sessions that are not tied to one board.
     pub fn repos(&self, workspace: &Workspace) -> Vec<PathBuf> {
-        let mut repos: Vec<PathBuf> = self.board_names(workspace).iter().filter_map(|b| self.repo_of(workspace, b).ok()).collect();
+        let mut repos: Vec<PathBuf> = self.board_names(workspace).iter().filter_map(|b| self.repo_of(workspace, b).ok().flatten()).collect();
         repos.sort();
         repos.dedup();
         repos
@@ -486,15 +494,25 @@ mod tests {
     #[test]
     fn a_board_needs_an_existing_absolute_repo_and_expands_the_home_folder() {
         let with = |repo: &str| Pipeline::parse(&format!(r#"{{"repo": "{repo}", "brief_sections": [], "entry": "a", "stages": [{{"name":"a"}}]}}"#));
-        assert_eq!(with("/").unwrap().repo, Path::new("/"));
+        assert_eq!(with("/").unwrap().repo.as_deref(), Some(Path::new("/")));
         assert_eq!(with("/").unwrap().label, None);
         let labelled = Pipeline::parse(r#"{"repo": "/", "label": "Storyrails - Develop", "brief_sections": [], "entry": "a", "stages": [{"name":"a"}]}"#);
         assert_eq!(labelled.unwrap().label.as_deref(), Some("Storyrails - Develop"));
         assert!(with("relative").unwrap_err().contains("repo"));
         assert!(with("/no/such/dir").unwrap_err().contains("repo"));
-        assert!(Pipeline::parse(r#"{"brief_sections": [], "entry": "a", "stages": [{"name":"a"}]}"#).is_err(), "repo is required");
         let home = std::env::var("HOME").unwrap();
-        assert_eq!(with("~/").unwrap().repo, Path::new(&home).join(""));
+        assert_eq!(with("~/").unwrap().repo, Some(Path::new(&home).join("")));
+    }
+
+    #[test]
+    fn a_board_without_a_repo_has_no_prs() {
+        let without = |stages: &str, watch: &str| Pipeline::parse(&format!(r#"{{"brief_sections": [], "entry": "a", "stages": {stages}{watch}}}"#));
+        assert_eq!(without(r#"[{"name":"a","handler":"x","auto":true}]"#, "").unwrap().repo, None);
+        let reviews = r#"[{"name":"a","next":["b"],"watch":{"every":"5s","command":"pr-review"},"on_merge":"b"},{"name":"b"}]"#;
+        assert!(without(reviews, "").unwrap_err().contains("without a repo"));
+        assert!(without(r#"[{"name":"a","pr_status":true}]"#, "").unwrap_err().contains("without a repo"));
+        assert!(without(r#"[{"name":"a"}]"#, r#", "watch": {"every":"1m","command":"pr-status"}"#).unwrap_err().contains("without a repo"));
+        assert!(without(r#"[{"name":"a","watch":{"every":"1m","command":"pr-status"}}]"#, "").unwrap_err().contains("without a repo"));
     }
 
     #[test]
@@ -502,6 +520,6 @@ mod tests {
         let template = "{\n  \"entry\": \"a\",\n  \"brief_sections\": [],\n  \"stages\": [{ \"name\": \"a\" }]\n}\n";
         let text = with_repo(template, Path::new("/")).unwrap();
         assert!(text.starts_with("{\n  \"repo\": \"/\",\n  \"entry\""), "{text}");
-        assert_eq!(Pipeline::parse(&text).unwrap().repo, Path::new("/"));
+        assert_eq!(Pipeline::parse(&text).unwrap().repo.as_deref(), Some(Path::new("/")));
     }
 }

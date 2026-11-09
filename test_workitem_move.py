@@ -102,7 +102,17 @@ class WorkitemMoveTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("board", result.stderr)
 
-    def test_board_without_a_repo_is_invalid(self):
+    def test_board_without_a_repo_is_valid(self):
+        self.write("backlog")
+        self.named_board("dev", **{k: v for k, v in BUNDLED.items() if k in ("entry", "stages", "brief_sections")})
+        board = self.workspace / "boards/dev.json"
+        config = json.loads(board.read_text())
+        del config["repo"]
+        board.write_text(json.dumps(config))
+        result = self.run_move(str(self.item), "analyze")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_board_with_a_bad_repo_is_invalid(self):
         self.write("backlog")
         for repo in (None, "relative", str(self.repo / "gone")):
             self.named_board("dev", **{k: v for k, v in BUNDLED.items() if k in ("entry", "stages", "brief_sections")}, repo=repo)

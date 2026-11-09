@@ -14,7 +14,7 @@ export type StageConfig = {
 };
 
 /** `repo`: the repo every item of the board belongs to. `order`: item fields each column is sorted by, first one first; title breaks ties. */
-export type Pipeline = { repo: string; label?: string | null; entry: string; stages: StageConfig[]; order: string[] };
+export type Pipeline = { repo?: string; label?: string | null; entry: string; stages: StageConfig[]; order: string[] };
 
 /**
  * A board of a workspace: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.

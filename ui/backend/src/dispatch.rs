@@ -98,7 +98,7 @@ pub async fn launch_handler(state: &AppState, workspace: &Workspace, item: &Work
         block(&error);
         error
     })?;
-    let place = launch::Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let place = launch::Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let _ = set_status(path, "working");
     let prompt = launch::handler_prompt(state, &place, stage, instructions);
     launch::spawn(state, &name, workspace, launch::Scope::Item(&place), &prompt).await.map_err(|e| {

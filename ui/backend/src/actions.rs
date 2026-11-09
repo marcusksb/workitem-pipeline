@@ -39,9 +39,14 @@ fn find(state: &AppState, workspace: &str, dir: &str) -> Result<(Workspace, std:
     Ok((workspace, path, item))
 }
 
-/// The repo of the item's board.
-fn repo_of(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<std::path::PathBuf> {
+/// The repo of the item's board; `None` for a board without one.
+fn repo_of(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<Option<std::path::PathBuf>> {
     state.repo_of(workspace, &item.board).map_err(conflict)
+}
+
+/// The repo of the item's board, for what only works in one (PRs).
+fn pr_repo_of(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<std::path::PathBuf> {
+    repo_of(state, workspace, item)?.ok_or_else(|| conflict(format!("board {} has no repo, so no PRs", item.board)))
 }
 
 /// The board's config for the stage the item is in. Roles come from there, never from stage names.
@@ -223,7 +228,7 @@ pub async fn start(
     }
     let instructions = launch::instructions(&state, &workspace, &item.board, stage.handler.as_deref().unwrap_or_default()).map_err(conflict)?;
     let repo = repo_of(&state, &workspace, &item)?;
-    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::handler_prompt(&state, &place, &stage, &instructions);
     launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
@@ -272,12 +277,12 @@ pub async fn fix(
     if !item.pr.starts_with("http") {
         return Err(conflict("the workitem has no PR link"));
     }
-    let repo = repo_of(&state, &workspace, &item)?;
-    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let repo = pr_repo_of(&state, &workspace, &item)?;
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: Some(&repo), board: &item.board };
     let prompt = match kind.as_str() {
-        "ci" => launch::ci_fix_prompt(&place, &item.pr),
-        "conflict" => launch::conflict_fix_prompt(&place, &item.pr),
-        "comments" => launch::comments_fix_prompt(&place, &item.pr),
+        "ci" => launch::ci_fix_prompt(&place, &repo, &item.pr),
+        "conflict" => launch::conflict_fix_prompt(&place, &repo, &item.pr),
+        "comments" => launch::comments_fix_prompt(&place, &repo, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
     launch_item_session(&state, &workspace, &path, &place, &prompt, true).await
@@ -291,7 +296,7 @@ pub async fn start_session(
 ) -> Result<(StatusCode, Json<Launched>)> {
     let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let repo = repo_of(&state, &workspace, &item)?;
-    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::session_prompt(&place);
     launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
@@ -304,7 +309,7 @@ pub async fn discuss_brief(
 ) -> Result<(StatusCode, Json<Launched>)> {
     let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let repo = repo_of(&state, &workspace, &item)?;
-    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::brief_prompt(&place);
     launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
@@ -350,7 +355,7 @@ async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &
     if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
     }
-    let repo = repo_of(state, workspace, item)?;
+    let repo = pr_repo_of(state, workspace, item)?;
     let mut command = tokio::process::Command::new(&state.gh);
     command.arg("pr").arg(args[0]).arg(&item.pr).args(&args[1..]).current_dir(&repo).kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
@@ -410,8 +415,8 @@ pub async fn remove(
     }
 
     let mut worktree_left = None;
-    // An item whose board has no valid file has no repo to look for a worktree in.
-    let repo = state.repo_of(&workspace, &item.board).ok();
+    // An item whose board has no valid file, or no repo, has no worktree to look for.
+    let repo = state.repo_of(&workspace, &item.board).ok().flatten();
     let worktree = match &repo {
         Some(repo) => worktree_of(repo, &dir).await,
         None => None,

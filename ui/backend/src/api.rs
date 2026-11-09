@@ -190,11 +190,11 @@ pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
                     let board = boards.entry(item.board.clone()).or_insert_with(|| state.pipeline(workspace, &item.board).pipeline);
                     let session = tmux::session_for(sessions, workspace, &item.dir).is_some();
                     let roles = roles_of(board.as_ref(), &item);
-                    let repo = board.as_ref().map(|b| b.repo.clone());
+                    let repo = board.as_ref().and_then(|b| b.repo.clone());
                     (item, session, roles, repo)
                 })
                 .collect();
-            let worktrees = worktrees_of(boards.values().flatten().map(|b| b.repo.clone())).await;
+            let worktrees = worktrees_of(boards.values().flatten().filter_map(|b| b.repo.clone())).await;
             let worktrees = &worktrees;
             futures_util::future::join_all(items.into_iter().map(|(item, session, roles, repo)| async move {
                 let unpushed = unpushed_of(repo.as_deref(), &item, worktrees).await;
@@ -223,7 +223,7 @@ pub async fn item(
     let session = tmux::session_for(&sessions, &workspace, &dir).is_some();
     let board = state.pipeline(&workspace, &item.board).pipeline;
     let roles = roles_of(board.as_ref(), &item);
-    let repo = board.map(|b| b.repo);
+    let repo = board.and_then(|b| b.repo);
     let unpushed = unpushed_of(repo.as_deref(), &item, &worktrees_of(repo.clone()).await).await;
     Ok(Json(Detail { item: Item { item, session, roles, unpushed }, content }))
 }
@@ -239,7 +239,10 @@ pub async fn pr_conversation(
     if !item.pr.starts_with("http") {
         return Err(ApiError::not_found("pull request"));
     }
-    let repo = state.repo_of(&workspace, &item.board).map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    let repo = state
+        .repo_of(&workspace, &item.board)
+        .and_then(|repo| repo.ok_or_else(|| format!("board {} has no repo, so no PRs", item.board)))
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
     let conversation = review::conversation(&state, &repo, &item.pr)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;

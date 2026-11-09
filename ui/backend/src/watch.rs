@@ -118,7 +118,7 @@ pub async fn pass(state: &AppState) {
                 runs.insert(key.clone(), now());
                 started = true;
                 let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
-                let job = Job::new(state, &workspace, &board, &pipeline.repo, stage, watch, script, &here, &sessions);
+                let job = Job::new(state, &workspace, &board, pipeline.repo.as_deref(), stage, watch, script, &here, &sessions);
                 let running = state.watching.clone();
                 tokio::spawn(async move {
                     if let Err(e) = job.run().await {
@@ -140,17 +140,17 @@ pub async fn pass(state: &AppState) {
 struct Job {
     script: PathBuf,
     args: Vec<String>,
-    repo: PathBuf,
+    /// The board's repo, or the workspace folder for a board without one.
+    cwd: PathBuf,
     env: Vec<(&'static str, String)>,
     items: String,
 }
 
 impl Job {
     #[allow(clippy::too_many_arguments)]
-    fn new(state: &AppState, workspace: &Workspace, board: &str, repo: &Path, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
+    fn new(state: &AppState, workspace: &Workspace, board: &str, repo: Option<&Path>, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
         let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, workspace, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
-        let env = vec![
-            ("WORKITEM_REPO", repo.display().to_string()),
+        let mut env = vec![
             ("WORKITEM_DIR_ROOT", workspace.dir.display().to_string()),
             ("WORKITEM_BOARD", board.to_string()),
             ("WORKITEM_STAGE", stage.map(|s| s.name.clone()).unwrap_or_default()),
@@ -165,14 +165,19 @@ impl Job {
             ("WORKITEM_WHEN", stage.and_then(|s| serde_json::to_string(&s.when).ok()).unwrap_or_else(|| "{}".into())),
             ("WORKITEM_MOVE", state.skills_dir.join("workitem-pipeline/bin/workitem-move").display().to_string()),
         ];
-        Job { script, args: watch.args.clone(), repo: repo.to_path_buf(), env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
+        // A board without a repo has no WORKITEM_REPO; its scripts run in the workspace folder.
+        if let Some(repo) = repo {
+            env.push(("WORKITEM_REPO", repo.display().to_string()));
+        }
+        let cwd = repo.map_or_else(|| workspace.dir.clone(), Path::to_path_buf);
+        Job { script, args: watch.args.clone(), cwd, env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
     }
 
-    /// Runs the script in the repo with the context in env vars and the items of the column as a
+    /// Runs the script in `cwd` with the context in env vars and the items of the column as a
     /// JSON array on stdin.
     async fn run(self) -> Result<(), String> {
         let mut command = Command::new(&self.script);
-        command.args(&self.args).current_dir(&self.repo).envs(self.env.iter().map(|(k, v)| (*k, v))).stdin(Stdio::piped()).kill_on_drop(true);
+        command.args(&self.args).current_dir(&self.cwd).envs(self.env.iter().map(|(k, v)| (*k, v))).stdin(Stdio::piped()).kill_on_drop(true);
         let mut child = command.spawn().map_err(|e| start_error(&self.script, e))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(self.items.as_bytes()).await;
@@ -204,7 +209,7 @@ mod tests {
         let script = dir.path().join("check");
         fs::write(&script, "#!/bin/sh\n").unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
-        let job = Job { script: script.clone(), args: vec![], repo: dir.path().to_path_buf(), env: vec![], items: "[]".into() };
+        let job = Job { script: script.clone(), args: vec![], cwd: dir.path().to_path_buf(), env: vec![], items: "[]".into() };
         assert_eq!(job.run().await.unwrap_err(), format!("{} is not executable, run: chmod +x {}", script.display(), script.display()));
     }
 }
