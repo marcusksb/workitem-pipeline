@@ -159,7 +159,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
       {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
         <p className="empty">No boards in {workspace} yet. Add one for a repository with + Board.</p>
       )}
-      <main className={detailOpen ? "with-detail" : ""}>
+      <main>
         <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
           <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
             void items.reload();
