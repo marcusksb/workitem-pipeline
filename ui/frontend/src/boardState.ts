@@ -77,6 +77,10 @@ export function shownBoard(item: Item, pipelines: Pipelines | undefined): string
   return pipelines?.[item.workspace]?.[0]?.name ?? item.board;
 }
 
+/** How a board is titled: its `label`, else its name. */
+export const boardLabel = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
+  boardOfWorkspace(pipelines, workspace, board)?.pipeline?.label || board;
+
 /** The last folder of a repo path, which is how a board's repo is shown. */
 export const repoName = (repo: string) => repo.replace(/\/+$/, "").split("/").pop() ?? repo;
 

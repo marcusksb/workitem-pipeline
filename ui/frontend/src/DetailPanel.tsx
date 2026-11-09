@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, itemTerminal } from "./api";
 import { isBlocked, isWaiting, KIND_ICONS, stageLabel, stripFrontmatter } from "./boardState";
-import { Item } from "./types";
+import { Item, Pipelines } from "./types";
 import { Actions } from "./Actions";
 import { AgentActions } from "./AgentActions";
 import { BriefActions } from "./BriefActions";
@@ -25,6 +25,7 @@ type Props = {
   /** Items of the visible workspaces, used to find the parent and children. */
   items: Item[];
   onSelect: (item: Item) => void;
+  pipelines: Pipelines | undefined;
   /** Tab from the URL hash; unset falls back to the state-dependent default. */
   tab?: Tab;
   onTab: (tab: Tab) => void;
@@ -32,7 +33,7 @@ type Props = {
   onUnauthorized: () => void;
 };
 
-export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClose, onUnauthorized }: Props) {
+export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, onTab, onClose, onUnauthorized }: Props) {
   const key = `${item.workspace}/${item.dir}`;
   const {
     data: detail,
@@ -157,7 +158,7 @@ export function DetailPanel({ item, items, onSelect, tab: routeTab, onTab, onClo
           {detail ? <BriefView item={live} body={stripFrontmatter(detail.content)} onSaved={() => void reload()} /> : "Loading…"}
         </div>
       )}
-      {tab === "info" && <div className="brief">{detail ? <Info item={live} items={items} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
+      {tab === "info" && <div className="brief">{detail ? <Info item={live} items={items} pipelines={pipelines} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
       {tab === "files" && <Files item={live} onUnauthorized={onUnauthorized} />}
       {tab === "pr" && live.pr && (
         <div className="brief">

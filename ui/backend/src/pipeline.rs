@@ -155,6 +155,9 @@ pub struct Pipeline {
     /// The repo every item of the board belongs to (decision 45).
     #[serde(deserialize_with = "repo_path")]
     pub repo: PathBuf,
+    /// Tab title; the board's name (its file name) when absent.
+    #[serde(default)]
+    pub label: Option<String>,
     pub entry: String,
     pub stages: Vec<Stage>,
     /// Scripts that run for the whole board on a timer, with every item of the board on stdin.
@@ -484,6 +487,9 @@ mod tests {
     fn a_board_needs_an_existing_absolute_repo_and_expands_the_home_folder() {
         let with = |repo: &str| Pipeline::parse(&format!(r#"{{"repo": "{repo}", "brief_sections": [], "entry": "a", "stages": [{{"name":"a"}}]}}"#));
         assert_eq!(with("/").unwrap().repo, Path::new("/"));
+        assert_eq!(with("/").unwrap().label, None);
+        let labelled = Pipeline::parse(r#"{"repo": "/", "label": "Storyrails - Develop", "brief_sections": [], "entry": "a", "stages": [{"name":"a"}]}"#);
+        assert_eq!(labelled.unwrap().label.as_deref(), Some("Storyrails - Develop"));
         assert!(with("relative").unwrap_err().contains("repo"));
         assert!(with("/no/such/dir").unwrap_err().contains("repo"));
         assert!(Pipeline::parse(r#"{"brief_sections": [], "entry": "a", "stages": [{"name":"a"}]}"#).is_err(), "repo is required");

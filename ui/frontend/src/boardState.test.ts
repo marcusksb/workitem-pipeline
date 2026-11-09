@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -92,6 +92,15 @@ describe("openDependencies", () => {
     const ui = item({ dir: "U-1", depends_on: ["A-1", "A-2", "A-3", "A-4", "A-gone"] });
     expect(openDependencies(ui, items, flow).map((i) => i.dir)).toEqual(["A-1"]);
     expect(openDependencies(item({}), items, flow)).toEqual([]);
+  });
+});
+
+describe("boardLabel", () => {
+  it("is the board's label, else its name", () => {
+    const labelled: Pipelines = { x: [{ ...board("dev", "a"), pipeline: { ...board("dev", "a").pipeline, label: "Storyrails - Develop" } }] };
+    expect(boardLabel(labelled, "x", "dev")).toBe("Storyrails - Develop");
+    expect(boardLabel(labelled, "x", "gone")).toBe("gone");
+    expect(boardLabel(pipelines, "app", "research")).toBe("research");
   });
 });
 

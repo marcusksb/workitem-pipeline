@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, openDependencies, orderFor, pauseState, repoName, shownBoard, stageTitle, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, shownBoard, stageTitle, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -140,7 +140,7 @@ function DependencyChip({ item, pipelines, onOpen }: { item: Item; pipelines: Pi
         onOpen(item);
       }}
     >
-      waits on {item.dir} · {shownBoard(item, pipelines)} · {stageTitle(item, pipelines)}
+      waits on {item.dir} · {boardLabel(pipelines, item.workspace, shownBoard(item, pipelines))} · {stageTitle(item, pipelines)}
     </button>
   );
 }
@@ -234,11 +234,12 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
     <>
       <nav className="board-tabs" role="tablist">
         {names.map((name) => {
-          const repo = workspaces.map((w) => pipelines?.[w]?.find((b) => b.name === name)?.pipeline?.repo).find(Boolean);
+          const board = workspaces.map((w) => pipelines?.[w]?.find((b) => b.name === name)?.pipeline).find(Boolean);
+          const repo = board?.repo;
           return (
             <button key={name} role="tab" aria-selected={name === active} className={name === active ? "active" : ""} onClick={() => onBoard(name)} title={repo}>
-              {name}
-              {repo && <span className="repo-name">{repoName(repo)}</span>}
+              {board?.label || name}
+              {repo && !board?.label && <span className="repo-name">{repoName(repo)}</span>}
               {blocked[name] ? <span className="count blocked" title="blocked items">{blocked[name]}</span> : null}
             </button>
           );

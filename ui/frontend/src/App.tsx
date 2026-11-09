@@ -170,6 +170,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           <DetailPanel
             item={selected}
             items={shown}
+            pipelines={pipelines.data}
             onSelect={open}
             tab={route.tab}
             onTab={onTab}

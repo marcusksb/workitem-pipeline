@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { Dialog } from "./Dialog";
+import { boardLabel } from "./boardState";
 import { Learnings } from "./Learnings";
 import { Pipelines, Workspace } from "./types";
 
@@ -124,7 +125,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
           Learnings
         </button>
       )}
-      {learning && selected && onScreen && <Learnings workspace={selected} board={onScreen} onClose={() => setLearning(false)} />}
+      {learning && selected && onScreen && <Learnings workspace={selected} board={onScreen} label={boardLabel(pipelines, selected, onScreen)} onClose={() => setLearning(false)} />}
       {creating && selected && (
         <Dialog title={`New workitem in ${selected}`} onClose={() => setCreating(false)}>
           <form className="dialog-form" onSubmit={create}>
@@ -144,7 +145,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
                 <select value={board} onChange={(e) => setBoard(e.target.value)}>
                   {boards.map((name) => (
                     <option key={name} value={name}>
-                      {name}
+                      {boardLabel(pipelines, selected, name)}
                     </option>
                   ))}
                 </select>

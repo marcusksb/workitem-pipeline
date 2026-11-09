@@ -8,13 +8,14 @@ import { IconCheck, IconX } from "./icons";
 import { markdownLinks } from "./markdownLinks";
 import { Learnings as Data } from "./types";
 
-type Props = { workspace: string; board: string; onClose: () => void };
+/** `label`: the board's title. */
+type Props = { workspace: string; board: string; label: string; onClose: () => void };
 
 const NEW_FILE = "# Learnings\n\n";
 
 /** A board's `learnings.md`: the rules review fixers wrote down, and the human adds or prunes.
  * Saving sends the text the editor started from; the backend refuses if a fixer changed it since. */
-export function Learnings({ workspace, board, onClose }: Props) {
+export function Learnings({ workspace, board, label, onClose }: Props) {
   const [data, setData] = useState<Data>();
   const [error, setError] = useState<string>();
   const [text, setText] = useState<string>();
@@ -45,7 +46,7 @@ export function Learnings({ workspace, board, onClose }: Props) {
     if (!changed || confirm("Discard your changes to the learnings?")) onClose();
   };
 
-  const title = `Learnings in ${workspace} · ${board}`;
+  const title = `Learnings in ${workspace} · ${label}`;
   return (
     <Dialog title={title} onClose={close}>
       <div className="source learnings">

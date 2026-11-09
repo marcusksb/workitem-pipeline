@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { api } from "./api";
-import { frontmatterFields } from "./boardState";
+import { boardLabel, frontmatterFields } from "./boardState";
 import { IssueStatusChip } from "./IssueStatusChip";
 import { IconCheck, IconPencil, IconX } from "./icons";
-import { Item } from "./types";
+import { Item, Pipelines } from "./types";
 
 /** Fields only a stage move may change; the backend refuses them too. */
 const READ_ONLY = ["stage", "board"];
@@ -26,7 +26,7 @@ function Value({ name, value, category }: { name: string; value: string; categor
 
 /** The items this one waits for (`depends_on`), with a picker over the other items of its
  * workspace. A stage that requires it holds the item back until they are merged. */
-function Dependencies({ item, items, onSaved }: { item: Item; items: Item[]; onSaved: () => void }) {
+function Dependencies({ item, items, pipelines, onSaved }: { item: Item; items: Item[]; pipelines: Pipelines | undefined; onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const others = items.filter((i) => i.workspace === item.workspace && i.dir !== item.dir && !item.depends_on.includes(i.dir));
@@ -51,7 +51,7 @@ function Dependencies({ item, items, onSaved }: { item: Item; items: Item[]; onS
           return (
             <li key={dir}>
               {dir}
-              {other ? <span className="badge">{other.board} · {other.stage}</span> : <span className="empty">gone, counts as merged</span>}
+              {other ? <span className="badge">{boardLabel(pipelines, other.workspace, other.board)} · {other.stage}</span> : <span className="empty">gone, counts as merged</span>}
               <button className="link" disabled={busy} aria-label={`Remove ${dir}`} onClick={() => void save(item.depends_on.filter((d) => d !== dir))}>
                 <IconX />
               </button>
@@ -64,7 +64,7 @@ function Dependencies({ item, items, onSaved }: { item: Item; items: Item[]; onS
           <option value="">Add a dependency…</option>
           {others.map((other) => (
             <option key={other.dir} value={other.dir}>
-              {other.dir} ({other.board})
+              {other.dir} ({boardLabel(pipelines, other.workspace, other.board)})
             </option>
           ))}
         </select>
@@ -76,7 +76,7 @@ function Dependencies({ item, items, onSaved }: { item: Item; items: Item[]; onS
 
 /** The frontmatter of a workitem as labelled fields; Edit turns the values into inputs. Only
  * the changed fields are saved, so an agent's edit to another field is never overwritten. */
-export function Info({ item, items, content, onSaved }: { item: Item; items: Item[]; content: string; onSaved: () => void }) {
+export function Info({ item, items, pipelines, content, onSaved }: { item: Item; items: Item[]; pipelines: Pipelines | undefined; content: string; onSaved: () => void }) {
   const fields = frontmatterFields(content);
   const category = fields.find(([name]) => name === "issue_status_category")?.[1] ?? "";
   const [draft, setDraft] = useState<Record<string, string>>();
@@ -124,7 +124,7 @@ export function Info({ item, items, content, onSaved }: { item: Item; items: Ite
         )}
         {error && <span className="error">{error}</span>}
       </div>
-      <Dependencies item={item} items={items} onSaved={onSaved} />
+      <Dependencies item={item} items={items} pipelines={pipelines} onSaved={onSaved} />
       <dl className="info">
         {fields.map(([name, value], i) => (
           <div key={`${name}-${i}`}>
