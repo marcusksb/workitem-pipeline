@@ -39,7 +39,7 @@ const fanfare = () => play([523, 659, 784, 1047], 0.1);
 const matching = (items: Item[], matches: (item: Item) => boolean) => new Set(items.filter(matches).map(itemKey));
 
 /**
- * Notification and beep when an item becomes blocked; a chime when its PR becomes ready to merge, a fanfare
+ * Beep, plus a notification while the page is not focused, when an item becomes blocked; a chime when its PR becomes ready to merge, a fanfare
  * when its Jira issue becomes done. Items already in that state on first load stay quiet. Clicking a notification
  * calls `onOpen` with the item.
  */
@@ -74,6 +74,8 @@ export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => voi
     seen.current = new Set(items.filter(isBlocked).map(blockedKey));
     if (fresh.length === 0) return;
     beep();
+    // While the page has focus, the toasts show it already.
+    if (document.hasFocus()) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     for (const item of fresh) {
       const note = new Notification(`Workitem blocked (${item.workspace})`, { body: `${item.dir}: ${item.agent_status}` });
