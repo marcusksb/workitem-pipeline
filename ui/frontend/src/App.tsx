@@ -66,7 +66,6 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const items = usePolling(api.items, 3000, "items", onUnauthorized);
   const sessions = usePolling(api.sessions, 3000, "sessions", onUnauthorized);
   const plans = usePolling(api.plans, 3000, "plans", onUnauthorized);
-  useAlerts(items.data);
 
   useEffect(() => {
     const onHash = () => setRoute(readRoute());
@@ -115,6 +114,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     const sameView = item.workspace === workspace && board === activeBoard;
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir } });
   };
+  useAlerts(items.data, open);
   const openFound = (item: Item) => {
     setSearching(false);
     open(item);

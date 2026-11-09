@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { blockedKey, isBlocked, issueDone, itemKey, newlyBlocked, newlyMatching, readyToMerge } from "./boardState";
 import { Item } from "./types";
-import { routeHash } from "./url";
 
 let audio: AudioContext | undefined;
 
@@ -41,9 +40,13 @@ const matching = (items: Item[], matches: (item: Item) => boolean) => new Set(it
 
 /**
  * Notification and beep when an item becomes blocked; a chime when its PR becomes ready to merge, a fanfare
- * when its Jira issue becomes done. Items already in that state on first load stay quiet.
+ * when its Jira issue becomes done. Items already in that state on first load stay quiet. Clicking a notification
+ * calls `onOpen` with the item.
  */
-export function useAlerts(items: Item[] | undefined) {
+export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => void) {
+  // A notification is clicked long after it is shown, so it must call the latest `onOpen`, not the one of its render.
+  const openRef = useRef(onOpen);
+  openRef.current = onOpen;
   const seen = useRef<Set<string>>(undefined);
   const ready = useRef<Set<string>>(undefined);
   const done = useRef<Set<string>>(undefined);
@@ -76,7 +79,7 @@ export function useAlerts(items: Item[] | undefined) {
       const note = new Notification(`Workitem blocked (${item.workspace})`, { body: `${item.dir}: ${item.agent_status}` });
       note.onclick = () => {
         window.focus();
-        location.hash = routeHash({ item: { workspace: item.workspace, dir: item.dir } });
+        openRef.current(item);
       };
     }
   }, [items]);
