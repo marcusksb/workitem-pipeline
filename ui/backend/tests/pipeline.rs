@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; printf 'last=%s\n' "${@: -1}"; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; } > "$LOGDIR/args-$(date +%s%N)"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
   echo "$WORKITEM $stage" >> "$repo/.stub-log"
@@ -1664,7 +1664,7 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
 
     eventually("stub recorded the plan prompt", || stub_logs(&w).iter().any(|t| t.contains("planning session"))).await;
     let log = stub_logs(&w).into_iter().find(|t| t.contains("planning session")).unwrap();
-    assert!(log.starts_with("argc=7\n"), "--add-dir, repo, --settings, json, --session-id, uuid, prompt: {log}");
+    assert!(log.starts_with("argc=7\nclaude_md=1\n"), "--add-dir, repo, --settings, json, --session-id, uuid, prompt; reads the repos' CLAUDE.md: {log}");
     assert!(log.contains(&format!("- default: repo {}", w.repo.display())), "the prompt lists the boards and their repos: {log}");
     assert!(log.contains(&input), "prompt keeps the text verbatim");
     assert!(!pwn.exists(), "text must never reach a shell");
@@ -1711,7 +1711,7 @@ async fn a_prompt_over_the_tmux_command_limit_reaches_the_agent_unchanged() {
     let prompt = format!("{}\n'quotes' \"and\" $(no expansion) `here`\n\n", "x".repeat(20_000));
     workitem_ui::launch::spawn(&w.state, "wi-big", &project, workitem_ui::launch::Scope::Workspace, &prompt).await.unwrap();
     eventually("the agent ran", || !args_log(&w).is_empty()).await;
-    assert_eq!(args_log(&w), format!("argc=5\nlast={prompt}\n"));
+    assert_eq!(args_log(&w), format!("argc=5\nclaude_md=1\nlast={prompt}\n"), "a workspace session reads the repos' CLAUDE.md");
     assert!(w.tmux.has("wi-big"));
 }
 

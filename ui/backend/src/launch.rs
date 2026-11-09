@@ -59,6 +59,7 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
             worktree.unwrap_or_else(|| place.repo.to_path_buf())
         }
         Scope::Workspace => {
+            env.push(CLAUDE_MD_OF_ADDED_DIRS.into());
             dirs.extend(state.repos(workspace));
             workspace.dir.clone()
         }
@@ -68,6 +69,10 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
     args.extend(["--settings".into(), hooks.into()]);
     start(state, session, workspace, &cwd, &env, &args, Some(prompt)).await
 }
+
+/// A workspace or plan session starts outside every repo, so Claude Code would not read the repos'
+/// `CLAUDE.md` files; this makes it read them from the `--add-dir` folders too.
+const CLAUDE_MD_OF_ADDED_DIRS: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1";
 
 /// `--add-dir` with every folder, or nothing. It takes several values, so `--settings` must
 /// follow it to end the list.
@@ -83,7 +88,7 @@ fn add_dirs(dirs: &[PathBuf]) -> Vec<OsString> {
 /// `--resume <uuid>`), then `prompt` if any. `record` is its plan record, which the hooks and
 /// `workitem-plan-note` update.
 pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, record: &Path, claude_args: &[&str], prompt: Option<&str>) -> Result<(), String> {
-    let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_WORKSPACE={}", workspace.dir.display())];
+    let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_WORKSPACE={}", workspace.dir.display()), CLAUDE_MD_OF_ADDED_DIRS.into()];
     let mut args = add_dirs(&state.repos(workspace));
     args.extend(["--settings".into(), plan_settings(state).into()]);
     args.extend(claude_args.iter().map(OsString::from));
