@@ -12,10 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::ApiError,
-    config::Project,
+    config::Workspace,
     dispatch::RunError,
     git, launch,
-    pipeline::{Stage, DEFAULT_BOARD},
+    launch::{Place, Scope},
+    pipeline::Stage,
     tmux,
     workitem::{self, Workitem},
     AppState, Shared,
@@ -31,22 +32,27 @@ fn internal(message: impl ToString) -> ApiError {
     ApiError(StatusCode::INTERNAL_SERVER_ERROR, message.to_string())
 }
 
-fn find(state: &AppState, project: &str, dir: &str) -> Result<(Project, std::path::PathBuf, Workitem)> {
-    let project = state.store.project(project).ok_or(ApiError::not_found("project"))?;
-    let path = workitem::path(&project, dir).ok_or(ApiError::not_found("workitem"))?;
-    let (item, _) = workitem::read(&project, dir).ok_or(ApiError::not_found("workitem"))?;
-    Ok((project, path, item))
+fn find(state: &AppState, workspace: &str, dir: &str) -> Result<(Workspace, std::path::PathBuf, Workitem)> {
+    let workspace = state.store.workspace(workspace).ok_or(ApiError::not_found("workspace"))?;
+    let path = workitem::path(&workspace, dir).ok_or(ApiError::not_found("workitem"))?;
+    let (item, _) = workitem::read(&workspace, dir).ok_or(ApiError::not_found("workitem"))?;
+    Ok((workspace, path, item))
+}
+
+/// The repo of the item's board.
+fn repo_of(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<std::path::PathBuf> {
+    state.repo_of(workspace, &item.board).map_err(conflict)
 }
 
 /// The board's config for the stage the item is in. Roles come from there, never from stage names.
-fn stage_of(state: &AppState, project: &Project, item: &Workitem) -> Result<Stage> {
-    let board = state.pipeline(project, &item.board).pipeline.ok_or(conflict(format!("board {} has no valid file", item.board)))?;
+fn stage_of(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<Stage> {
+    let board = state.pipeline(workspace, &item.board).pipeline.ok_or(conflict(format!("board {} has no valid file", item.board)))?;
     board.stage(&item.stage).cloned().ok_or_else(|| conflict(format!("stage {} is not on the board", item.stage)))
 }
 
-async fn has_session(state: &AppState, project: &Project, dir: &str) -> bool {
+async fn has_session(state: &AppState, workspace: &Workspace, dir: &str) -> bool {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    tmux::session_for(&sessions, project, dir).is_some()
+    tmux::session_for(&sessions, workspace, dir).is_some()
 }
 
 /// Runs `workitem-move` on the full path, so it never depends on the backend's cwd.
@@ -76,9 +82,9 @@ fn today() -> Result<String> {
 
 /// Approves at a gate: sets `approved` first, because the next stage may require it, then moves
 /// the item on. A refused move undoes the flag.
-pub async fn approve(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let gate = stage_of(&state, &project, &item)?.gate.ok_or(conflict(format!("stage {} has no gate", item.stage)))?;
+pub async fn approve(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let gate = stage_of(&state, &workspace, &item)?.gate.ok_or(conflict(format!("stage {} has no gate", item.stage)))?;
     workitem::set_fields(&path, &[("approved", "true"), ("approved_at", &today()?)]).map_err(internal)?;
     if let Err(e) = move_stage(&state, &path, &gate.approve_to) {
         let _ = workitem::set_fields(&path, &[("approved", "false")]);
@@ -95,11 +101,11 @@ pub struct Rejection {
 
 pub async fn reject(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     Json(body): Json<Rejection>,
 ) -> Result<StatusCode> {
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let gate = stage_of(&state, &project, &item)?.gate.ok_or(conflict(format!("stage {} has no gate", item.stage)))?;
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let gate = stage_of(&state, &workspace, &item)?.gate.ok_or(conflict(format!("stage {} has no gate", item.stage)))?;
     if body.comment.trim().is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "a rejection needs a comment".into()));
     }
@@ -120,10 +126,10 @@ pub struct BriefEdit {
 /// never sent or written.
 pub async fn edit_brief(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     Json(body): Json<BriefEdit>,
 ) -> Result<StatusCode> {
-    let (_, path, _) = find(&state, &project, &dir)?;
+    let (_, path, _) = find(&state, &workspace, &dir)?;
     if !workitem::set_body(&path, &body.base, &body.body).map_err(internal)? {
         return Err(conflict("the brief changed since you opened the editor; copy your text and reload"));
     }
@@ -139,22 +145,31 @@ pub struct FrontmatterEdit {
 /// Fields that only `workitem-move` may change.
 const MOVE_ONLY: [&str; 2] = ["stage", "board"];
 
-/// Sets values of existing frontmatter fields. `stage` and `board` are refused (`workitem-move`
-/// enforces the pipeline rules for them), and so are unknown keys and multi-line values.
+/// Sets values of existing frontmatter fields, and `depends_on` whether or not it exists yet.
+/// `stage` and `board` are refused (`workitem-move` enforces the pipeline rules for them), and so
+/// are unknown keys and multi-line values. Every `depends_on` entry must be another item of the
+/// workspace.
 pub async fn edit_frontmatter(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     Json(body): Json<FrontmatterEdit>,
 ) -> Result<StatusCode> {
-    let (_, path, _) = find(&state, &project, &dir)?;
+    let (workspace, path, _) = find(&state, &workspace, &dir)?;
     let text = std::fs::read_to_string(&path).map_err(internal)?;
     let current = workitem::frontmatter(&text);
+    if let Some(list) = body.fields.get("depends_on") {
+        for other in list.split(',').map(str::trim).filter(|d| !d.is_empty()) {
+            if other == dir || workitem::path(&workspace, other).is_none() {
+                return Err(ApiError(StatusCode::BAD_REQUEST, format!("depends_on: {other} is not another workitem of this workspace")));
+            }
+        }
+    }
     for (key, value) in &body.fields {
         let bad = |message: String| ApiError(StatusCode::BAD_REQUEST, message);
         if MOVE_ONLY.contains(&key.as_str()) {
             return Err(bad(format!("{key} changes through a stage move, not an edit")));
         }
-        if !current.contains_key(key) {
+        if !current.contains_key(key) && key != "depends_on" {
             return Err(bad(format!("{key} is not a field of this workitem")));
         }
         if value.contains(['\n', '\r']) {
@@ -168,22 +183,22 @@ pub async fn edit_frontmatter(
 
 /// With a live session the agent still waits for its answer, so it goes back to `working`
 /// (an `ok` would make the dispatcher kill the session).
-pub async fn clear_blocked(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, path, item) = find(&state, &project, &dir)?;
+pub async fn clear_blocked(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
     if !item.agent_status.starts_with("blocked") {
         return Err(conflict("workitem is not blocked"));
     }
-    let status = if has_session(&state, &project, &dir).await { "working" } else { "ok" };
+    let status = if has_session(&state, &workspace, &dir).await { "working" } else { "ok" };
     set_status(&path, status).map_err(internal)?;
     state.wake.notify_one();
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Ends the agent session and lets the dispatcher retry (or stop at the attempt cap).
-pub async fn kill_session(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, path, _) = find(&state, &project, &dir)?;
+pub async fn kill_session(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let (workspace, path, _) = find(&state, &workspace, &dir)?;
     let _busy = state.busy.lock().await;
-    if !has_session(&state, &project, &dir).await {
+    if !has_session(&state, &workspace, &dir).await {
         return Err(conflict("no session is running"));
     }
     tmux::kill(state.tmux_socket.as_deref(), &format!("wi-{dir}")).await;
@@ -199,16 +214,18 @@ pub struct Launched {
 
 pub async fn start(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<(StatusCode, Json<Launched>)> {
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let stage = stage_of(&state, &project, &item)?;
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let stage = stage_of(&state, &workspace, &item)?;
     if !item.approved || !stage.develops() {
         return Err(conflict("only an approved workitem in a development stage can start"));
     }
-    let instructions = launch::instructions(&state, &project, &item.board, stage.handler.as_deref().unwrap_or_default()).map_err(conflict)?;
-    let prompt = launch::handler_prompt(&state, &project, &item, &stage, &instructions);
-    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
+    let instructions = launch::instructions(&state, &workspace, &item.board, stage.handler.as_deref().unwrap_or_default()).map_err(conflict)?;
+    let repo = repo_of(&state, &workspace, &item)?;
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let prompt = launch::handler_prompt(&state, &place, &stage, &instructions);
+    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
 
 #[derive(Deserialize)]
@@ -221,17 +238,17 @@ pub struct Run {
 /// themselves when an item gets a handler.
 pub async fn run_handler(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     body: Option<Json<Run>>,
 ) -> Result<(StatusCode, Json<Launched>)> {
     let handler = body.and_then(|Json(run)| run.handler);
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let stage = stage_of(&state, &project, &item)?;
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let stage = stage_of(&state, &workspace, &item)?;
     let _busy = state.busy.lock().await;
-    if has_session(&state, &project, &dir).await {
+    if has_session(&state, &workspace, &dir).await {
         return Err(conflict(format!("{dir} already has a session")));
     }
-    crate::dispatch::run_handler(&state, &project, &item, &path, &stage, handler.as_deref()).await.map_err(|e| match e {
+    crate::dispatch::run_handler(&state, &workspace, &item, &path, &stage, handler.as_deref()).await.map_err(|e| match e {
         // The handler itself is unusable: not a state that retrying fixes.
         RunError::Handler(message) => ApiError(StatusCode::UNPROCESSABLE_ENTITY, message),
         RunError::Refused(message) => conflict(message),
@@ -248,42 +265,48 @@ pub struct Fix {
 /// `pr-review` watcher, which decides when; this only launches, like `run_handler`.
 pub async fn fix(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     Json(Fix { kind }): Json<Fix>,
 ) -> Result<(StatusCode, Json<Launched>)> {
-    let (project, path, item) = find(&state, &project, &dir)?;
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
     if !item.pr.starts_with("http") {
         return Err(conflict("the workitem has no PR link"));
     }
+    let repo = repo_of(&state, &workspace, &item)?;
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
     let prompt = match kind.as_str() {
-        "ci" => launch::ci_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
-        "conflict" => launch::conflict_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
-        "comments" => launch::comments_fix_prompt(&dir, &project.repo, &item.board, &item.pr),
+        "ci" => launch::ci_fix_prompt(&place, &item.pr),
+        "conflict" => launch::conflict_fix_prompt(&place, &item.pr),
+        "comments" => launch::comments_fix_prompt(&place, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
-    launch_item_session(&state, &project, &path, &dir, &prompt, true).await
+    launch_item_session(&state, &workspace, &path, &place, &prompt, true).await
 }
 
 /// A free-form agent session on the workitem, in any stage: the human drives it from the
 /// terminal tab. Same `wi-<dir>` session as the handlers, so it is the item's lock too.
 pub async fn start_session(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<(StatusCode, Json<Launched>)> {
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let prompt = launch::session_prompt(&dir, &project.repo);
-    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let repo = repo_of(&state, &workspace, &item)?;
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let prompt = launch::session_prompt(&place);
+    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
 
 /// Like `start_session`, but the agent opens on the brief and plan so the human can discuss
 /// and adjust them.
 pub async fn discuss_brief(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<(StatusCode, Json<Launched>)> {
-    let (project, path, item) = find(&state, &project, &dir)?;
-    let prompt = launch::brief_prompt(&dir, &project.repo);
-    launch_item_session(&state, &project, &path, &item.dir, &prompt, false).await
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let repo = repo_of(&state, &workspace, &item)?;
+    let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let prompt = launch::brief_prompt(&place);
+    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
 }
 
 /// Starts `wi-<dir>` with `prompt`. The status is `working` while it runs: an `ok` item with
@@ -293,17 +316,18 @@ pub async fn discuss_brief(
 /// `require_ok` refuses any status but `ok` (fixers only start on an idle item).
 async fn launch_item_session(
     state: &AppState,
-    project: &Project,
+    workspace: &Workspace,
     path: &Path,
-    dir: &str,
+    place: &Place<'_>,
     prompt: &str,
     require_ok: bool,
 ) -> Result<(StatusCode, Json<Launched>)> {
+    let dir = place.dir;
     let _busy = state.busy.lock().await;
-    if has_session(state, project, dir).await {
+    if has_session(state, workspace, dir).await {
         return Err(conflict(format!("{dir} already has a session")));
     }
-    let (item, _) = workitem::read(project, dir).ok_or(ApiError::not_found("workitem"))?;
+    let (item, _) = workitem::read(workspace, dir).ok_or(ApiError::not_found("workitem"))?;
     if item.agent_status.starts_with("blocked") {
         return Err(conflict("clear the blocked status first"));
     }
@@ -312,22 +336,23 @@ async fn launch_item_session(
     }
     let session = format!("wi-{dir}");
     set_status(path, "working").map_err(internal)?;
-    if let Err(e) = launch::spawn(state, &session, project, Some(dir), prompt).await {
+    if let Err(e) = launch::spawn(state, &session, workspace, Scope::Item(place), prompt).await {
         let _ = set_status(path, &item.agent_status);
         return Err(conflict(e));
     }
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs `gh pr <subcommand> <pr url> <args>` in the project's repo, then makes the board's
+/// Runs `gh pr <subcommand> <pr url> <args>` in the repo of the item's board, then makes the board's
 /// watchers (`pr-status` among them) and the stage's due and wakes the dispatcher, so the next
 /// pass reads the PR at once.
-async fn gh_pr(state: &AppState, project: &Project, item: &Workitem, args: &[&str]) -> Result<()> {
-    if !stage_of(state, project, item)?.watches_prs() || !item.pr.starts_with("http") {
+async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &[&str]) -> Result<()> {
+    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
     }
+    let repo = repo_of(state, workspace, item)?;
     let mut command = tokio::process::Command::new(&state.gh);
-    command.arg("pr").arg(args[0]).arg(&item.pr).args(&args[1..]).current_dir(&project.repo).kill_on_drop(true);
+    command.arg("pr").arg(args[0]).arg(&item.pr).args(&args[1..]).current_dir(&repo).kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
         .await
         .map_err(|_| conflict("gh timed out"))?
@@ -335,25 +360,25 @@ async fn gh_pr(state: &AppState, project: &Project, item: &Workitem, args: &[&st
     if !output.status.success() {
         return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
     }
-    crate::watch::forget(state, project, &item.board, crate::watch::BOARD);
-    crate::watch::forget(state, project, &item.board, &item.stage);
+    crate::watch::forget(state, workspace, &item.board, crate::watch::BOARD);
+    crate::watch::forget(state, workspace, &item.board, &item.stage);
     state.wake.notify_one();
     Ok(())
 }
 
 /// Squash-merges the PR with `gh`. Moving the item to `done` is left to the dispatcher's
 /// review pass: the same path also covers a merge queue that lands the PR later.
-pub async fn merge(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, _, item) = find(&state, &project, &dir)?;
-    gh_pr(&state, &project, &item, &["merge", "--squash"]).await?;
+pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let (workspace, _, item) = find(&state, &workspace, &dir)?;
+    gh_pr(&state, &workspace, &item, &["merge", "--squash"]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Rebases the PR's remote branch onto its base branch on GitHub (`gh pr update-branch
 /// --rebase`), so no local checkout is touched. GitHub refuses when the rebase conflicts.
-pub async fn rebase(State(state): State<Shared>, UrlPath((project, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (project, _, item) = find(&state, &project, &dir)?;
-    gh_pr(&state, &project, &item, &["update-branch", "--rebase"]).await?;
+pub async fn rebase(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let (workspace, _, item) = find(&state, &workspace, &dir)?;
+    gh_pr(&state, &workspace, &item, &["update-branch", "--rebase"]).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -373,19 +398,25 @@ async fn worktree_of(repo: &Path, dir: &str) -> Option<std::path::PathBuf> {
 /// (never `--force`), then deletes the folder. Branch and PR stay.
 pub async fn remove(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<Json<Removed>> {
-    let (project, path, _) = find(&state, &project, &dir)?;
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let _busy = state.busy.lock().await;
-    // Only this project's session; a same-named session from another repo is not ours.
+    // Only this workspace's session; a same-named session from another workspace is not ours.
     let session = format!("wi-{dir}");
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    if tmux::named(&sessions, &project, &session).is_some() {
+    if tmux::named(&sessions, &workspace, &session).is_some() {
         tmux::kill(state.tmux_socket.as_deref(), &session).await;
     }
 
     let mut worktree_left = None;
-    if let Some(worktree) = worktree_of(&project.repo, &dir).await {
+    // An item whose board has no valid file has no repo to look for a worktree in.
+    let repo = state.repo_of(&workspace, &item.board).ok();
+    let worktree = match &repo {
+        Some(repo) => worktree_of(repo, &dir).await,
+        None => None,
+    };
+    if let (Some(worktree), Some(repo)) = (worktree, &repo) {
         let teardown = worktree.join("bin/teardown_worktree");
         if teardown.is_file() {
             let _ = tokio::process::Command::new(&teardown).current_dir(&worktree).output().await;
@@ -393,7 +424,7 @@ pub async fn remove(
         let out = tokio::process::Command::new("git")
             .args(["worktree", "remove"])
             .arg(&worktree)
-            .current_dir(&project.repo)
+            .current_dir(repo)
             .output()
             .await
             .map_err(internal)?;
@@ -411,28 +442,31 @@ pub async fn remove(
 #[derive(Deserialize)]
 pub struct NewWorkitem {
     input: String,
-    /// Board the item starts on; `default` when absent.
+    /// Board the item starts on (the workitem-create session may add items on other boards too);
+    /// the workspace's first board when absent.
     #[serde(default)]
     board: Option<String>,
 }
 
 pub async fn create(
     State(state): State<Shared>,
-    UrlPath(project): UrlPath<String>,
+    UrlPath(workspace): UrlPath<String>,
     Json(body): Json<NewWorkitem>,
 ) -> Result<(StatusCode, Json<Launched>)> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     if body.input.trim().is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "describe the task or paste a Jira key or Sentry URL".into()));
     }
-    let board = body.board.unwrap_or_else(|| DEFAULT_BOARD.into());
-    if !state.board_names(&project).contains(&board) {
-        return Err(ApiError(StatusCode::BAD_REQUEST, format!("the project has no board '{board}'")));
-    }
+    let boards = state.board_names(&workspace);
+    let board = match body.board {
+        Some(board) if boards.contains(&board) => board,
+        Some(board) => return Err(ApiError(StatusCode::BAD_REQUEST, format!("the workspace has no board '{board}'"))),
+        None => boards.first().cloned().ok_or_else(|| conflict("add a board to the workspace first"))?,
+    };
     let id: [u8; 3] = rand::rng().random();
     let session = format!("wi-new-{}", id.iter().map(|b| format!("{b:02x}")).collect::<String>());
-    let prompt = launch::create_prompt(&state, &project, &session, body.input.trim(), &board).map_err(conflict)?;
+    let prompt = launch::create_prompt(&state, &workspace, &session, body.input.trim(), &board).map_err(conflict)?;
     let _busy = state.busy.lock().await;
-    launch::spawn(&state, &session, &project, None, &prompt).await.map_err(conflict)?;
+    launch::spawn(&state, &session, &workspace, Scope::Workspace, &prompt).await.map_err(conflict)?;
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }

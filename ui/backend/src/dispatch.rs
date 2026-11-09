@@ -4,7 +4,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use crate::{
     actions::set_status,
-    config::Project,
+    config::Workspace,
     launch,
     pipeline::Stage,
     plans,
@@ -46,12 +46,12 @@ pub async fn run(state: Arc<AppState>) {
 pub async fn pass(state: &AppState) {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    for project in state.store.projects() {
-        for item in workitem::list(&project) {
-            let session = tmux::session_for(&sessions, &project, &item.dir).map(|s| s.name.as_str());
-            reap(state, &project, &item, session, &dead).await;
+    for workspace in state.store.workspaces() {
+        for item in workitem::list(&workspace) {
+            let session = tmux::session_for(&sessions, &workspace, &item.dir).map(|s| s.name.as_str());
+            reap(state, &workspace, &item, session, &dead).await;
         }
-        plans::reap(state, &project, &sessions, &dead).await;
+        plans::reap(state, &workspace, &sessions, &dead).await;
     }
     watch::pass(state).await;
 }
@@ -59,8 +59,8 @@ pub async fn pass(state: &AppState) {
 /// Session housekeeping. `ok` means the handler is done, so its session goes; a dead pane that
 /// never said so crashed, so the item is idle again; a `working` or `waiting: <what>` item with no
 /// session is idle too. Starting handlers and reacting to PRs is the column watchers' job.
-async fn reap(state: &AppState, project: &Project, item: &Workitem, session: Option<&str>, dead: &std::collections::HashSet<String>) {
-    let Some(path) = workitem::path(project, &item.dir) else {
+async fn reap(state: &AppState, workspace: &Workspace, item: &Workitem, session: Option<&str>, dead: &std::collections::HashSet<String>) {
+    let Some(path) = workitem::path(workspace, &item.dir) else {
         return;
     };
     let status = item.agent_status.as_str();
@@ -78,9 +78,9 @@ async fn reap(state: &AppState, project: &Project, item: &Workitem, session: Opt
     }
 }
 
-fn instructions_of(state: &AppState, project: &Project, item: &Workitem, source: &Source) -> Result<String, String> {
+fn instructions_of(state: &AppState, workspace: &Workspace, item: &Workitem, source: &Source) -> Result<String, String> {
     match source {
-        Source::Skill(name) => launch::instructions(state, project, &item.board, name),
+        Source::Skill(name) => launch::instructions(state, workspace, &item.board, name),
         Source::Prompt(text) => Ok(text.to_string()),
     }
 }
@@ -88,13 +88,22 @@ fn instructions_of(state: &AppState, project: &Project, item: &Workitem, source:
 /// Starts the handler of the item's stage as `wi-<dir>` and marks the item `working`; a failed
 /// start blocks it with the cause, so it is not retried blindly. Shared by the dispatcher and `workitem-run-item`. The caller holds
 /// `AppState::busy` and has checked that the item is idle.
-pub async fn launch_handler(state: &AppState, project: &Project, item: &Workitem, path: &Path, stage: &Stage, instructions: &str) -> Result<(), String> {
-    let _ = set_status(path, "working");
-    let prompt = launch::handler_prompt(state, project, item, stage, instructions);
+pub async fn launch_handler(state: &AppState, workspace: &Workspace, item: &Workitem, path: &Path, stage: &Stage, instructions: &str) -> Result<(), String> {
     let name = format!("wi-{}", item.dir);
-    launch::spawn(state, &name, &project, Some(&item.dir), &prompt).await.map_err(|e| {
-        let error = format!("cannot start {name}: {e}");
+    let block = |error: &str| {
         let _ = set_status(path, &format!("blocked: {}", error.split_whitespace().collect::<Vec<_>>().join(" ")));
+    };
+    let repo = state.repo_of(workspace, &item.board).map_err(|e| {
+        let error = format!("cannot start {name}: {e}");
+        block(&error);
+        error
+    })?;
+    let place = launch::Place { dir: &item.dir, workspace: &workspace.dir, repo: &repo, board: &item.board };
+    let _ = set_status(path, "working");
+    let prompt = launch::handler_prompt(state, &place, stage, instructions);
+    launch::spawn(state, &name, workspace, launch::Scope::Item(&place), &prompt).await.map_err(|e| {
+        let error = format!("cannot start {name}: {e}");
+        block(&error);
         error
     })
 }
@@ -102,7 +111,7 @@ pub async fn launch_handler(state: &AppState, project: &Project, item: &Workitem
 /// What `workitem-run-item` does: starts the stage handler of an idle item, with the same
 /// instructions the dispatcher would use, or the named `handler` instead for this one run.
 /// Policy (when, how often, attempt caps) is the caller's.
-pub async fn run_handler(state: &AppState, project: &Project, item: &Workitem, path: &Path, stage: &Stage, handler: Option<&str>) -> Result<(), RunError> {
+pub async fn run_handler(state: &AppState, workspace: &Workspace, item: &Workitem, path: &Path, stage: &Stage, handler: Option<&str>) -> Result<(), RunError> {
     let source = match handler {
         Some(name) => Source::Skill(name),
         None => source_of(stage).ok_or_else(|| RunError::Refused(format!("stage {} has no handler to run", stage.name)))?,
@@ -110,8 +119,8 @@ pub async fn run_handler(state: &AppState, project: &Project, item: &Workitem, p
     if item.agent_status != "ok" {
         return Err(RunError::Refused(format!("{} is {}, not ok", item.dir, item.agent_status)));
     }
-    let instructions = instructions_of(state, project, item, &source).map_err(RunError::Handler)?;
-    launch_handler(state, project, item, path, stage, &instructions).await.map_err(RunError::Refused)
+    let instructions = instructions_of(state, workspace, item, &source).map_err(RunError::Handler)?;
+    launch_handler(state, workspace, item, path, stage, &instructions).await.map_err(RunError::Refused)
 }
 
 /// Why `run_handler` did not start anything: the stage's handler cannot be used (not found, bad

@@ -6,27 +6,30 @@ use std::{
 
 use serde::Serialize;
 
-use crate::config::Project;
+use crate::config::Workspace;
 
 #[derive(Serialize)]
 pub struct Workitem {
-    pub project: String,
+    pub workspace: String,
     pub dir: String,
     pub title: String,
     pub kind: String,
     pub stage: String,
-    /// Name of the board the item is on; `default` unless the frontmatter says otherwise.
+    /// Name of the board the item is on; empty when the frontmatter has none.
     pub board: String,
     pub approved: bool,
     pub agent_status: String,
     pub issue: String,
-    /// Jira status name, as the project's watcher last saw it, or empty.
+    /// Jira status name, as the workspace's watcher last saw it, or empty.
     pub issue_status: String,
     /// Jira status category key (`new`, `indeterminate`, `done`), or empty.
     pub issue_status_category: String,
     pub pr: String,
     /// Directory name of the workitem this one was split from, or empty.
     pub parent: String,
+    /// Directory names of the items that must be merged before this one may enter a stage that
+    /// requires it (decision 47).
+    pub depends_on: Vec<String>,
     pub created: String,
     /// Open `- [ ]` items under `## Follow-ups`: work left for after the item is done.
     pub follow_ups: Vec<String>,
@@ -50,20 +53,9 @@ pub fn frontmatter(text: &str) -> HashMap<String, String> {
         .collect()
 }
 
-/// `<repo>/.workitems`, or the older `<repo>/.claude/workitems` when only that exists.
-pub fn workitems_dir(repo: &Path) -> PathBuf {
-    let new = repo.join(".workitems");
-    let old = repo.join(".claude/workitems");
-    if old.exists() && !new.exists() {
-        old
-    } else {
-        new
-    }
-}
-
-/// `workitem.md` of the workitem `dir` in `repo`, whether or not it exists.
-pub fn file(repo: &Path, dir: &str) -> PathBuf {
-    workitems_dir(repo).join(dir).join("workitem.md")
+/// `workitem.md` of the workitem `dir` in the workspace folder, whether or not it exists.
+pub fn file(workspace: &Path, dir: &str) -> PathBuf {
+    workspace.join(dir).join("workitem.md")
 }
 
 /// Values are written as YAML strings, so they can arrive wrapped in quotes (an agent quotes
@@ -75,18 +67,18 @@ fn unquote(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
+fn parse(workspace: &Workspace, dir: &str, text: &str) -> Workitem {
     let fields = frontmatter(text);
     let field = |key: &str, default: &str| {
         fields.get(key).map(|v| unquote(v)).filter(|v| !v.is_empty()).unwrap_or(default).to_string()
     };
     Workitem {
-        project: project.name.clone(),
+        workspace: workspace.name.clone(),
         dir: dir.to_string(),
         title: field("title", dir),
         kind: field("type", "-"),
         stage: field("stage", ""),
-        board: field("board", crate::pipeline::DEFAULT_BOARD),
+        board: field("board", ""),
         approved: field("approved", "false") == "true",
         agent_status: field("agent_status", "ok"),
         issue: field("issue", "none"),
@@ -94,6 +86,7 @@ fn parse(project: &Project, dir: &str, text: &str) -> Workitem {
         issue_status_category: field("issue_status_category", ""),
         pr: field("pr", ""),
         parent: field("parent", ""),
+        depends_on: field("depends_on", "").split(',').map(str::trim).filter(|d| !d.is_empty()).map(String::from).collect(),
         created: field("created", ""),
         follow_ups: follow_ups(text),
         review: crate::review::PrStatus::from_fields(&fields),
@@ -114,8 +107,8 @@ fn follow_ups(text: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn list(project: &Project) -> Vec<Workitem> {
-    let Ok(entries) = fs::read_dir(workitems_dir(&project.repo)) else {
+pub fn list(workspace: &Workspace) -> Vec<Workitem> {
+    let Ok(entries) = fs::read_dir(&workspace.dir) else {
         return vec![];
     };
     let mut items: Vec<Workitem> = entries
@@ -123,7 +116,7 @@ pub fn list(project: &Project) -> Vec<Workitem> {
         .filter_map(|entry| {
             let dir = entry.file_name().to_str()?.to_string();
             let text = fs::read_to_string(entry.path().join("workitem.md")).ok()?;
-            Some(parse(project, &dir, &text))
+            Some(parse(workspace, &dir, &text))
         })
         .collect();
     items.sort_by(|a, b| a.dir.cmp(&b.dir));
@@ -131,18 +124,18 @@ pub fn list(project: &Project) -> Vec<Workitem> {
 }
 
 /// Path of `workitem.md` for a plain directory name that exists.
-pub fn path(project: &Project, dir: &str) -> Option<PathBuf> {
+pub fn path(workspace: &Workspace, dir: &str) -> Option<PathBuf> {
     if dir.is_empty() || dir == "." || dir == ".." || dir.contains(['/', '\\', '\0']) {
         return None;
     }
-    let path = file(&project.repo, dir);
+    let path = file(&workspace.dir, dir);
     path.is_file().then_some(path)
 }
 
 /// Returns the item and its raw markdown.
-pub fn read(project: &Project, dir: &str) -> Option<(Workitem, String)> {
-    let text = fs::read_to_string(path(project, dir)?).ok()?;
-    Some((parse(project, dir, &text), text))
+pub fn read(workspace: &Workspace, dir: &str) -> Option<(Workitem, String)> {
+    let text = fs::read_to_string(path(workspace, dir)?).ok()?;
+    Some((parse(workspace, dir, &text), text))
 }
 
 fn frontmatter_end(text: &str) -> Option<usize> {
@@ -202,18 +195,8 @@ pub fn set_rejection(path: &std::path::Path, comment: &str) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    fn project(repo: &std::path::Path) -> Project {
-        Project { name: "app".into(), repo: repo.to_path_buf(), agent: None }
-    }
-
-    #[test]
-    fn workitems_dir_prefers_the_new_folder_and_falls_back_to_the_old_one() {
-        let repo = tempfile::tempdir().unwrap();
-        assert_eq!(workitems_dir(repo.path()), repo.path().join(".workitems"));
-        fs::create_dir_all(repo.path().join(".claude/workitems")).unwrap();
-        assert_eq!(workitems_dir(repo.path()), repo.path().join(".claude/workitems"));
-        fs::create_dir_all(repo.path().join(".workitems")).unwrap();
-        assert_eq!(workitems_dir(repo.path()), repo.path().join(".workitems"));
+    fn workspace(dir: &std::path::Path) -> Workspace {
+        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None }
     }
 
     #[test]
@@ -235,13 +218,13 @@ mod tests {
     #[test]
     fn lists_items_and_defaults_missing_fields() {
         let repo = tempfile::tempdir().unwrap();
-        let dir = repo.path().join(".claude/workitems/SHAPE-1-foo");
+        let dir = repo.path().join("SHAPE-1-foo");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("workitem.md"), "---\ntitle: Foo\nstage: analyze\nagent_status: blocked: why\napproved: true\npr: https://github.com/app/pull/9\n---\nbody").unwrap();
-        fs::create_dir_all(repo.path().join(".claude/workitems/SHAPE-2-bar")).unwrap();
-        fs::write(repo.path().join(".claude/workitems/SHAPE-2-bar/workitem.md"), "---\ntitle: Bar\nstage: analyze\nparent: SHAPE-1-foo\n---\nbody").unwrap();
-        fs::create_dir_all(repo.path().join(".claude/workitems/no-file")).unwrap();
-        let items = list(&project(repo.path()));
+        fs::create_dir_all(repo.path().join("SHAPE-2-bar")).unwrap();
+        fs::write(repo.path().join("SHAPE-2-bar/workitem.md"), "---\ntitle: Bar\nstage: analyze\nparent: SHAPE-1-foo\nboard: web\ndepends_on: SHAPE-1-foo, X-9\n---\nbody").unwrap();
+        fs::create_dir_all(repo.path().join("no-file")).unwrap();
+        let items = list(&workspace(repo.path()));
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].stage, "analyze");
         assert_eq!(items[0].agent_status, "blocked: why");
@@ -251,15 +234,17 @@ mod tests {
         assert_eq!(items[1].pr, "");
         assert_eq!(items[1].parent, "SHAPE-1-foo");
         assert_eq!(items[0].parent, "");
+        assert_eq!((items[0].board.as_str(), items[1].board.as_str()), ("", "web"));
+        assert_eq!((items[0].depends_on.len(), &items[1].depends_on[..]), (0, &["SHAPE-1-foo".to_string(), "X-9".to_string()][..]));
     }
 
     #[test]
     fn unquotes_quoted_values() {
         let repo = tempfile::tempdir().unwrap();
-        let dir = repo.path().join(".workitems/T-1-a");
+        let dir = repo.path().join("T-1-a");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("workitem.md"), "---\ntitle: 'Fix: login'\nstage: \"analyze\"\nagent_status: \"blocked: x\"\n---\nbody").unwrap();
-        let items = list(&project(repo.path()));
+        let items = list(&workspace(repo.path()));
         assert_eq!(items[0].title, "Fix: login");
         assert_eq!(items[0].stage, "analyze");
         assert_eq!(items[0].agent_status, "blocked: x");
@@ -268,12 +253,12 @@ mod tests {
     #[test]
     fn reads_the_jira_status_and_leaves_it_empty_when_missing() {
         let repo = tempfile::tempdir().unwrap();
-        let root = repo.path().join(".workitems");
+        let root = repo.path().to_path_buf();
         fs::create_dir_all(root.join("T-1-a")).unwrap();
         fs::write(root.join("T-1-a/workitem.md"), "---\ntitle: A\nissue_status: Waiting for Deployment\nissue_status_category: done\n---\nbody").unwrap();
         fs::create_dir_all(root.join("T-2-b")).unwrap();
         fs::write(root.join("T-2-b/workitem.md"), "---\ntitle: B\n---\nbody").unwrap();
-        let items = list(&project(repo.path()));
+        let items = list(&workspace(repo.path()));
         assert_eq!(items[0].issue_status, "Waiting for Deployment");
         assert_eq!(items[0].issue_status_category, "done");
         assert_eq!(items[1].issue_status, "");
@@ -317,7 +302,7 @@ mod tests {
     #[test]
     fn read_rejects_path_traversal() {
         let repo = tempfile::tempdir().unwrap();
-        let p = project(repo.path());
+        let p = workspace(repo.path());
         assert!(read(&p, "../x").is_none());
         assert!(read(&p, "a/b").is_none());
         assert!(read(&p, "..").is_none());

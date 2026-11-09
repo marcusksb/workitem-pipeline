@@ -7,7 +7,7 @@ use std::{collections::{HashMap, HashSet}, fs, io, os::unix::fs::PermissionsExt,
 use tokio::{io::AsyncWriteExt, process::Command};
 
 use crate::{
-    config::{Project, Store},
+    config::{Workspace, Store},
     locate::{self, Found},
     pipeline::{Stage, Watch},
     tmux,
@@ -26,9 +26,9 @@ pub fn valid_name(name: &str) -> bool {
 }
 
 /// The script `name` for a stage on `board`. The first of these wins: the board's
-/// `watch/<name>`, the project's `watch/<name>`, the bundled one.
-pub fn resolve(state: &AppState, project: &Project, board: &str, name: &str) -> Result<Found, String> {
-    let places = locate::places(project, board, "watch", state.skills_dir.join("workitem-pipeline/watch"));
+/// `watch/<name>`, the workspace's `watch/<name>`, the bundled one.
+pub fn resolve(state: &AppState, workspace: &Workspace, board: &str, name: &str) -> Result<Found, String> {
+    let places = locate::places(workspace, board, "watch", state.skills_dir.join("workitem-pipeline/watch"));
     locate::find(&places, Path::new(name)).ok_or_else(|| format!("watch script '{name}' not found in {}", locate::looked(&places)))
 }
 
@@ -36,7 +36,7 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// When each watcher last started (epoch seconds, key `project/board/stage`), kept next to the
+/// When each watcher last started (epoch seconds, key `workspace/board/stage`), kept next to the
 /// config so a restart does not run a daily script again.
 fn runs_file(state: &AppState) -> PathBuf {
     state.store.sibling("watch.json")
@@ -47,17 +47,17 @@ fn last_runs(state: &AppState) -> HashMap<String, u64> {
 }
 
 /// Makes the watchers of a stage due now, so the next pass runs them.
-pub fn forget(state: &AppState, project: &Project, board: &str, stage: &str) {
+pub fn forget(state: &AppState, workspace: &Workspace, board: &str, stage: &str) {
     let mut runs = last_runs(state);
-    let prefix = format!("{}/{board}/{stage}/", project.name);
+    let prefix = format!("{}/{board}/{stage}/", workspace.name);
     runs.retain(|key, _| !key.starts_with(&prefix));
     if let Ok(text) = serde_json::to_string_pretty(&runs) {
         let _ = fs::write(runs_file(state), text);
     }
 }
 
-fn paused_key(project: &Project, board: &str, stage: &str) -> String {
-    format!("{}/{board}/{stage}", project.name)
+fn paused_key(workspace: &Workspace, board: &str, stage: &str) -> String {
+    format!("{}/{board}/{stage}", workspace.name)
 }
 
 /// The paused stages kept next to the config, so a pause survives a restart.
@@ -67,9 +67,9 @@ pub fn load_paused(store: &Store) -> HashSet<String> {
 
 /// Pauses or resumes every watcher of a stage. A paused one is not started; a script that is
 /// already running finishes.
-pub fn set_paused(state: &AppState, project: &Project, board: &str, stage: &str, paused: bool) -> io::Result<()> {
+pub fn set_paused(state: &AppState, workspace: &Workspace, board: &str, stage: &str, paused: bool) -> io::Result<()> {
     let mut stages = state.paused.lock().unwrap();
-    let key = paused_key(project, board, stage);
+    let key = paused_key(workspace, board, stage);
     if paused { stages.insert(key) } else { stages.remove(&key) };
     let mut sorted: Vec<&String> = stages.iter().collect();
     sorted.sort();
@@ -77,8 +77,8 @@ pub fn set_paused(state: &AppState, project: &Project, board: &str, stage: &str,
 }
 
 /// The stages of a board whose watchers are paused.
-pub fn paused_stages(state: &AppState, project: &Project, board: &str) -> Vec<String> {
-    let prefix = paused_key(project, board, "");
+pub fn paused_stages(state: &AppState, workspace: &Workspace, board: &str) -> Vec<String> {
+    let prefix = paused_key(workspace, board, "");
     let mut stages: Vec<String> = state.paused.lock().unwrap().iter().filter_map(|key| key.strip_prefix(&prefix).map(String::from)).collect();
     stages.sort();
     stages
@@ -91,21 +91,21 @@ pub async fn pass(state: &AppState) {
     let mut runs = last_runs(state);
     let mut started = false;
     let paused = state.paused.lock().unwrap().clone();
-    for project in state.store.projects() {
-        let items = workitem::list(&project);
-        for board in state.board_names(&project) {
-            let Some(pipeline) = state.pipeline(&project, &board).pipeline else {
+    for workspace in state.store.workspaces() {
+        let items = workitem::list(&workspace);
+        for board in state.board_names(&workspace) {
+            let Some(pipeline) = state.pipeline(&workspace, &board).pipeline else {
                 continue;
             };
             // A board watcher has no stage; `@` keeps its key apart from every stage name.
-            let stages = pipeline.stages.iter().filter(|s| !paused.contains(&paused_key(&project, &board, &s.name)));
+            let stages = pipeline.stages.iter().filter(|s| !paused.contains(&paused_key(&workspace, &board, &s.name)));
             let watchers = pipeline.watch.iter().enumerate().map(|(i, w)| (None, i, w));
             for (stage, index, watch) in watchers.chain(stages.flat_map(|s| s.watch.iter().enumerate().map(move |(i, w)| (Some(s), i, w)))) {
-                let key = format!("{}/{board}/{}/{index}", project.name, stage.map_or(BOARD, |s| s.name.as_str()));
+                let key = format!("{}/{board}/{}/{index}", workspace.name, stage.map_or(BOARD, |s| s.name.as_str()));
                 if runs.get(&key).is_some_and(|last| now().saturating_sub(*last) < watch.every.as_secs()) {
                     continue;
                 }
-                let script = match resolve(state, &project, &board, &watch.command) {
+                let script = match resolve(state, &workspace, &board, &watch.command) {
                     Ok(found) => found.path,
                     Err(e) => {
                         eprintln!("workitem-ui: {key}: {e}");
@@ -118,7 +118,7 @@ pub async fn pass(state: &AppState) {
                 runs.insert(key.clone(), now());
                 started = true;
                 let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
-                let job = Job::new(state, &project, &board, stage, watch, script, &here, &sessions);
+                let job = Job::new(state, &workspace, &board, &pipeline.repo, stage, watch, script, &here, &sessions);
                 let running = state.watching.clone();
                 tokio::spawn(async move {
                     if let Err(e) = job.run().await {
@@ -147,14 +147,14 @@ struct Job {
 
 impl Job {
     #[allow(clippy::too_many_arguments)]
-    fn new(state: &AppState, project: &Project, board: &str, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
-        let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, project, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
+    fn new(state: &AppState, workspace: &Workspace, board: &str, repo: &Path, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
+        let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, workspace, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
         let env = vec![
-            ("WORKITEM_REPO", project.repo.display().to_string()),
-            ("WORKITEM_DIR_ROOT", workitem::workitems_dir(&project.repo).display().to_string()),
+            ("WORKITEM_REPO", repo.display().to_string()),
+            ("WORKITEM_DIR_ROOT", workspace.dir.display().to_string()),
             ("WORKITEM_BOARD", board.to_string()),
             ("WORKITEM_STAGE", stage.map(|s| s.name.clone()).unwrap_or_default()),
-            ("WORKITEM_PROJECT", project.name.clone()),
+            ("WORKITEM_WORKSPACE", workspace.name.clone()),
             ("WORKITEM_UI_PORT", state.port.to_string()),
             ("WORKITEM_UI_CONFIG", state.store.path().display().to_string()),
             ("WORKITEM_NEXT", stage.map(|s| s.next.join(",")).unwrap_or_default()),
@@ -165,7 +165,7 @@ impl Job {
             ("WORKITEM_WHEN", stage.and_then(|s| serde_json::to_string(&s.when).ok()).unwrap_or_else(|| "{}".into())),
             ("WORKITEM_MOVE", state.skills_dir.join("workitem-pipeline/bin/workitem-move").display().to_string()),
         ];
-        Job { script, args: watch.args.clone(), repo: project.repo.clone(), env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
+        Job { script, args: watch.args.clone(), repo: repo.to_path_buf(), env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
     }
 
     /// Runs the script in the repo with the context in env vars and the items of the column as a

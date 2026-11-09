@@ -64,27 +64,27 @@ pub fn resolve(root: &Path, rel: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-fn item_dir(state: &Shared, project: &str, dir: &str) -> Result<PathBuf, ApiError> {
-    let project = state.store.project(project).ok_or(ApiError::not_found("project"))?;
-    let file = workitem::path(&project, dir).ok_or(ApiError::not_found("workitem"))?;
+fn item_dir(state: &Shared, workspace: &str, dir: &str) -> Result<PathBuf, ApiError> {
+    let workspace = state.store.workspace(workspace).ok_or(ApiError::not_found("workspace"))?;
+    let file = workitem::path(&workspace, dir).ok_or(ApiError::not_found("workitem"))?;
     Ok(file.parent().expect("workitem.md has a folder").to_path_buf())
 }
 
 pub async fn list_files(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<Json<Vec<Entry>>, ApiError> {
-    Ok(Json(list(&item_dir(&state, &project, &dir)?)))
+    Ok(Json(list(&item_dir(&state, &workspace, &dir)?)))
 }
 
 /// The raw file, with range requests so audio and video can seek. It is served from the UI's
 /// origin, so it is sandboxed: an HTML file an agent wrote must not run script with the session cookie.
 pub async fn file(
     State(state): State<Shared>,
-    UrlPath((project, dir, rel)): UrlPath<(String, String, String)>,
+    UrlPath((workspace, dir, rel)): UrlPath<(String, String, String)>,
     req: Request,
 ) -> Result<Response, ApiError> {
-    let path = resolve(&item_dir(&state, &project, &dir)?, &rel).ok_or(ApiError::not_found("file"))?;
+    let path = resolve(&item_dir(&state, &workspace, &dir)?, &rel).ok_or(ApiError::not_found("file"))?;
     let mut response = ServeFile::new(path)
         .try_call(req)
         .await
@@ -104,10 +104,10 @@ pub struct Reveal {
 /// Shows the file in Finder (on Linux, opens its folder), for what the browser cannot play.
 pub async fn reveal(
     State(state): State<Shared>,
-    UrlPath((project, dir)): UrlPath<(String, String)>,
+    UrlPath((workspace, dir)): UrlPath<(String, String)>,
     Json(body): Json<Reveal>,
 ) -> Result<StatusCode, ApiError> {
-    let path = resolve(&item_dir(&state, &project, &dir)?, &body.path).ok_or(ApiError::not_found("file"))?;
+    let path = resolve(&item_dir(&state, &workspace, &dir)?, &body.path).ok_or(ApiError::not_found("file"))?;
     // `path` is absolute, so it can never read as an option.
     let mut command = if cfg!(target_os = "macos") {
         let mut open = tokio::process::Command::new("open");

@@ -5,7 +5,7 @@ use workitem_ui::{config::Store, dispatch, router, AppState};
 
 #[tokio::main]
 async fn main() {
-    let store = Store::open(Store::default_path()).unwrap_or_else(|e| {
+    let store = Store::open(Store::default_root(), Store::legacy_config().as_deref()).unwrap_or_else(|e| {
         eprintln!("workload: cannot open config: {e}");
         std::process::exit(1);
     });

@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::{config::Project, pipeline::valid_board_name, workitem};
+use crate::{config::Workspace, pipeline::valid_board_name};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Origin {
     Board,
-    Project,
+    Workspace,
     Bundled,
 }
 
@@ -20,14 +20,14 @@ pub struct Found {
 }
 
 /// Folders searched for `folder` (`skills` or `watch`), first match wins: the board's, the
-/// project's, then `bundled`.
-pub fn places(project: &Project, board: &str, folder: &str, bundled: PathBuf) -> Vec<(Origin, PathBuf)> {
-    let own = workitem::workitems_dir(&project.repo);
+/// workspace's, then `bundled`.
+pub fn places(workspace: &Workspace, board: &str, folder: &str, bundled: PathBuf) -> Vec<(Origin, PathBuf)> {
+    let own = &workspace.dir;
     let mut places = Vec::new();
     if valid_board_name(board) {
         places.push((Origin::Board, own.join("boards").join(board).join(folder)));
     }
-    places.push((Origin::Project, own.join(folder)));
+    places.push((Origin::Workspace, own.join(folder)));
     places.push((Origin::Bundled, bundled));
     places
 }
@@ -49,17 +49,17 @@ mod tests {
     #[test]
     fn first_place_with_the_file_wins() {
         let dir = tempfile::tempdir().unwrap();
-        let (board, project, bundled) = (dir.path().join("b"), dir.path().join("p"), dir.path().join("w"));
-        for place in [&board, &project, &bundled] {
+        let (board, workspace, bundled) = (dir.path().join("b"), dir.path().join("p"), dir.path().join("w"));
+        for place in [&board, &workspace, &bundled] {
             std::fs::create_dir_all(place).unwrap();
         }
-        let places = vec![(Origin::Board, board.clone()), (Origin::Project, project.clone()), (Origin::Bundled, bundled.clone())];
+        let places = vec![(Origin::Board, board.clone()), (Origin::Workspace, workspace.clone()), (Origin::Bundled, bundled.clone())];
         let rel = Path::new("x");
         assert!(find(&places, rel).is_none());
         std::fs::write(bundled.join("x"), "").unwrap();
         assert_eq!(find(&places, rel).unwrap().origin, Origin::Bundled);
-        std::fs::write(project.join("x"), "").unwrap();
-        assert_eq!(find(&places, rel).unwrap().origin, Origin::Project);
+        std::fs::write(workspace.join("x"), "").unwrap();
+        assert_eq!(find(&places, rel).unwrap().origin, Origin::Workspace);
         std::fs::write(board.join("x"), "").unwrap();
         let found = find(&places, rel).unwrap();
         assert_eq!((found.origin, found.path), (Origin::Board, board.join("x")));

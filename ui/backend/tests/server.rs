@@ -21,17 +21,16 @@ struct Fixture {
 
 async fn fixture() -> (Fixture, TcpListener) {
     let dir = tempfile::tempdir().unwrap();
-    let repo = dir.path().join("repo");
-    let item = repo.join(".claude/workitems/T-1");
+    let store = Store::open(dir.path().join("home"), None).unwrap();
+    let workspace = store.add_workspace("app").unwrap();
+    let item = workspace.dir.join("T-1");
     std::fs::create_dir_all(&item).unwrap();
     std::fs::write(item.join("workitem.md"), "---\ntitle: Test\nstage: analyze\nagent_status: blocked: need input\n---\nbody\n").unwrap();
-
-    let store = Store::open(dir.path().join("config.toml")).unwrap();
-    store.add_project("app", repo.to_str().unwrap()).unwrap();
     let token = store.token();
 
     let tmux = Tmux::new();
-    tmux.run(&["new-session", "-d", "-s", "wi-T-1", "-c", repo.to_str().unwrap(), "cat"]);
+    let tag = workspace.dir.to_str().unwrap();
+    tmux.run(&["new-session", "-d", "-s", "wi-T-1", "cat", ";", "set-option", "@workitem_workspace", tag]);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

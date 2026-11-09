@@ -5,17 +5,17 @@ use std::{
 
 use tokio::process::Command;
 
-use crate::config::Project;
+use crate::config::Workspace;
 
 pub struct Session {
     pub name: String,
-    /// The repo the session belongs to: its `@workitem_repo` option, else its start directory
-    /// (sessions started before the option existed). A session may run in a worktree instead.
-    pub repo: PathBuf,
+    /// The folder of the workspace the session belongs to: its `@workitem_workspace` option,
+    /// empty for sessions the UI did not start.
+    pub workspace: PathBuf,
 }
 
-/// Session option `launch::spawn` sets to the project's repo.
-pub const REPO_OPTION: &str = "@workitem_repo";
+/// Session option `launch::start` sets to the workspace folder.
+pub const WORKSPACE_OPTION: &str = "@workitem_workspace";
 
 pub fn command(socket: Option<&str>) -> Command {
     let mut command = Command::new("tmux");
@@ -28,7 +28,7 @@ pub fn command(socket: Option<&str>) -> Command {
 /// All tmux sessions; empty when no server is running.
 pub async fn sessions(socket: Option<&str>) -> Vec<Session> {
     let output = command(socket)
-        .args(["list-sessions", "-F", &format!("#{{session_name}}\t#{{session_path}}\t#{{{REPO_OPTION}}}")])
+        .args(["list-sessions", "-F", &format!("#{{session_name}}\t#{{{WORKSPACE_OPTION}}}")])
         .output()
         .await;
     let Ok(output) = output else {
@@ -40,9 +40,8 @@ pub async fn sessions(socket: Option<&str>) -> Vec<Session> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
-            let (name, path, repo) = (fields.next()?, fields.next()?, fields.next().unwrap_or(""));
-            Some(Session { name: name.to_string(), repo: if repo.is_empty() { path } else { repo }.into() })
+            let (name, workspace) = line.split_once('\t').unwrap_or((line, ""));
+            Some(Session { name: name.to_string(), workspace: workspace.into() })
         })
         .collect()
 }
@@ -54,15 +53,15 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// The `wi-<dir>` session of this project's workitem. A same-named session of another repo
-/// is not a match.
-pub fn session_for<'a>(sessions: &'a [Session], project: &Project, dir: &str) -> Option<&'a Session> {
-    named(sessions, project, &format!("wi-{dir}"))
+/// The `wi-<dir>` session of this workspace's workitem. A same-named session of another
+/// workspace is not a match.
+pub fn session_for<'a>(sessions: &'a [Session], workspace: &Workspace, dir: &str) -> Option<&'a Session> {
+    named(sessions, workspace, &format!("wi-{dir}"))
 }
 
-/// A session of this project by exact name.
-pub fn named<'a>(sessions: &'a [Session], project: &Project, name: &str) -> Option<&'a Session> {
-    sessions.iter().find(|s| s.name == name && same_dir(&s.repo, &project.repo))
+/// A session of this workspace by exact name.
+pub fn named<'a>(sessions: &'a [Session], workspace: &Workspace, name: &str) -> Option<&'a Session> {
+    sessions.iter().find(|s| s.name == name && !s.workspace.as_os_str().is_empty() && same_dir(&s.workspace, &workspace.dir))
 }
 
 /// Sessions the UI starts that are not tied to one workitem: `wi-new-<id>`.

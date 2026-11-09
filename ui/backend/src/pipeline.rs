@@ -1,14 +1,11 @@
-//! The board of a project: its stages in column order and what runs in each. Read from
-//! `<workitems dir>/pipeline.json`, or the bundled `workitem-pipeline/pipeline.json` when the
-//! project has none. `workitem-move` enforces the same file; this side only reads it.
-use std::{collections::{HashMap, HashSet}, fs, path::Path, time::Duration};
+//! The boards of a workspace: `<workspace>/boards/<name>.json`, each with its repo, its stages in
+//! column order and what runs in each. `workitem-move` enforces the same file; this side only
+//! reads it. The bundled `workitem-pipeline/pipeline.json` is the template for a new board.
+use std::{collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Project, workitem, AppState};
-
-/// The board of items without a `board:` key: `boards/default.json`, else `pipeline.json`, else the bundled file.
-pub const DEFAULT_BOARD: &str = "default";
+use crate::{config::Workspace, AppState};
 
 /// Handler value for the stage whose PR the backend polls (`review.rs`).
 pub const PR_REVIEW: &str = "builtin:pr-review";
@@ -144,8 +141,20 @@ fn valid_order(entry: &str) -> bool {
     matches!(entry.split_whitespace().collect::<Vec<_>>()[..], [field] | [field, "asc" | "desc"] if ORDER_FIELDS.contains(&field))
 }
 
+/// A board's `repo`: `~/` is the home folder.
+fn repo_path<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<PathBuf, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    Ok(match (text.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => Path::new(&home).join(rest),
+        _ => PathBuf::from(text),
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Pipeline {
+    /// The repo every item of the board belongs to (decision 45).
+    #[serde(deserialize_with = "repo_path")]
+    pub repo: PathBuf,
     pub entry: String,
     pub stages: Vec<Stage>,
     /// Scripts that run for the whole board on a timer, with every item of the board on stdin.
@@ -187,6 +196,9 @@ impl Pipeline {
         let reads_prs = pipeline.watch.iter().chain(pipeline.stages.iter().flat_map(|s| &s.watch)).any(|w| w.command == "pr-status");
         if !reads_prs && pipeline.stages.iter().any(|s| s.pr_status || s.watches_prs()) {
             pipeline.watch.push(legacy("pr-status", PR_STATUS_EVERY));
+        }
+        if !pipeline.repo.is_absolute() || !pipeline.repo.is_dir() {
+            return Err(format!("repo '{}' is not an absolute path to a directory", pipeline.repo.display()));
         }
         let names: HashSet<&str> = pipeline.stages.iter().map(|s| s.name.as_str()).collect();
         if names.contains("") {
@@ -238,7 +250,7 @@ impl Pipeline {
     }
 }
 
-/// What the board of one project looks like right now.
+/// What one board of a workspace looks like right now.
 #[derive(Clone, Serialize)]
 pub struct Resolved {
     /// The newest valid file. `None` only when none was ever valid.
@@ -249,33 +261,25 @@ pub struct Resolved {
 
 /// Board names become file names, so only plain ones are accepted.
 pub fn valid_board_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    crate::config::valid_name(name)
 }
 
-fn read(skills_dir: &Path, project: &Project, board: &str) -> Result<Pipeline, String> {
-    let dir = workitem::workitems_dir(&project.repo);
-    let path = if !valid_board_name(board) {
+fn read(workspace: &Workspace, board: &str) -> Result<Pipeline, String> {
+    if !valid_board_name(board) {
         return Err(format!("'{board}' is not a board name"));
-    } else if board == DEFAULT_BOARD {
-        // The project's own default board: `boards/default.json`, else `pipeline.json`, else the bundled one.
-        [dir.join("boards/default.json"), dir.join("pipeline.json")]
-            .into_iter()
-            .find(|own| own.is_file())
-            .unwrap_or_else(|| skills_dir.join("workitem-pipeline/pipeline.json"))
-    } else {
-        dir.join("boards").join(format!("{board}.json"))
-    };
+    }
+    let path = workspace.dir.join("boards").join(format!("{board}.json"));
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     Pipeline::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 impl AppState {
-    /// Reads a board of the project. When its file is invalid the last valid one stays in use, so
+    /// Reads a board of the workspace. When its file is invalid the last valid one stays in use, so
     /// a typo never stops the dispatcher or empties the board.
-    pub fn pipeline(&self, project: &Project, board: &str) -> Resolved {
-        let key = format!("{}/{board}", project.name);
+    pub fn pipeline(&self, workspace: &Workspace, board: &str) -> Resolved {
+        let key = format!("{}/{board}", workspace.name);
         let mut known = self.pipelines.lock().unwrap();
-        match read(&self.skills_dir, project, board) {
+        match read(workspace, board) {
             Ok(pipeline) => {
                 known.insert(key, pipeline.clone());
                 Resolved { pipeline: Some(pipeline), error: None }
@@ -287,24 +291,64 @@ impl AppState {
         }
     }
 
-    /// Boards of the project: `default` first, then one per `boards/<name>.json`, by name.
-    pub fn board_names(&self, project: &Project) -> Vec<String> {
-        let files = fs::read_dir(workitem::workitems_dir(&project.repo).join("boards")).into_iter().flatten().flatten();
+    /// Boards of the workspace, one per `boards/<name>.json`, by name.
+    pub fn board_names(&self, workspace: &Workspace) -> Vec<String> {
+        let files = fs::read_dir(workspace.dir.join("boards")).into_iter().flatten().flatten();
         let mut names: Vec<String> = files
             .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(".json").map(String::from))
-            .filter(|name| valid_board_name(name) && name != DEFAULT_BOARD)
+            .filter(|name| valid_board_name(name))
             .collect();
         names.sort();
-        names.insert(0, DEFAULT_BOARD.into());
         names
     }
+
+    /// The repo of `board`, from its last valid file.
+    pub fn repo_of(&self, workspace: &Workspace, board: &str) -> Result<PathBuf, String> {
+        self.pipeline(workspace, board).pipeline.map(|p| p.repo).ok_or_else(|| format!("board '{board}' has no valid file"))
+    }
+
+    /// The distinct repos of the workspace's boards, for sessions that are not tied to one board.
+    pub fn repos(&self, workspace: &Workspace) -> Vec<PathBuf> {
+        let mut repos: Vec<PathBuf> = self.board_names(workspace).iter().filter_map(|b| self.repo_of(workspace, b).ok()).collect();
+        repos.sort();
+        repos.dedup();
+        repos
+    }
+
+    /// Writes `boards/<name>.json` as a copy of the bundled board with `repo` set.
+    pub fn add_board(&self, workspace: &Workspace, name: &str, repo: &str) -> Result<(), String> {
+        if !valid_board_name(name) {
+            return Err("a board name uses letters, digits, - and _ only".into());
+        }
+        let repo = Path::new(repo.trim());
+        if !repo.is_absolute() || !repo.is_dir() {
+            return Err(format!("{} is not an existing absolute directory", repo.display()));
+        }
+        let repo = repo.canonicalize().map_err(|e| e.to_string())?;
+        let path = workspace.dir.join("boards").join(format!("{name}.json"));
+        if path.exists() {
+            return Err(format!("board '{name}' already exists"));
+        }
+        let template = fs::read_to_string(self.skills_dir.join("workitem-pipeline/pipeline.json")).map_err(|e| e.to_string())?;
+        let text = with_repo(&template, &repo)?;
+        Pipeline::parse(&text)?;
+        fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        fs::write(&path, text).map_err(|e| e.to_string())
+    }
+}
+
+/// The board file `template` with `"repo"` as its first key, keeping the rest of the text as it is.
+fn with_repo(template: &str, repo: &Path) -> Result<String, String> {
+    let rest = template.trim_start().strip_prefix('{').ok_or("the bundled board is not a JSON object")?;
+    let repo = serde_json::to_string(&repo.display().to_string()).map_err(|e| e.to_string())?;
+    Ok(format!("{{\n  \"repo\": {repo},{rest}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const BRIEF: &str = r#""brief_sections": []"#;
+    const BRIEF: &str = r#""repo": "/", "brief_sections": []"#;
 
     fn parse(stages: &str, entry: &str) -> Result<Pipeline, String> {
         Pipeline::parse(&format!(r#"{{ {BRIEF}, "entry": "{entry}", "stages": {stages} }}"#))
@@ -425,14 +469,33 @@ mod tests {
     }
 
     #[test]
-    fn the_bundled_file_is_valid() {
+    fn the_bundled_file_is_a_valid_template() {
         let text = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/workitem-pipeline/pipeline.json")).unwrap();
-        let pipeline = Pipeline::parse(&text).unwrap();
+        let pipeline = Pipeline::parse(&with_repo(&text, Path::new("/")).unwrap()).unwrap();
         assert_eq!(pipeline.entry, "backlog");
         assert_eq!(pipeline.stages.len(), 6);
         assert!(pipeline.stage("ready_for_development").unwrap().gate.is_some());
         assert!(pipeline.stage("in_review").unwrap().watches_prs());
         assert!(pipeline.stage("in_development").unwrap().develops());
         assert!(pipeline.watch.iter().any(|w| w.command == "pr-status" && !w.implicit), "the bundled board reads its PRs itself");
+    }
+
+    #[test]
+    fn a_board_needs_an_existing_absolute_repo_and_expands_the_home_folder() {
+        let with = |repo: &str| Pipeline::parse(&format!(r#"{{"repo": "{repo}", "brief_sections": [], "entry": "a", "stages": [{{"name":"a"}}]}}"#));
+        assert_eq!(with("/").unwrap().repo, Path::new("/"));
+        assert!(with("relative").unwrap_err().contains("repo"));
+        assert!(with("/no/such/dir").unwrap_err().contains("repo"));
+        assert!(Pipeline::parse(r#"{"brief_sections": [], "entry": "a", "stages": [{"name":"a"}]}"#).is_err(), "repo is required");
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(with("~/").unwrap().repo, Path::new(&home).join(""));
+    }
+
+    #[test]
+    fn a_new_board_is_the_template_with_its_repo_first() {
+        let template = "{\n  \"entry\": \"a\",\n  \"brief_sections\": [],\n  \"stages\": [{ \"name\": \"a\" }]\n}\n";
+        let text = with_repo(template, Path::new("/")).unwrap();
+        assert!(text.starts_with("{\n  \"repo\": \"/\",\n  \"entry\""), "{text}");
+        assert_eq!(Pipeline::parse(&text).unwrap().repo, Path::new("/"));
     }
 }

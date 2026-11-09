@@ -1,5 +1,5 @@
-//! Planning sessions (decision 36): a `claude` conversation about a project with no workitem and
-//! no worktree, in tmux session `wi-plan-<id>`. Its record `<workitems dir>/plans/<id>.md` is the
+//! Planning sessions (decisions 36, 49): a `claude` conversation about a workspace with no workitem
+//! and no worktree, in tmux session `wi-plan-<id>`. Its record `<workspace>/plans/<id>.md` is the
 //! source of truth (topic, summary, status, Claude session id, optional plan); tmux only tells
 //! whether it is live. The agent updates the record through `workitem-plan-note` and the hooks.
 use std::{
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::ApiError,
-    config::Project,
+    config::Workspace,
     launch, tmux,
     workitem::{self, frontmatter},
     AppState, Shared,
@@ -32,14 +32,14 @@ const TOPIC_MAX: usize = 160;
 
 #[derive(Serialize)]
 pub struct Plan {
-    pub project: String,
+    pub workspace: String,
     pub id: String,
     pub topic: String,
     pub summary: String,
     /// `working`, `waiting` or `ended`.
     pub status: String,
-    /// Directory name of the workitem made from this session, or empty.
-    pub workitem: String,
+    /// Directory names of the workitems made from this session.
+    pub workitems: Vec<String>,
     /// Epoch seconds.
     pub created: u64,
     /// A `## Plan` was saved.
@@ -60,13 +60,13 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn folder(repo: &Path) -> PathBuf {
-    workitem::workitems_dir(repo).join("plans")
+fn folder(workspace: &Path) -> PathBuf {
+    workspace.join("plans")
 }
 
 /// The record of plan `id`, if it exists.
-fn record(project: &Project, id: &str) -> Option<PathBuf> {
-    let path = folder(&project.repo).join(format!("{id}.md"));
+fn record(workspace: &Workspace, id: &str) -> Option<PathBuf> {
+    let path = folder(&workspace.dir).join(format!("{id}.md"));
     (valid_id(id) && path.is_file()).then_some(path)
 }
 
@@ -79,25 +79,26 @@ fn section(text: &str, name: &str) -> Option<String> {
     Some(body.trim().to_string())
 }
 
-fn parse(project: &Project, id: &str, text: &str, live: bool) -> Plan {
+fn parse(workspace: &Workspace, id: &str, text: &str, live: bool) -> Plan {
     let fields = frontmatter(text);
     let field = |key: &str| fields.get(key).cloned().unwrap_or_default();
     Plan {
-        project: project.name.clone(),
+        workspace: workspace.name.clone(),
         id: id.to_string(),
         topic: field("topic"),
         summary: field("summary"),
         status: if fields.get("status").is_some_and(|s| !s.is_empty()) { field("status") } else { "ended".into() },
-        workitem: field("workitem"),
+        // `workitem` is the single item of records written before plans could make several.
+        workitems: [field("workitems"), field("workitem")].join(",").split(',').map(str::trim).filter(|d| !d.is_empty()).map(String::from).collect(),
         created: field("created").parse().unwrap_or(0),
         has_plan: section(text, "Plan").is_some_and(|plan| !plan.is_empty()),
         live,
     }
 }
 
-/// The project's plans, newest first.
-fn list(project: &Project, live: &HashSet<String>) -> Vec<Plan> {
-    let Ok(entries) = fs::read_dir(folder(&project.repo)) else {
+/// The workspace's plans, newest first.
+fn list(workspace: &Workspace, live: &HashSet<String>) -> Vec<Plan> {
+    let Ok(entries) = fs::read_dir(folder(&workspace.dir)) else {
         return vec![];
     };
     let mut plans: Vec<Plan> = entries
@@ -106,18 +107,18 @@ fn list(project: &Project, live: &HashSet<String>) -> Vec<Plan> {
             let name = entry.file_name().to_str()?.to_string();
             let id = name.strip_suffix(".md").filter(|id| valid_id(id))?;
             let text = fs::read_to_string(entry.path()).ok()?;
-            Some(parse(project, id, &text, live.contains(&session_name(id))))
+            Some(parse(workspace, id, &text, live.contains(&session_name(id))))
         })
         .collect();
     plans.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)));
     plans
 }
 
-/// Live `wi-plan-*` session names of this project.
-fn live_sessions(sessions: &[tmux::Session], dead: &HashSet<String>, project: &Project) -> HashSet<String> {
+/// Live `wi-plan-*` session names of this workspace.
+fn live_sessions(sessions: &[tmux::Session], dead: &HashSet<String>, workspace: &Workspace) -> HashSet<String> {
     sessions
         .iter()
-        .filter(|s| is_session(&s.name) && !dead.contains(&s.name) && tmux::named(sessions, project, &s.name).is_some())
+        .filter(|s| is_session(&s.name) && !dead.contains(&s.name) && tmux::named(sessions, workspace, &s.name).is_some())
         .map(|s| s.name.clone())
         .collect()
 }
@@ -125,23 +126,23 @@ fn live_sessions(sessions: &[tmux::Session], dead: &HashSet<String>, project: &P
 /// Dispatcher housekeeping: a plan whose session exited or is gone is `ended`, and an exited
 /// session is killed. The caller holds `AppState::busy`, which `create` and `resume` also hold
 /// between writing `working` and starting the session.
-pub async fn reap(state: &AppState, project: &Project, sessions: &[tmux::Session], dead: &HashSet<String>) {
-    let live = live_sessions(sessions, dead, project);
-    for plan in list(project, &live) {
+pub async fn reap(state: &AppState, workspace: &Workspace, sessions: &[tmux::Session], dead: &HashSet<String>) {
+    let live = live_sessions(sessions, dead, workspace);
+    for plan in list(workspace, &live) {
         let name = session_name(&plan.id);
-        if tmux::named(sessions, project, &name).is_some() && dead.contains(&name) {
+        if tmux::named(sessions, workspace, &name).is_some() && dead.contains(&name) {
             tmux::kill(state.tmux_socket.as_deref(), &name).await;
         }
         if !plan.live && plan.status != "ended" {
-            if let Some(path) = record(project, &plan.id) {
+            if let Some(path) = record(workspace, &plan.id) {
                 let _ = workitem::set_fields(&path, &[("status", "ended")]);
             }
         }
     }
 }
 
-fn project_of(state: &AppState, name: &str) -> Result<Project> {
-    state.store.project(name).ok_or(ApiError::not_found("project"))
+fn workspace_of(state: &AppState, name: &str) -> Result<Workspace> {
+    state.store.workspace(name).ok_or(ApiError::not_found("workspace"))
 }
 
 fn internal(message: impl ToString) -> ApiError {
@@ -152,15 +153,15 @@ fn conflict(message: impl Into<String>) -> ApiError {
     ApiError(StatusCode::CONFLICT, message.into())
 }
 
-/// Plans of every configured project, newest first per project.
+/// Plans of every configured workspace, newest first per workspace.
 pub async fn list_plans(State(state): State<Shared>) -> Json<Vec<Plan>> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
     let plans = state
         .store
-        .projects()
+        .workspaces()
         .iter()
-        .flat_map(|project| list(project, &live_sessions(&sessions, &dead, project)))
+        .flat_map(|workspace| list(workspace, &live_sessions(&sessions, &dead, workspace)))
         .collect();
     Json(plans)
 }
@@ -175,15 +176,15 @@ pub struct Detail {
     text: Option<String>,
 }
 
-pub async fn plan(State(state): State<Shared>, UrlPath((project, id)): UrlPath<(String, String)>) -> Result<Json<Detail>> {
-    let project = project_of(&state, &project)?;
-    let path = record(&project, &id).ok_or(ApiError::not_found("plan"))?;
+pub async fn plan(State(state): State<Shared>, UrlPath((workspace, id)): UrlPath<(String, String)>) -> Result<Json<Detail>> {
+    let workspace = workspace_of(&state, &workspace)?;
+    let path = record(&workspace, &id).ok_or(ApiError::not_found("plan"))?;
     let text = fs::read_to_string(&path).map_err(internal)?;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    let live = live_sessions(&sessions, &dead, &project);
+    let live = live_sessions(&sessions, &dead, &workspace);
     Ok(Json(Detail {
-        plan: parse(&project, &id, &text, live.contains(&session_name(&id))),
+        plan: parse(&workspace, &id, &text, live.contains(&session_name(&id))),
         prompt: section(&text, "Prompt").unwrap_or_default(),
         text: section(&text, "Plan").filter(|plan| !plan.is_empty()),
     }))
@@ -226,30 +227,32 @@ fn now() -> u64 {
 }
 
 /// The first prompt: the planning rules, then what the human typed.
-fn prompt(state: &AppState, project: &Project, session: &str, input: &str) -> String {
+fn prompt(state: &AppState, workspace: &Workspace, session: &str, input: &str) -> String {
     let note = state.skills_dir.join("workitem-pipeline/bin/workitem-plan-note");
     format!(
-        "This is a planning session in repo {repo}, started from the Workload web UI. A human wants to think something through \
+        "This is a planning session in workspace {workspace}, started from the Workload web UI. A human wants to think something through \
 with you: explore the code, answer questions, compare options and work towards a plan. Ask when something is unclear.\n\
-You do not change code here. Edits outside {workitems} are refused; prefer read-only shell commands, others ask the human first.\n\
+The workspace has these boards, each with its repo; all of the repos are added to this session:\n{boards}\
+You do not change code here. Edits outside {workspace} are refused; prefer read-only shell commands, others ask the human first.\n\
 Keep the record of this session current, always with exactly these commands:\n\
 - Right after reading the request, and after each meaningful step: python3 {note} \"<one line: what this is about and where it stands>\"\n\
 - Only when the human wants a plan saved: python3 {note} --plan <<'PLAN' ... PLAN (the whole plan as markdown on stdin).\n\
-- Only when the human asks for a workitem: use the workitem-create skill with --repo {repo}, then python3 {note} --workitem <dir>.\n\
+- Only when the human asks for workitems: use the workitem-create skill with --workspace {workspace} --board <board>, once per board \
+the work touches (one item per repo, linked with depends_on as that skill describes), then python3 {note} --workitem <dir> for each item.\n\
 The status (working, waiting) is kept by hooks; do not set it. The tmux session is {session}.\n\
 The request, as typed in the web UI:\n\n{input}\n",
-        repo = project.repo.display(),
-        workitems = workitem::workitems_dir(&project.repo).display(),
+        workspace = workspace.dir.display(),
+        boards = launch::board_list(state, workspace),
         note = note.display(),
     )
 }
 
 pub async fn create(
     State(state): State<Shared>,
-    UrlPath(project): UrlPath<String>,
+    UrlPath(workspace): UrlPath<String>,
     Json(body): Json<NewPlan>,
 ) -> Result<(StatusCode, Json<Started>)> {
-    let project = project_of(&state, &project)?;
+    let workspace = workspace_of(&state, &workspace)?;
     let input = body.input.trim();
     if input.is_empty() {
         return Err(ApiError(StatusCode::BAD_REQUEST, "describe what you want to plan".into()));
@@ -257,21 +260,21 @@ pub async fn create(
     let id = hex(&rand::rng().random::<[u8; 3]>());
     let session = session_name(&id);
     let claude_session = uuid();
-    let folder = folder(&project.repo);
+    let folder = folder(&workspace.dir);
     let path = folder.join(format!("{id}.md"));
     let text = format!(
         "---\ntopic: {topic}\nsummary: \nstatus: working\nclaude_session: {claude_session}\ncreated: {created}\n---\n\n## Prompt\n\n{input}\n",
         topic = topic(input),
         created = now(),
     );
-    let prompt = prompt(&state, &project, &session, input);
+    let prompt = prompt(&state, &workspace, &session, input);
     let _busy = state.busy.lock().await;
     if path.exists() {
         return Err(conflict(format!("plan {id} already exists, try again")));
     }
     fs::create_dir_all(&folder).map_err(internal)?;
     fs::write(&path, text).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--session-id", &claude_session], Some(&prompt)).await {
+    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &["--session-id", &claude_session], Some(&prompt)).await {
         let _ = fs::remove_file(&path);
         return Err(conflict(e));
     }
@@ -279,9 +282,9 @@ pub async fn create(
 }
 
 /// Continues an ended plan's Claude conversation in a new `wi-plan-<id>` session.
-pub async fn resume(State(state): State<Shared>, UrlPath((project, id)): UrlPath<(String, String)>) -> Result<(StatusCode, Json<Started>)> {
-    let project = project_of(&state, &project)?;
-    let path = record(&project, &id).ok_or(ApiError::not_found("plan"))?;
+pub async fn resume(State(state): State<Shared>, UrlPath((workspace, id)): UrlPath<(String, String)>) -> Result<(StatusCode, Json<Started>)> {
+    let workspace = workspace_of(&state, &workspace)?;
+    let path = record(&workspace, &id).ok_or(ApiError::not_found("plan"))?;
     let text = fs::read_to_string(&path).map_err(internal)?;
     let claude_session = frontmatter(&text).get("claude_session").cloned().unwrap_or_default();
     if claude_session.is_empty() {
@@ -290,11 +293,11 @@ pub async fn resume(State(state): State<Shared>, UrlPath((project, id)): UrlPath
     let session = session_name(&id);
     let _busy = state.busy.lock().await;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    if tmux::named(&sessions, &project, &session).is_some() {
+    if tmux::named(&sessions, &workspace, &session).is_some() {
         return Err(conflict(format!("{session} is still running")));
     }
     workitem::set_fields(&path, &[("status", "working")]).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &project, &path, &["--resume", &claude_session], None).await {
+    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &["--resume", &claude_session], None).await {
         let _ = workitem::set_fields(&path, &[("status", "ended")]);
         return Err(conflict(e));
     }
@@ -302,13 +305,13 @@ pub async fn resume(State(state): State<Shared>, UrlPath((project, id)): UrlPath
 }
 
 /// Kills the plan's session, if any, and deletes its record.
-pub async fn delete(State(state): State<Shared>, UrlPath((project, id)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let project = project_of(&state, &project)?;
-    let path = record(&project, &id).ok_or(ApiError::not_found("plan"))?;
+pub async fn delete(State(state): State<Shared>, UrlPath((workspace, id)): UrlPath<(String, String)>) -> Result<StatusCode> {
+    let workspace = workspace_of(&state, &workspace)?;
+    let path = record(&workspace, &id).ok_or(ApiError::not_found("plan"))?;
     let session = session_name(&id);
     let _busy = state.busy.lock().await;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    if tmux::named(&sessions, &project, &session).is_some() {
+    if tmux::named(&sessions, &workspace, &session).is_some() {
         tmux::kill(state.tmux_socket.as_deref(), &session).await;
     }
     fs::remove_file(&path).map_err(internal)?;

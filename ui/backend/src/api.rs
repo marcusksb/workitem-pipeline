@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::{
     auth,
-    config::Project,
+    config::Workspace,
     git,
     launch,
     locate::{Found, Origin},
@@ -54,50 +54,57 @@ pub async fn me() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-pub async fn list_projects(State(state): State<Shared>) -> Json<Vec<Project>> {
-    Json(state.store.projects())
+pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<Workspace>> {
+    Json(state.store.workspaces())
 }
 
 #[derive(Deserialize)]
-pub struct NewProject {
+pub struct NewWorkspace {
+    name: String,
+}
+
+/// Creates an empty workspace folder (decision 44).
+pub async fn add_workspace(
+    State(state): State<Shared>,
+    Json(body): Json<NewWorkspace>,
+) -> Result<(StatusCode, Json<Workspace>), ApiError> {
+    let workspace = state.store.add_workspace(&body.name).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    Ok((StatusCode::CREATED, Json(workspace)))
+}
+
+#[derive(Deserialize)]
+pub struct NewBoard {
     name: String,
     repo: String,
 }
 
-pub async fn add_project(
+/// Adds a board for a repo: a copy of the bundled board with `repo` set (decision 45).
+pub async fn add_board(
     State(state): State<Shared>,
-    Json(body): Json<NewProject>,
-) -> Result<(StatusCode, Json<Project>), ApiError> {
-    let project = state
-        .store
-        .add_project(&body.name, &body.repo)
-        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
-    Ok((StatusCode::CREATED, Json(project)))
+    Path(workspace): Path<String>,
+    Json(body): Json<NewBoard>,
+) -> Result<StatusCode, ApiError> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    state.add_board(&workspace, body.name.trim(), &body.repo).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    state.wake.notify_one();
+    Ok(StatusCode::CREATED)
 }
 
 #[derive(Deserialize)]
-pub struct ProjectChange {
+pub struct WorkspaceChange {
     agent: String,
 }
 
-/// Sets the project's agent (decision 39); an empty one clears it.
-pub async fn update_project(
+/// Sets the workspace's agent (decision 39); an empty one clears it.
+pub async fn update_workspace(
     State(state): State<Shared>,
     Path(name): Path<String>,
-    Json(body): Json<ProjectChange>,
-) -> Result<Json<Project>, ApiError> {
+    Json(body): Json<WorkspaceChange>,
+) -> Result<Json<Workspace>, ApiError> {
     match state.store.set_agent(&name, &body.agent) {
-        Ok(Some(project)) => Ok(Json(project)),
-        Ok(None) => Err(ApiError::not_found("project")),
+        Ok(Some(workspace)) => Ok(Json(workspace)),
+        Ok(None) => Err(ApiError::not_found("workspace")),
         Err(e) => Err(ApiError(StatusCode::BAD_REQUEST, e)),
-    }
-}
-
-pub async fn remove_project(State(state): State<Shared>, Path(name): Path<String>) -> Result<StatusCode, ApiError> {
-    match state.store.remove_project(&name) {
-        Ok(true) => Ok(StatusCode::NO_CONTENT),
-        Ok(false) => Err(ApiError::not_found("project")),
-        Err(e) => Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }
 }
 
@@ -112,18 +119,18 @@ pub struct BoardInfo {
     resolved: Resolved,
 }
 
-/// The boards of every project, keyed by project name; `default` comes first.
+/// The boards of every workspace, keyed by workspace name, by board name.
 pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
-    let boards = |project: &Project| {
+    let boards = |workspace: &Workspace| {
         let info = |name: String| {
-            let resolved = state.pipeline(project, &name);
+            let resolved = state.pipeline(workspace, &name);
             let stages = resolved.pipeline.iter().flat_map(|p| &p.stages);
             let watched = stages.filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
-            BoardInfo { watched, paused: crate::watch::paused_stages(&state, project, &name), resolved, name }
+            BoardInfo { watched, paused: crate::watch::paused_stages(&state, workspace, &name), resolved, name }
         };
-        state.board_names(project).into_iter().map(info).collect()
+        state.board_names(workspace).into_iter().map(info).collect()
     };
-    Json(state.store.projects().iter().map(|project| (project.name.clone(), boards(project))).collect())
+    Json(state.store.workspaces().iter().map(|workspace| (workspace.name.clone(), boards(workspace))).collect())
 }
 
 /// What the board lets a human do with an item in its current stage, so the UI never needs to
@@ -156,33 +163,47 @@ pub struct Item {
     unpushed: Option<u32>,
 }
 
-async fn unpushed_of(project: &Project, item: &Workitem, worktrees: &[std::path::PathBuf]) -> Option<u32> {
-    git::unpushed(git::worktree_for(worktrees, &project.repo, &item.dir)?).await
+/// The worktrees git knows for each repo, keyed by repo.
+type Worktrees = HashMap<std::path::PathBuf, Vec<std::path::PathBuf>>;
+
+async fn unpushed_of(repo: Option<&std::path::Path>, item: &Workitem, worktrees: &Worktrees) -> Option<u32> {
+    let repo = repo?;
+    git::unpushed(git::worktree_for(worktrees.get(repo)?, repo, &item.dir)?).await
+}
+
+async fn worktrees_of(repos: impl IntoIterator<Item = std::path::PathBuf>) -> Worktrees {
+    let repos: Vec<_> = repos.into_iter().collect();
+    let lists = futures_util::future::join_all(repos.iter().map(|repo| git::worktrees(repo))).await;
+    repos.into_iter().zip(lists).collect()
 }
 
 pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let projects = state.store.projects();
-    let per_project = projects.iter().map(|project| {
+    let workspaces = state.store.workspaces();
+    let per_workspace = workspaces.iter().map(|workspace| {
         let (state, sessions) = (&state, &sessions);
         async move {
-            let worktrees = git::worktrees(&project.repo).await;
             let mut boards: HashMap<String, Option<Pipeline>> = HashMap::new();
-            let items = workitem::list(project).into_iter().map(|item| {
-                let board = boards.entry(item.board.clone()).or_insert_with(|| state.pipeline(project, &item.board).pipeline);
-                let session = tmux::session_for(sessions, project, &item.dir).is_some();
-                let roles = roles_of(board.as_ref(), &item);
-                (item, session, roles)
-            });
+            let items: Vec<_> = workitem::list(workspace)
+                .into_iter()
+                .map(|item| {
+                    let board = boards.entry(item.board.clone()).or_insert_with(|| state.pipeline(workspace, &item.board).pipeline);
+                    let session = tmux::session_for(sessions, workspace, &item.dir).is_some();
+                    let roles = roles_of(board.as_ref(), &item);
+                    let repo = board.as_ref().map(|b| b.repo.clone());
+                    (item, session, roles, repo)
+                })
+                .collect();
+            let worktrees = worktrees_of(boards.values().flatten().map(|b| b.repo.clone())).await;
             let worktrees = &worktrees;
-            futures_util::future::join_all(items.map(|(item, session, roles)| async move {
-                let unpushed = unpushed_of(project, &item, worktrees).await;
+            futures_util::future::join_all(items.into_iter().map(|(item, session, roles, repo)| async move {
+                let unpushed = unpushed_of(repo.as_deref(), &item, worktrees).await;
                 Item { item, session, roles, unpushed }
             }))
             .await
         }
     });
-    Json(futures_util::future::join_all(per_project).await.into_iter().flatten().collect())
+    Json(futures_util::future::join_all(per_workspace).await.into_iter().flatten().collect())
 }
 
 #[derive(Serialize)]
@@ -194,29 +215,32 @@ pub struct Detail {
 
 pub async fn item(
     State(state): State<Shared>,
-    Path((project, dir)): Path<(String, String)>,
+    Path((workspace, dir)): Path<(String, String)>,
 ) -> Result<Json<Detail>, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    let (item, content) = workitem::read(&project, &dir).ok_or(ApiError::not_found("workitem"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    let (item, content) = workitem::read(&workspace, &dir).ok_or(ApiError::not_found("workitem"))?;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let session = tmux::session_for(&sessions, &project, &dir).is_some();
-    let roles = roles_of(state.pipeline(&project, &item.board).pipeline.as_ref(), &item);
-    let unpushed = unpushed_of(&project, &item, &git::worktrees(&project.repo).await).await;
+    let session = tmux::session_for(&sessions, &workspace, &dir).is_some();
+    let board = state.pipeline(&workspace, &item.board).pipeline;
+    let roles = roles_of(board.as_ref(), &item);
+    let repo = board.map(|b| b.repo);
+    let unpushed = unpushed_of(repo.as_deref(), &item, &worktrees_of(repo.clone()).await).await;
     Ok(Json(Detail { item: Item { item, session, roles, unpushed }, content }))
 }
 
 /// The PR description and comments of a workitem, read live with `gh`.
 pub async fn pr_conversation(
     State(state): State<Shared>,
-    Path((project, dir)): Path<(String, String)>,
+    Path((workspace, dir)): Path<(String, String)>,
 ) -> Result<Json<Conversation>, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    let (item, _) = workitem::read(&project, &dir).ok_or(ApiError::not_found("workitem"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    let (item, _) = workitem::read(&workspace, &dir).ok_or(ApiError::not_found("workitem"))?;
     // `gh` takes a URL; anything else (or an option-looking value) is not a PR link.
     if !item.pr.starts_with("http") {
         return Err(ApiError::not_found("pull request"));
     }
-    let conversation = review::conversation(&state, &project.repo, &item.pr)
+    let repo = state.repo_of(&workspace, &item.board).map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    let conversation = review::conversation(&state, &repo, &item.pr)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
     Ok(Json(conversation))
@@ -224,22 +248,22 @@ pub async fn pr_conversation(
 
 #[derive(Serialize)]
 pub struct AgentSession {
-    project: String,
+    workspace: String,
     name: String,
 }
 
-/// Running `wi-new-*` sessions of the configured projects.
+/// Running `wi-new-*` sessions of the configured workspaces.
 pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let found = state
         .store
-        .projects()
+        .workspaces()
         .iter()
-        .flat_map(|project| {
+        .flat_map(|workspace| {
             sessions
                 .iter()
-                .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(&sessions, project, &s.name).is_some())
-                .map(|s| AgentSession { project: project.name.clone(), name: s.name.clone() })
+                .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(&sessions, workspace, &s.name).is_some())
+                .map(|s| AgentSession { workspace: workspace.name.clone(), name: s.name.clone() })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -266,16 +290,16 @@ pub struct Learnings {
     content: String,
 }
 
-/// The `learnings.md` of a board that exists in the project.
-fn learnings_path(state: &AppState, project: &str, board: &str) -> Result<std::path::PathBuf, ApiError> {
-    let project = state.store.project(project).ok_or(ApiError::not_found("project"))?;
-    state.pipeline(&project, board).pipeline.ok_or(ApiError::not_found("board"))?;
-    launch::learnings_file(&project.repo, board).ok_or(ApiError::not_found("board"))
+/// The `learnings.md` of a board that exists in the workspace.
+fn learnings_path(state: &AppState, workspace: &str, board: &str) -> Result<std::path::PathBuf, ApiError> {
+    let workspace = state.store.workspace(workspace).ok_or(ApiError::not_found("workspace"))?;
+    state.pipeline(&workspace, board).pipeline.ok_or(ApiError::not_found("board"))?;
+    launch::learnings_file(&workspace.dir, board).ok_or(ApiError::not_found("board"))
 }
 
 /// A board's learnings, which the review fixers write and code-writing sessions get.
-pub async fn learnings(State(state): State<Shared>, Path((project, board)): Path<(String, String)>) -> Result<Json<Learnings>, ApiError> {
-    let path = learnings_path(&state, &project, &board)?;
+pub async fn learnings(State(state): State<Shared>, Path((workspace, board)): Path<(String, String)>) -> Result<Json<Learnings>, ApiError> {
+    let path = learnings_path(&state, &workspace, &board)?;
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     Ok(Json(Learnings { path: path.display().to_string(), content }))
 }
@@ -291,10 +315,10 @@ pub struct LearningsEdit {
 /// added a rule meanwhile).
 pub async fn save_learnings(
     State(state): State<Shared>,
-    Path((project, board)): Path<(String, String)>,
+    Path((workspace, board)): Path<(String, String)>,
     Json(edit): Json<LearningsEdit>,
 ) -> Result<StatusCode, ApiError> {
-    let path = learnings_path(&state, &project, &board)?;
+    let path = learnings_path(&state, &workspace, &board)?;
     let internal = |e: std::io::Error| ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {e}", path.display()));
     if std::fs::read_to_string(&path).unwrap_or_default() != edit.base {
         return Err(ApiError(StatusCode::CONFLICT, "the learnings changed since you opened the editor; copy your text and reload".into()));
@@ -328,19 +352,19 @@ fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static s
 /// handler skill or inline prompt.
 pub async fn stage_source(
     State(state): State<Shared>,
-    Path((project, board, stage)): Path<(String, String, String)>,
+    Path((workspace, board, stage)): Path<(String, String, String)>,
 ) -> Result<Json<StageSource>, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    let pipeline = state.pipeline(&project, &board).pipeline.ok_or(ApiError::not_found("board"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    let pipeline = state.pipeline(&workspace, &board).pipeline.ok_or(ApiError::not_found("board"))?;
     let stage = pipeline.stage(&stage).ok_or(ApiError::not_found("stage"))?;
     let scripts = stage
         .watch
         .iter()
-        .map(|w| file_source(&w.command, crate::watch::resolve(&state, &project, &board, &w.command), w.implicit.then_some("implicit")))
+        .map(|w| file_source(&w.command, crate::watch::resolve(&state, &workspace, &board, &w.command), w.implicit.then_some("implicit")))
         .collect();
     let prose = match (stage.handler.as_deref(), stage.prompt.as_deref()) {
         (Some(handler), _) if handler.starts_with("builtin:") => None,
-        (Some(handler), _) => Some(file_source(handler, launch::handler_file(&state, &project, &board, handler), None)),
+        (Some(handler), _) => Some(file_source(handler, launch::handler_file(&state, &workspace, &board, handler), None)),
         (None, Some(prompt)) => Some(Source {
             name: "prompt".into(),
             path: None,
@@ -363,13 +387,13 @@ pub struct Pause {
 /// due meanwhile runs at once.
 pub async fn pause_stage(
     State(state): State<Shared>,
-    Path((project, board, stage)): Path<(String, String, String)>,
+    Path((workspace, board, stage)): Path<(String, String, String)>,
     Json(body): Json<Pause>,
 ) -> Result<StatusCode, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    let pipeline = state.pipeline(&project, &board).pipeline.ok_or(ApiError::not_found("board"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    let pipeline = state.pipeline(&workspace, &board).pipeline.ok_or(ApiError::not_found("board"))?;
     let stage = pipeline.stage(&stage).ok_or(ApiError::not_found("stage"))?;
-    crate::watch::set_paused(&state, &project, &board, &stage.name, body.paused).map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    crate::watch::set_paused(&state, &workspace, &board, &stage.name, body.paused).map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     if !body.paused {
         state.wake.notify_one();
     }

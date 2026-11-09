@@ -12,7 +12,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::{api::ApiError, config::Project, plans, tmux, workitem, AppState, Shared};
+use crate::{api::ApiError, config::Workspace, plans, tmux, workitem, AppState, Shared};
 
 #[derive(Deserialize)]
 pub struct Size {
@@ -101,37 +101,37 @@ fn spawn(socket: Option<&str>, session: &str, cols: u16, rows: u16) -> Result<Pt
 pub async fn attach_item(
     upgrade: WebSocketUpgrade,
     State(state): State<Shared>,
-    Path((project, dir)): Path<(String, String)>,
+    Path((workspace, dir)): Path<(String, String)>,
     Query(requested): Query<Size>,
 ) -> Result<Response, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
-    workitem::read(&project, &dir).ok_or(ApiError::not_found("workitem"))?;
-    attach(upgrade, &state, &project, &format!("wi-{dir}"), requested).await
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    workitem::read(&workspace, &dir).ok_or(ApiError::not_found("workitem"))?;
+    attach(upgrade, &state, &workspace, &format!("wi-{dir}"), requested).await
 }
 
 /// Browser terminal for a session without a workitem: `wi-new-<id>` or a plan's `wi-plan-<id>`.
 pub async fn attach_agent(
     upgrade: WebSocketUpgrade,
     State(state): State<Shared>,
-    Path((project, name)): Path<(String, String)>,
+    Path((workspace, name)): Path<(String, String)>,
     Query(requested): Query<Size>,
 ) -> Result<Response, ApiError> {
-    let project = state.store.project(&project).ok_or(ApiError::not_found("project"))?;
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     if !tmux::is_agent_session(&name) && !plans::is_session(&name) {
         return Err(ApiError::not_found("session"));
     }
-    attach(upgrade, &state, &project, &name, requested).await
+    attach(upgrade, &state, &workspace, &name, requested).await
 }
 
 async fn attach(
     upgrade: WebSocketUpgrade,
     state: &AppState,
-    project: &Project,
+    workspace: &Workspace,
     name: &str,
     requested: Size,
 ) -> Result<Response, ApiError> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let session = tmux::named(&sessions, project, name).ok_or(ApiError::not_found("session"))?;
+    let session = tmux::named(&sessions, workspace, name).ok_or(ApiError::not_found("session"))?;
     let pty = spawn(
         state.tmux_socket.as_deref(),
         &session.name,

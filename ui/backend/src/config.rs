@@ -11,12 +11,15 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 7373;
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Project {
+/// A folder in `<root>/workspaces/` (decision 44): its items, boards, skills, watch scripts and plans.
+#[derive(Clone, Serialize)]
+pub struct Workspace {
+    /// The folder name.
     pub name: String,
-    pub repo: PathBuf,
-    /// Executable that runs this project's sessions instead of `AppState::claude` (decision 39).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: PathBuf,
+    /// Executable that runs this workspace's sessions instead of `AppState::claude` (decision 39),
+    /// from `workspace.toml`.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
 }
 
@@ -25,8 +28,13 @@ struct Config {
     token: String,
     #[serde(default = "default_port")]
     port: u16,
-    #[serde(default)]
-    projects: Vec<Project>,
+}
+
+/// `<workspace>/workspace.toml`.
+#[derive(Default, Serialize, Deserialize)]
+struct Settings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -38,42 +46,62 @@ fn new_token() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Workspace and board names become folder and file names, so only plain ones are accepted.
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 pub struct Store {
-    path: PathBuf,
+    root: PathBuf,
     config: Mutex<Config>,
 }
 
 impl Store {
-    pub fn default_path() -> PathBuf {
-        if let Some(path) = std::env::var_os("WORKITEM_UI_CONFIG") {
+    /// `WORKITEM_UI_HOME`, else `~/.workitems-pipeline`.
+    pub fn default_root() -> PathBuf {
+        if let Some(path) = std::env::var_os("WORKITEM_UI_HOME") {
             return path.into();
         }
         let home = std::env::var_os("HOME").expect("HOME is not set");
-        Path::new(&home).join(".config/workitem-ui/config.toml")
+        Path::new(&home).join(".workitems-pipeline")
     }
 
-    /// Loads the config, creating it with a fresh token on first run.
-    pub fn open(path: PathBuf) -> io::Result<Store> {
-        let config = match fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?,
+    /// The config file of the UI before workspaces, whose token and port a first start takes over.
+    pub fn legacy_config() -> Option<PathBuf> {
+        Some(Path::new(&std::env::var_os("HOME")?).join(".config/workitem-ui/config.toml"))
+    }
+
+    /// Loads `<root>/config.toml`, creating it on first run with the token and port of `legacy`
+    /// when that file exists, else a fresh token.
+    pub fn open(root: PathBuf, legacy: Option<&Path>) -> io::Result<Store> {
+        let path = root.join("config.toml");
+        let read = |path: &Path| -> io::Result<Config> {
+            let text = fs::read_to_string(path)?;
+            toml::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))
+        };
+        let config = match read(&path) {
+            Ok(config) => config,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                let config = Config { token: new_token(), port: DEFAULT_PORT, projects: vec![] };
+                let config = legacy
+                    .and_then(|old| read(old).ok())
+                    .unwrap_or_else(|| Config { token: new_token(), port: DEFAULT_PORT });
                 save(&path, &config)?;
                 config
             }
             Err(e) => return Err(e),
         };
-        Ok(Store { path, config: Mutex::new(config) })
+        fs::create_dir_all(root.join("workspaces"))?;
+        Ok(Store { root, config: Mutex::new(config) })
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// The config file, which holds the token.
+    pub fn path(&self) -> PathBuf {
+        self.root.join("config.toml")
     }
 
-    /// A file next to the config file, for state the backend keeps.
+    /// A file in the root, for state the backend keeps.
     pub fn sibling(&self, file: &str) -> PathBuf {
-        self.path.with_file_name(file)
+        self.root.join(file)
     }
 
     pub fn token(&self) -> String {
@@ -84,77 +112,64 @@ impl Store {
         self.config.lock().unwrap().port
     }
 
-    pub fn projects(&self) -> Vec<Project> {
-        self.config.lock().unwrap().projects.clone()
+    fn load(&self, name: &str) -> Workspace {
+        let dir = self.root.join("workspaces").join(name);
+        let settings: Settings = fs::read_to_string(dir.join("workspace.toml")).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default();
+        Workspace { name: name.to_string(), dir, agent: settings.agent }
     }
 
-    pub fn project(&self, name: &str) -> Option<Project> {
-        self.projects().into_iter().find(|p| p.name == name)
+    /// Every folder in `workspaces/` with a plain name, by name.
+    pub fn workspaces(&self) -> Vec<Workspace> {
+        let entries = fs::read_dir(self.root.join("workspaces")).into_iter().flatten().flatten();
+        let mut names: Vec<String> = entries
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().to_str().map(String::from))
+            .filter(|name| valid_name(name))
+            .collect();
+        names.sort();
+        names.iter().map(|name| self.load(name)).collect()
+    }
+
+    pub fn workspace(&self, name: &str) -> Option<Workspace> {
+        (valid_name(name) && self.root.join("workspaces").join(name).is_dir()).then(|| self.load(name))
     }
 
     pub fn rotate_token(&self) -> io::Result<String> {
         let mut config = self.config.lock().unwrap();
         let mut next = config.clone();
         next.token = new_token();
-        save(&self.path, &next)?;
+        save(&self.path(), &next)?;
         *config = next;
         Ok(config.token.clone())
     }
 
-    pub fn add_project(&self, name: &str, repo: &str) -> Result<Project, String> {
+    /// Creates an empty workspace folder.
+    pub fn add_workspace(&self, name: &str) -> Result<Workspace, String> {
         let name = name.trim();
-        if name.is_empty() || name.chars().any(char::is_control) {
-            return Err("name must be non-empty text".into());
+        if !valid_name(name) {
+            return Err("a workspace name uses letters, digits, - and _ only".into());
         }
-        let repo = Path::new(repo.trim());
-        if !repo.is_absolute() || !repo.is_dir() {
-            return Err(format!("{} is not an existing absolute directory", repo.display()));
+        let dir = self.root.join("workspaces").join(name);
+        if dir.exists() {
+            return Err(format!("workspace '{name}' already exists"));
         }
-        let project = Project {
-            name: name.to_string(),
-            repo: repo.canonicalize().map_err(|e| e.to_string())?,
-            agent: None,
-        };
-        let mut config = self.config.lock().unwrap();
-        if config.projects.iter().any(|p| p.name == project.name) {
-            return Err(format!("project '{name}' already exists"));
-        }
-        let mut next = config.clone();
-        next.projects.push(project.clone());
-        save(&self.path, &next).map_err(|e| e.to_string())?;
-        *config = next;
-        Ok(project)
+        fs::create_dir_all(dir.join("boards")).map_err(|e| e.to_string())?;
+        Ok(self.load(name))
     }
 
-    /// Sets or, with an empty `agent`, clears the project's agent. `None` when there is no such project.
-    pub fn set_agent(&self, name: &str, agent: &str) -> Result<Option<Project>, String> {
+    /// Sets or, with an empty `agent`, clears the workspace's agent. `None` when there is no such workspace.
+    pub fn set_agent(&self, name: &str, agent: &str) -> Result<Option<Workspace>, String> {
         let agent = agent.trim();
         if !agent.is_empty() && resolve_executable(agent).is_none() {
             return Err(format!("'{agent}' is not one executable on PATH or an absolute path to one"));
         }
-        let mut config = self.config.lock().unwrap();
-        let mut next = config.clone();
-        let Some(project) = next.projects.iter_mut().find(|p| p.name == name) else {
+        let Some(workspace) = self.workspace(name) else {
             return Ok(None);
         };
-        project.agent = (!agent.is_empty()).then(|| agent.to_string());
-        let project = project.clone();
-        save(&self.path, &next).map_err(|e| e.to_string())?;
-        *config = next;
-        Ok(Some(project))
-    }
-
-    /// Only drops the project from the config; the repo is untouched.
-    pub fn remove_project(&self, name: &str) -> Result<bool, String> {
-        let mut config = self.config.lock().unwrap();
-        let mut next = config.clone();
-        next.projects.retain(|p| p.name != name);
-        if next.projects.len() == config.projects.len() {
-            return Ok(false);
-        }
-        save(&self.path, &next).map_err(|e| e.to_string())?;
-        *config = next;
-        Ok(true)
+        let settings = Settings { agent: (!agent.is_empty()).then(|| agent.to_string()) };
+        let text = toml::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+        fs::write(workspace.dir.join("workspace.toml"), text).map_err(|e| e.to_string())?;
+        Ok(Some(self.load(name)))
     }
 }
 
@@ -192,52 +207,62 @@ mod tests {
     #[test]
     fn creates_token_file_with_private_mode_and_reloads() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sub/config.toml");
-        let store = Store::open(path.clone()).unwrap();
-        let mode = fs::metadata(&path).unwrap().permissions();
+        let root = dir.path().join("sub");
+        let store = Store::open(root.clone(), None).unwrap();
+        let mode = fs::metadata(root.join("config.toml")).unwrap().permissions();
         assert_eq!(std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777, 0o600);
         assert_eq!(store.token().len(), 64);
-        assert_eq!(Store::open(path).unwrap().token(), store.token());
+        assert_eq!(Store::open(root, None).unwrap().token(), store.token());
     }
 
     #[test]
-    fn projects_persist_and_reject_bad_input() {
+    fn a_first_start_takes_over_the_old_token_and_port() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        let store = Store::open(path.clone()).unwrap();
-        let repo = dir.path().to_str().unwrap();
-        store.add_project("app", repo).unwrap();
-        assert!(store.add_project("app", repo).is_err());
-        assert!(store.add_project("", repo).is_err());
-        assert!(store.add_project("x", "relative/dir").is_err());
-        assert!(store.add_project("y", "/no/such/dir").is_err());
-        assert_eq!(Store::open(path.clone()).unwrap().projects().len(), 1);
-        assert!(store.remove_project("app").unwrap());
-        assert!(!store.remove_project("app").unwrap());
-        assert!(Store::open(path).unwrap().projects().is_empty());
+        let old = dir.path().join("old.toml");
+        fs::write(&old, "token = \"abc\"\nport = 7400\n\n[[projects]]\nname = \"x\"\nrepo = \"/x\"\n").unwrap();
+        let store = Store::open(dir.path().join("root"), Some(&old)).unwrap();
+        assert_eq!((store.token().as_str(), store.port()), ("abc", 7400));
+        assert!(!fs::read_to_string(store.path()).unwrap().contains("projects"));
+    }
+
+    #[test]
+    fn workspaces_are_the_folders_with_plain_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        store.add_workspace("web").unwrap();
+        store.add_workspace(" api ").unwrap();
+        assert!(store.add_workspace("api").is_err());
+        for bad in ["", "a b", "../x", "a/b"] {
+            assert!(store.add_workspace(bad).is_err(), "{bad}");
+        }
+        fs::create_dir_all(dir.path().join("workspaces/.hidden")).unwrap();
+        fs::write(dir.path().join("workspaces/file"), "").unwrap();
+        assert_eq!(store.workspaces().iter().map(|w| w.name.as_str()).collect::<Vec<_>>(), ["api", "web"]);
+        assert!(store.workspace("api").unwrap().dir.join("boards").is_dir());
+        assert!(store.workspace("nope").is_none());
+        assert!(store.workspace("..").is_none());
     }
 
     #[test]
     fn agent_persists_clears_and_rejects_non_executables() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        let store = Store::open(path.clone()).unwrap();
-        store.add_project("app", dir.path().to_str().unwrap()).unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        store.add_workspace("app").unwrap();
         assert_eq!(store.set_agent("app", " /bin/sh ").unwrap().unwrap().agent.as_deref(), Some("/bin/sh"));
-        assert_eq!(Store::open(path.clone()).unwrap().project("app").unwrap().agent.as_deref(), Some("/bin/sh"));
+        assert_eq!(Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap().agent.as_deref(), Some("/bin/sh"));
         assert!(store.set_agent("app", "sh").is_ok(), "a bare name is looked up on PATH");
         for bad in ["sh -c", "bin/sh", "/no/such/agent", "/etc/hosts"] {
             assert!(store.set_agent("app", bad).is_err(), "{bad}");
         }
         assert!(store.set_agent("nope", "sh").unwrap().is_none());
         assert_eq!(store.set_agent("app", "").unwrap().unwrap().agent, None);
-        assert!(!fs::read_to_string(path).unwrap().contains("agent"));
+        assert!(!fs::read_to_string(dir.path().join("workspaces/app/workspace.toml")).unwrap().contains("agent"));
     }
 
     #[test]
     fn rotate_changes_token() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("c.toml")).unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
         let before = store.token();
         assert_ne!(store.rotate_token().unwrap(), before);
     }
