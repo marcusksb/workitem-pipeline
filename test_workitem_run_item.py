@@ -35,9 +35,9 @@ class WorkitemRunItemTest(unittest.TestCase):
 
     def run_item(self, *args, project="my app"):
         env = {**os.environ, "WORKITEM_UI_PORT": str(self.server.server_port), "WORKITEM_UI_CONFIG": self.config}
-        env.pop("WORKITEM_PROJECT", None)
+        env.pop("WORKITEM_WORKSPACE", None)
         if project:
-            env["WORKITEM_PROJECT"] = project
+            env["WORKITEM_WORKSPACE"] = project
         return subprocess.run([SCRIPT, *args], env=env, capture_output=True, text=True)
 
     def test_posts_to_the_run_endpoint_with_the_token(self):

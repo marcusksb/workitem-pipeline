@@ -4,7 +4,7 @@
   workitem-plan-note "<one line summary>"    what the session is about right now
   workitem-plan-note --status working        also: waiting, ended
   workitem-plan-note --plan < plan.md        saves the plan as the record's ## Plan
-  workitem-plan-note --workitem <dir>        links the workitem made from this session
+  workitem-plan-note --workitem <dir>        adds a workitem made from this session to its list
 
 Options combine. The record is the file in WORKITEM_PLAN, which the backend sets when it starts
 a `wi-plan-*` session; the UI's Plans bar reads it.
@@ -64,7 +64,11 @@ def main(argv):
     if args.status:
         frontmatter = set_field(frontmatter, "status", args.status)
     if args.workitem:
-        frontmatter = set_field(frontmatter, "workitem", one_line(args.workitem))
+        listed = re.search(r"^workitems:(.*)$", frontmatter, re.M)
+        items = [i.strip() for i in (listed.group(1) if listed else "").split(",") if i.strip()]
+        if args.workitem.strip() not in items:
+            items.append(args.workitem.strip())
+        frontmatter = set_field(frontmatter, "workitems", ", ".join(items))
     if args.plan:
         plan = sys.stdin.read()
         if not plan.strip():

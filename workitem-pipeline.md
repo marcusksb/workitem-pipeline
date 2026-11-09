@@ -79,6 +79,10 @@ The stage list above is the bundled default. A project can replace it, and can h
 - **Handler prompts** get the workitem path, the current stage and the allowed `next` stages appended by the launcher.
 - **Handler files:** a handler name is looked up as `SKILL.md` in `.workitems/boards/<board>/skills/<name>/`, then `.workitems/skills/<name>/`, then the bundled `skills/<name>/`. The launcher reads it and passes the body as the prompt, so nothing depends on Claude's skill discovery. Projects override `workitem-start` (and `create`, `remove`) the same way.
 
+## Workspaces
+
+Items no longer live in a repo. A workspace (`~/.workitems-pipeline/workspaces/<name>/`) holds the items and the boards of several repos; each board names its repo, and every item names its board. `depends_on: <dir>, ...` links items across boards, and `"require": {"depends_on": "merged"}` holds an item back until those are merged. Decisions 44 to 53 in `workitem-pipeline-ui.md`; they supersede the file locations above.
+
 ## Components
 
 New: `pipeline.json`, `bin/workitem-move`, `workitem-triage`, `workitem-analyze`, `workitem-approve`, `workitem-run`, `workitem-remove` (manual, deletes a workitem after confirmation; leaves branch and PR alone).

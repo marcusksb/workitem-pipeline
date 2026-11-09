@@ -6,7 +6,7 @@ prompt). If the workitem is still `working`, marks it blocked; the UI
 alerts the browser. An agent that set `waiting: <what>` idles on purpose, so
 only a prompt that needs a human (permission, elicitation) blocks it. Does
 nothing outside such a session or when the agent set another status itself.
-Needs WORKITEM and WORKITEM_REPO in the env.
+Needs WORKITEM and WORKITEM_FILE in the env.
 In a planning session (WORKITEM_PLAN, the plan record) it sets the
 record's `status: working` to `waiting` instead.
 """
@@ -15,10 +15,6 @@ import os
 import re
 import sys
 from pathlib import Path
-
-sys.dont_write_bytecode = True
-from workitem_paths import workitems_dir
-
 
 def unquote(value):
     """An agent may quote a value (`"waiting: CI"`) because it holds a colon."""
@@ -43,8 +39,8 @@ if plan:
     replace_status(Path(plan), "status", lambda s: s == "working", "waiting")
     sys.exit(0)
 
-name, repo = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_REPO")
-if not name or not repo:
+name, file = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_FILE")
+if not name or not file:
     sys.exit(0)
 
 try:
@@ -52,6 +48,5 @@ try:
 except (ValueError, AttributeError):
     kind = ""
 needs_human = kind in ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
-path = workitems_dir(repo) / name / "workitem.md"
-replace_status(path, "agent_status", lambda s: s == "working" or (needs_human and s.startswith("waiting")),
+replace_status(Path(file), "agent_status", lambda s: s == "working" or (needs_human and s.startswith("waiting")),
                f"blocked: waiting for input, tmux attach -t wi-{name}")

@@ -15,7 +15,7 @@ class NotifyTest(unittest.TestCase):
         repo = Path(self.tmp.name).resolve()
         self.file = repo / ".workitems/T-1-a/workitem.md"
         self.file.parent.mkdir(parents=True)
-        self.env = {**os.environ, "WORKITEM": "T-1-a", "WORKITEM_REPO": str(repo)}
+        self.env = {**os.environ, "WORKITEM": "T-1-a", "WORKITEM_FILE": str(self.file)}
 
     def tearDown(self):
         self.tmp.cleanup()

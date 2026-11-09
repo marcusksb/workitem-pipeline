@@ -1,22 +1,170 @@
 #!/usr/bin/env python3
-"""Move the workitems of the current repo from .claude/workitems to .workitems.
+"""Move a repo's workitems into a workspace, as one board per board of the repo.
 
-  workitem-migrate
+  workitem-migrate --to-workspace <name> --board <board> <repo>
 
-Run it with no agent sessions open: their prompts name the old path.
-Exit code 1 means nothing was moved.
+Moves <repo>/.workitems (or <repo>/.claude/workitems) into
+~/.workitems-pipeline/workspaces/<name>/ (WORKITEM_UI_HOME overrides the root). The repo's default
+board becomes boards/<board>.json, its other boards boards/<board>-<their name>.json, each with
+`repo` set; items get `board:` rewritten to match. Repo-level skills/ and watch/ go into every new
+board's folder (a board's own files win), learnings.md into the default board's. The agent of the
+repo's project in the old ~/.config/workitem-ui/config.toml becomes the workspace's agent when it
+has none. Run it once per repo to put several repos in one workspace.
+
+Refuses before moving anything when a target exists, a board name is taken, or a wi-* session
+of the repo is running. Exit code 1 means nothing was moved.
 """
+import argparse
+import json
+import os
+import re
+import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
-root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-if root.returncode:
-    sys.exit("refused: not inside a git repo")
-old, new = Path(root.stdout.strip(), ".claude/workitems"), Path(root.stdout.strip(), ".workitems")
-if not old.is_dir():
-    sys.exit(f"refused: {old} does not exist")
-if new.exists():
-    sys.exit(f"refused: {new} already exists")
-old.rename(new)
-print(f"moved {old} -> {new}")
+BUNDLED = Path(__file__).resolve().parent.parent / "pipeline.json"
+NAME = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def fail(message):
+    sys.exit(f"refused: {message}")
+
+
+def home():
+    return Path(os.environ.get("WORKITEM_UI_HOME") or Path.home() / ".workitems-pipeline")
+
+
+def source_dir(repo):
+    new, old = repo / ".workitems", repo / ".claude/workitems"
+    return old if old.is_dir() and not new.exists() else new
+
+
+def running_sessions(repo):
+    command = ["tmux"]
+    if os.environ.get("WORKITEM_UI_TMUX_SOCKET"):
+        command += ["-L", os.environ["WORKITEM_UI_TMUX_SOCKET"]]
+    command += ["list-sessions", "-F", "#{session_name}\t#{@workitem_repo}\t#{session_path}"]
+    try:
+        listed = subprocess.run(command, capture_output=True, text=True).stdout
+    except FileNotFoundError:
+        return []
+    found = []
+    for line in listed.splitlines():
+        name, tagged, path = (line.split("\t") + ["", ""])[:3]
+        if name.startswith("wi-") and str(repo) in (tagged, path):
+            found.append(name)
+    return found
+
+
+def old_agent(repo):
+    config = Path.home() / ".config/workitem-ui/config.toml"
+    try:
+        projects = tomllib.loads(config.read_text()).get("projects", [])
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return next((p.get("agent") for p in projects if Path(p.get("repo", "")) == repo), None)
+
+
+def set_board(text, board):
+    """`text` with `board: <board>` in its frontmatter."""
+    if not text.startswith("---\n") or "\n---" not in text[3:]:
+        return text
+    end = text.index("\n---", 3)
+    head = re.sub(r"^board:.*\n?", "", text[:end], flags=re.M).rstrip("\n")
+    return f"{head}\nboard: {board}{text[end:]}"
+
+
+def merge_tree(source, target):
+    """Copies files of `source` into `target`, keeping the files `target` already has."""
+    for path in source.rglob("*"):
+        if path.is_file() and "__pycache__" not in path.parts:
+            dest = target / path.relative_to(source)
+            if not dest.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dest)
+
+
+def main(argv):
+    parser = argparse.ArgumentParser(prog="workitem-migrate")
+    parser.add_argument("--to-workspace", required=True)
+    parser.add_argument("--board", required=True)
+    parser.add_argument("repo")
+    args = parser.parse_args(argv)
+    if not NAME.fullmatch(args.to_workspace) or not NAME.fullmatch(args.board):
+        fail("workspace and board names may only use letters, digits, '-' and '_'")
+    repo = Path(args.repo).expanduser().resolve()
+    source = source_dir(repo)
+    if not source.is_dir():
+        fail(f"{repo} has no .workitems folder")
+    sessions = running_sessions(repo)
+    if sessions:
+        fail(f"end these sessions first: {', '.join(sessions)}")
+    workspace = home() / "workspaces" / args.to_workspace
+
+    # Boards: the default one, then the others, each to a new name.
+    default_file = next((f for f in (source / "boards/default.json", source / "pipeline.json") if f.is_file()), BUNDLED)
+    boards = {"default": (default_file, args.board)}
+    for file in sorted((source / "boards").glob("*.json")):
+        if file.stem != "default":
+            boards[file.stem] = (file, f"{args.board}-{file.stem}")
+    items = sorted(p.parent for p in source.glob("*/workitem.md"))
+    plans = sorted((source / "plans").glob("*.md"))
+
+    moves = [(item, workspace / item.name) for item in items] + [(plan, workspace / "plans" / plan.name) for plan in plans]
+    targets = [workspace / "boards" / f"{new}.json" for _, new in boards.values()]
+    taken = [t for t in targets + [dest for _, dest in moves] if t.exists()]
+    if taken:
+        fail("these already exist in the workspace: " + ", ".join(str(t) for t in taken))
+
+    (workspace / "plans").mkdir(parents=True, exist_ok=True)
+    (workspace / "boards").mkdir(exist_ok=True)
+    for old, (file, new) in boards.items():
+        config = json.loads(file.read_text())
+        config["repo"] = str(repo)
+        (workspace / "boards" / f"{new}.json").write_text(json.dumps(config, indent=2) + "\n")
+        folder = source / "boards" / old
+        if folder.is_dir():
+            merge_tree(folder, workspace / "boards" / new)
+            shutil.rmtree(folder)
+        for shared in ("skills", "watch"):
+            if (source / shared).is_dir():
+                merge_tree(source / shared, workspace / "boards" / new / shared)
+        if file.parent == source / "boards" or file == source / "pipeline.json":
+            file.unlink()
+    for shared in ("skills", "watch"):
+        if (source / shared).is_dir():
+            shutil.rmtree(source / shared)
+    if (source / "learnings.md").is_file():
+        dest = workspace / "boards" / args.board / "learnings.md"
+        if not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            (source / "learnings.md").rename(dest)
+
+    names = {old: new for old, (_, new) in boards.items()}
+    for item in items:
+        path = item / "workitem.md"
+        text = path.read_text()
+        board = re.search(r"^board:\s*(\S+)", text.split("\n---", 1)[0], re.M)
+        old = board.group(1) if board else "default"
+        path.write_text(set_board(text, names.get(old, old)))
+        item.rename(workspace / item.name)
+    for plan in plans:
+        plan.rename(workspace / "plans" / plan.name)
+
+    settings = workspace / "workspace.toml"
+    agent = old_agent(repo)
+    if agent and not settings.exists():
+        settings.write_text(f'agent = "{agent}"\n')
+
+    for empty in (source / "plans", source / "boards", source):
+        if empty.is_dir() and not any(empty.iterdir()):
+            empty.rmdir()
+    left = sorted(str(p.relative_to(source)) for p in source.iterdir()) if source.is_dir() else []
+    print(f"moved {len(items)} items, {len(plans)} plans and boards {', '.join(names.values())} to {workspace}")
+    if left:
+        print(f"left in {source}: {', '.join(left)}")
+
+
+main(sys.argv[1:])

@@ -13,10 +13,10 @@ class PlanTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = Path(self.tmp.name).resolve()
-        self.record = self.repo / ".workitems/plans/abc123.md"
+        self.record = self.repo / "plans/abc123.md"
         self.record.parent.mkdir(parents=True)
         self.record.write_text(RECORD)
-        self.env = {**os.environ, "WORKITEM_PLAN": str(self.record), "WORKITEM_REPO": str(self.repo)}
+        self.env = {**os.environ, "WORKITEM_PLAN": str(self.record), "WORKITEM_WORKSPACE": str(self.repo)}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -24,13 +24,18 @@ class PlanTest(unittest.TestCase):
     def run_script(self, name, *args, stdin="", env=None):
         return subprocess.run(["python3", str(BIN / name), *args], input=stdin, capture_output=True, text=True, env=env or self.env)
 
+    def test_note_adds_each_workitem_once(self):
+        for name in ("X-1-api", "X-2-ui", "X-1-api"):
+            self.run_script("workitem-plan-note", "--workitem", name)
+        self.assertIn("workitems: X-1-api, X-2-ui\n---\n", self.record.read_text())
+
     def test_note_sets_summary_status_and_workitem(self):
         result = self.run_script("workitem-plan-note", "Comparing\n two  options", "--status", "waiting", "--workitem", "X-1-a")
         self.assertEqual(result.returncode, 0, result.stderr)
         text = self.record.read_text()
         self.assertIn("summary: Comparing two options\n", text)
         self.assertIn("status: waiting\n", text)
-        self.assertIn("workitem: X-1-a\n---\n", text)
+        self.assertIn("workitems: X-1-a\n---\n", text)
         self.assertIn("## Prompt\n\nt\n", text)
 
     def test_note_caps_the_summary(self):
@@ -58,19 +63,19 @@ class PlanTest(unittest.TestCase):
         call = {"tool_name": tool, "cwd": str(self.repo), "tool_input": {"file_path": target}}
         return self.run_script("workitem-plan-guard", stdin=json.dumps(call), env=env)
 
-    def test_guard_allows_the_workitems_folder(self):
-        self.assertEqual(self.guard("Write", ".workitems/X-1/workitem.md").returncode, 0)
+    def test_guard_allows_the_workspace_folder(self):
+        self.assertEqual(self.guard("Write", "X-1/workitem.md").returncode, 0)
         self.assertEqual(self.guard("Edit", str(self.record)).returncode, 0)
 
     def test_guard_refuses_code_and_escapes(self):
-        for target in ("app.py", str(self.repo / "src/a.rs"), ".workitems/../app.py", "/etc/hosts"):
+        for target in (str(self.repo.parent / "app.py"), "../src/a.rs", "plans/../../app.py", "/etc/hosts"):
             result = self.guard("Edit", target)
             self.assertEqual(result.returncode, 2, target)
             self.assertIn("planning session", result.stderr)
 
     def test_guard_is_off_outside_a_planning_session(self):
         env = {k: v for k, v in self.env.items() if k != "WORKITEM_PLAN"}
-        self.assertEqual(self.guard("Edit", "app.py", env=env).returncode, 0)
+        self.assertEqual(self.guard("Edit", "/etc/hosts", env=env).returncode, 0)
 
     def test_notify_marks_a_working_plan_waiting_only(self):
         self.run_script("workitem-notify")

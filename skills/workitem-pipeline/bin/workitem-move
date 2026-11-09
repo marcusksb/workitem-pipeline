@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Move a workitem between pipeline stages, or list workitems.
+"""Move a workitem between pipeline stages.
 
   workitem-move <workitem-dir|workitem.md> <stage>
   workitem-move <workitem-dir|workitem.md> --board <name>   # put it on that board's entry stage
-  workitem-move --list [--auto]          # workitems of the current repo
 
-Rules come from the item's board: <workitems dir>/pipeline.json for `default` (or ../pipeline.json
-when the repo has none), <workitems dir>/boards/<name>.json for the others; `board: <name>` in the
-item's frontmatter picks one. Exit code 1 means the move was refused.
+The item is a path (absolute or relative to the current directory) inside a workspace folder.
+Rules come from the item's board, <workspace>/boards/<name>.json, which `board: <name>` in the
+item's frontmatter names. Exit code 1 means the move was refused.
 """
 import json
 import os
@@ -16,10 +15,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.dont_write_bytecode = True
-from workitem_paths import workitems_dir
-
-BUNDLED = Path(__file__).resolve().parent.parent / "pipeline.json"
 BOARD_NAME = re.compile(r"[A-Za-z0-9_-]+")
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 
@@ -48,28 +43,27 @@ def problems(config):
                 found.append(f"'{stage.get('name')}' has next '{target}', which is not a stage")
     if not isinstance(config.get("brief_sections"), list):
         found.append("'brief_sections' must be a list")
+    repo = config.get("repo")
+    if not isinstance(repo, str) or not Path(repo).expanduser().is_absolute() or not Path(repo).expanduser().is_dir():
+        found.append(f"'repo' ({repo!r}) must be an absolute path to a directory")
     return found
 
 
-def board_file(workitems_dir, name):
-    """The file of board `name` for the items in `workitems_dir`, or None when there is none."""
-    if not BOARD_NAME.fullmatch(name):
+def board_file(workspace, name):
+    """The file of board `name` in `workspace`, or None when there is none."""
+    if not BOARD_NAME.fullmatch(name or ""):
         return None
-    if name == "default":
-        # The project's own default board: boards/default.json, else pipeline.json, else the bundled one.
-        for local in (Path(workitems_dir, "boards", "default.json"), Path(workitems_dir, "pipeline.json")):
-            if local.is_file():
-                return local
-        return BUNDLED
-    own = Path(workitems_dir, "boards", f"{name}.json")
+    own = Path(workspace, "boards", f"{name}.json")
     return own if own.is_file() else None
 
 
-def load_board(workitems_dir, name="default"):
+def load_board(workspace, name):
     """The stage table of board `name`, with `entry` and `brief_sections`; refuses a missing or invalid file."""
-    source = board_file(workitems_dir, name)
+    if not name:
+        fail("the item has no 'board:'")
+    source = board_file(workspace, name)
     if not source:
-        fail(f"board '{name}' has no file in {workitems_dir}")
+        fail(f"board '{name}' has no file in {workspace}/boards")
     try:
         config = json.loads(source.read_text())
     except ValueError as error:
@@ -119,9 +113,9 @@ def brief_problems(text, sections):
     return problems
 
 
-def requirement_problem(key, wanted, fields, text, sections):
-    """Why `require: {key: wanted}` is not met, or None. `issue: linked` and `brief: complete`
-    are checks; anything else compares a frontmatter value."""
+def requirement_problem(key, wanted, fields, text, sections, path):
+    """Why `require: {key: wanted}` is not met, or None. `issue: linked`, `brief: complete` and
+    `depends_on: merged` are checks; anything else compares a frontmatter value."""
     if (key, wanted) == ("issue", "linked"):
         if fields.get("issue", "none").lower() in ("", "none"):
             return "a linked issue (issue: is 'none')"
@@ -129,24 +123,47 @@ def requirement_problem(key, wanted, fields, text, sections):
         missing = brief_problems(text, sections)
         if missing:
             return "a complete review brief: " + "; ".join(missing)
+    elif (key, wanted) == ("depends_on", "merged"):
+        waiting = [d for d in dependencies(fields) if not merged(path.parent.parent, d)]
+        if waiting:
+            return "these dependencies merged first: " + ", ".join(waiting)
     elif fields.get(key) != wanted:
         return f"{key}: {wanted} (is '{fields.get(key)}')"
     return None
 
 
+def dependencies(fields):
+    return [d.strip() for d in fields.get("depends_on", "").split(",") if d.strip()]
+
+
+def merged(workspace, name):
+    """Whether item `name` of the workspace is merged: its PR is, or it sits in its board's
+    `on_merge` stage. A dependency that is gone counts as merged (Clear removes done items)."""
+    path = Path(workspace, name, "workitem.md")
+    if "/" in name or not path.is_file():
+        return True
+    _, _, fields = read(path)
+    if fields.get("pr_state") == "merged":
+        return True
+    source = board_file(workspace, fields.get("board"))
+    if not source:
+        return False
+    try:
+        board = json.loads(source.read_text())
+        return any(s.get("on_merge") and fields.get("stage") == s.get("on_merge") for s in board.get("stages", []))
+    except (ValueError, AttributeError):
+        return False
+
+
 def resolve(target):
     path = Path(target)
-    if not path.exists() and "/" not in target:
-        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-        if root.returncode == 0:
-            path = workitems_dir(root.stdout.strip()) / target
     return path / "workitem.md" if path.is_dir() else path
 
 
 def move(target, stage):
     path = resolve(target)
     text, match, fields = read(path)
-    board = load_board(path.parent.parent, fields.get("board", "default"))
+    board = load_board(path.parent.parent, fields.get("board"))
     stages = board["stages"]
     current = fields.get("stage")
     if stage not in stages:
@@ -166,7 +183,7 @@ def holding(path, board, stage):
     for other in path.parent.parent.glob("*/workitem.md"):
         if other != path:
             _, _, fields = read(other)
-            count += fields.get("stage") == stage and fields.get("board", "default") == board
+            count += fields.get("stage") == stage and fields.get("board") == board
     return count
 
 def enter(path, text, match, fields, board, stage, extra=None):
@@ -174,11 +191,11 @@ def enter(path, text, match, fields, board, stage, extra=None):
     stages = board["stages"]
     limit = stages[stage].get("limit")
     if limit is not None and fields.get("stage") != stage:
-        name = fields.get("board", "default") if "board" not in (extra or {}) else extra["board"]
+        name = (extra or {}).get("board", fields.get("board"))
         if holding(path, name, stage) >= limit:
             fail(f"'{stage}' is full (limit {limit})")
     for key, wanted in stages[stage].get("require", {}).items():
-        unmet = requirement_problem(key, wanted, fields, text, board["brief_sections"])
+        unmet = requirement_problem(key, wanted, fields, text, board["brief_sections"], path)
         if unmet:
             fail(f"'{stage}' requires {unmet}")
     frontmatter = match.group(1)
@@ -209,31 +226,11 @@ def switch(target, name):
         fail(f"{path.parent.name} has a running session (wi-{path.parent.name}); end it first")
     board = load_board(path.parent.parent, name)
     enter(path, text, match, fields, board, board["entry"], {"board": name})
-    print(f"{path.parent.name}: board {fields.get('board', 'default')} -> {name}, stage {board['entry']}")
-
-
-def list_items(auto_only):
-    root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    if root.returncode:
-        fail("not inside a git repo")
-    directory = workitems_dir(root.stdout.strip())
-    boards = {}
-    for path in sorted(directory.glob("*/workitem.md")):
-        _, _, fields = read(path)
-        name = fields.get("board", "default")
-        if name not in boards:
-            boards[name] = load_board(directory, name)["stages"] if board_file(directory, name) else {}
-        stage = fields.get("stage")
-        config = boards[name].get(stage)
-        if not config or (auto_only and not (config.get("auto") and config.get("handler"))):
-            continue
-        print("\t".join([path.parent.name, stage, config.get("handler") or "-", fields.get("agent_status", "-")]))
+    print(f"{path.parent.name}: board {fields.get('board', '-')} -> {name}, stage {board['entry']}")
 
 
 args = sys.argv[1:]
-if args[:1] == ["--list"]:
-    list_items("--auto" in args)
-elif len(args) == 3 and args[1] == "--board":
+if len(args) == 3 and args[1] == "--board":
     switch(args[0], args[2])
 elif len(args) == 2:
     move(*args)

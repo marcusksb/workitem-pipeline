@@ -9,7 +9,7 @@ For column watcher scripts. It asks the running backend (workitem-ui) to start t
 the item's `wi-<dir>` tmux session. Exits 1 with the backend's reason when the item is not idle
 or the stage has no handler, and 2 when the handler itself cannot be used (not found), which the
 caller should treat as a reason to block the item. Policy (when to run, attempt caps) is the
-caller's. Uses WORKITEM_PROJECT, WORKITEM_UI_PORT and WORKITEM_UI_CONFIG, which the backend
+caller's. Uses WORKITEM_WORKSPACE, WORKITEM_UI_PORT and WORKITEM_UI_CONFIG, which the backend
 sets for a watcher.
 """
 import sys
