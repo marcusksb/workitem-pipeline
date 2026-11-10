@@ -96,6 +96,9 @@ pub struct Stage {
     /// Inline instructions, instead of a `handler` skill.
     #[serde(default, skip_serializing)]
     pub prompt: Option<String>,
+    /// `--model` of every session of an item in this stage (decision 60); the agent's default when absent.
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(default)]
     pub auto: bool,
     #[serde(default)]
@@ -253,6 +256,9 @@ impl Pipeline {
             if stage.handler.is_some() && stage.prompt.is_some() {
                 return Err(format!("'{}' has both a handler and a prompt", stage.name));
             }
+            if let Some(model) = stage.model.as_deref().filter(|m| !valid_model(m)) {
+                return Err(format!("'{}' has model '{model}', which is not a model name (letters, digits, . _ : - [ ], not starting with -)", stage.name));
+            }
             if stage.limit == Some(0) {
                 return Err(format!("'{}' has limit 0, which no item could enter", stage.name));
             }
@@ -279,6 +285,12 @@ pub struct Resolved {
     pub pipeline: Option<Pipeline>,
     /// Why the file on disk is not in use, if so.
     pub error: Option<String>,
+}
+
+/// A model name or alias for `--model`. It is one argv element, never seen by a shell; this
+/// only catches typos, and a leading `-` that would read as a flag.
+fn valid_model(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('-') && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-' | b'[' | b']'))
 }
 
 /// Board names become file names, so only plain ones are accepted.
@@ -383,6 +395,18 @@ mod tests {
         assert_eq!(pipeline.stage("a").unwrap().label.as_deref(), Some("A"));
         assert!(pipeline.stage("a").unwrap().auto);
         assert!(pipeline.stage("zzz").is_none());
+    }
+
+    #[test]
+    fn reads_the_stage_model_and_rejects_what_is_not_a_model_name() {
+        let with = |model: &str| parse(&format!(r#"[{{"name":"a","model":"{model}"}}]"#), "a");
+        for model in ["sonnet", "claude-opus-5-5", "sonnet[1m]", "us.anthropic.claude:v1_2"] {
+            assert_eq!(with(model).unwrap().stage("a").unwrap().model.as_deref(), Some(model));
+        }
+        assert!(parse(r#"[{"name":"a"}]"#, "a").unwrap().stage("a").unwrap().model.is_none());
+        for model in ["", "--opus", "son net", "opus;rm"] {
+            assert!(with(model).unwrap_err().contains("model"), "{model}");
+        }
     }
 
     #[test]
