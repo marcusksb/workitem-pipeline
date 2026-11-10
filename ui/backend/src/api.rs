@@ -346,6 +346,8 @@ pub async fn save_learnings(
 pub struct StageSource {
     scripts: Vec<Source>,
     prose: Option<Source>,
+    /// The stage's `model` (decision 60); `None` means the agent's default.
+    model: Option<String>,
 }
 
 fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static str>) -> Source {
@@ -387,7 +389,7 @@ pub async fn stage_source(
         }),
         (None, None) => None,
     };
-    Ok(Json(StageSource { scripts, prose }))
+    Ok(Json(StageSource { scripts, prose, model: stage.model.clone() }))
 }
 
 #[derive(Deserialize)]
