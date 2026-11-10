@@ -124,3 +124,16 @@ export type Learnings = { path: string; content: string };
 
 /** A file in a workitem folder; `path` is relative to it. */
 export type FileEntry = { path: string; size: number };
+
+/** One line of an agent session's transcript, as the backend parses it. A `result` belongs to the `tool` with its `id`;
+ * `prompt` is the launcher's prompt that opens the session. */
+export type ChatEntry =
+  | { kind: "prompt"; text: string }
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool"; id: string; name: string; summary: string }
+  | { kind: "result"; id: string; output: string; error: boolean; more: number };
+
+/** A poll of the Chat tab. Pass `next` and `transcript` back; `reset` means the entries replace the old ones.
+ * `screen` is the bottom of the pane while the session runs. */
+export type Chat = { transcript: string; next: number; reset: boolean; entries: ChatEntry[]; session: boolean; screen: string | null };

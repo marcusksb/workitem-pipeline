@@ -1,11 +1,13 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, planTerminal } from "./api";
-import { IconExternal, IconFileText, IconTerminalSquare, IconX } from "./icons";
+import { api, planChat, planTerminal } from "./api";
+import { Chat } from "./Chat";
+import { IconExternal, IconFileText, IconMessage, IconTerminalSquare, IconX } from "./icons";
 import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
 import { Plan } from "./types";
+import { usePhone } from "./usePhone";
 import { usePolling } from "./usePolling";
 
 type Props = {
@@ -23,8 +25,12 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
   const { data: detail, error: loadError, reload } = usePolling(() => api.plan(plan.workspace, plan.id), 3000, key, onUnauthorized);
   const live = detail ?? plan;
   const status = planStatus(live);
-  const [tab, setTab] = useState<"terminal" | "plan">();
-  const shown = tab === "plan" && !detail?.text ? "terminal" : tab ?? (live.live || !detail?.text ? "terminal" : "plan");
+  const [tab, setTab] = useState<"chat" | "terminal" | "plan">();
+  // No Terminal on the phone (decision 61); Chat stands in for it.
+  const phone = usePhone();
+  const session = phone ? "chat" : "terminal";
+  const asked = phone && tab === "terminal" ? "chat" : tab;
+  const shown = asked === "plan" && !detail?.text ? session : asked ?? (live.live || !detail?.text ? session : "plan");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const path = planTerminal(live);
@@ -77,17 +83,23 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
         </button>
       </header>
       <nav className="tabs">
-        <button className={shown === "terminal" ? "active" : ""} onClick={() => setTab("terminal")}>
-          <IconTerminalSquare />
-          Terminal
+        <button className={shown === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
+          <IconMessage />
+          Chat
         </button>
+        {!phone && (
+          <button className={shown === "terminal" ? "active" : ""} onClick={() => setTab("terminal")}>
+            <IconTerminalSquare />
+            Terminal
+          </button>
+        )}
         {detail?.text && (
           <button className={shown === "plan" ? "active" : ""} onClick={() => setTab("plan")}>
             <IconFileText />
             Plan
           </button>
         )}
-        {live.live && (
+        {live.live && !phone && (
           <a href={`/?terminal=${encodeURIComponent(path)}`} target="_blank" rel="noreferrer">
             <IconExternal />
             Pop out
@@ -98,6 +110,18 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
         </button>
       </nav>
       {(error ?? loadError) && <p className="error">{error ?? loadError}</p>}
+      {shown === "chat" && (
+        <>
+          {!live.live && (
+            <div className="action-bar">
+              <button onClick={() => void resume()} disabled={busy}>
+                Resume
+              </button>
+            </div>
+          )}
+          <Chat base={planChat(live)} blocked={status === "waiting"} onUnauthorized={onUnauthorized} />
+        </>
+      )}
       {shown === "terminal" &&
         (live.live ? (
           <Terminal key={path} path={path} />

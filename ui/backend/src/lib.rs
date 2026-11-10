@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod api;
 pub mod auth;
+pub mod chat;
 pub mod config;
 pub mod dispatch;
 pub mod files;
@@ -29,6 +30,9 @@ pub struct AppState {
     /// `tmux -L <socket>`; `None` uses the default server.
     pub tmux_socket: Option<String>,
     pub port: u16,
+    /// One more host the guard accepts besides `127.0.0.1` and `localhost` (`WORKITEM_UI_HOST`,
+    /// decision 56): a LAN address or a tailnet name, so a phone can connect.
+    pub extra_host: Option<String>,
     /// Holds `workitem-pipeline/{pipeline.json,hooks.json,bin/workitem-move}`.
     pub skills_dir: PathBuf,
     /// Executable that runs a handler session; `claude` unless a test swaps in a stub.
@@ -55,6 +59,7 @@ impl AppState {
         AppState {
             tmux_socket: env("WORKITEM_UI_TMUX_SOCKET"),
             port,
+            extra_host: env("WORKITEM_UI_HOST").filter(|h| !h.is_empty()),
             skills_dir: env("WORKITEM_UI_SKILLS").map(PathBuf::from).unwrap_or_else(|| home.join(".claude/skills")),
             claude: env("WORKITEM_UI_CLAUDE").unwrap_or_else(|| "claude".into()),
             gh: env("WORKITEM_UI_GH").unwrap_or_else(|| "gh".into()),
@@ -84,6 +89,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workitems", get(api::list_items))
         .route("/api/workitems/{workspace}/{dir}", get(api::item))
         .route("/api/workitems/{workspace}/{dir}/pr", get(api::pr_conversation))
+        .route("/api/workitems/{workspace}/{dir}/chat", get(chat::item_chat).post(chat::item_send))
+        .route("/api/workitems/{workspace}/{dir}/keys", post(chat::item_key))
         .route("/api/workitems/{workspace}/{dir}/files", get(files::list_files))
         .route("/api/workitems/{workspace}/{dir}/files/{*path}", get(files::file))
         .route("/api/workitems/{workspace}/{dir}/reveal", post(files::reveal))
@@ -106,6 +113,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans", get(plans::list_plans))
         .route("/api/plans/{workspace}/{id}", get(plans::plan).delete(plans::delete))
         .route("/api/plans/{workspace}/{id}/resume", post(plans::resume))
+        .route("/api/plans/{workspace}/{id}/chat", get(chat::plan_chat).post(chat::plan_send))
+        .route("/api/plans/{workspace}/{id}/keys", post(chat::plan_key))
         .route("/api/workspaces/{workspace}/plans", post(plans::create))
         .route("/ws/terminal/{workspace}/{dir}", get(terminal::attach_item))
         .route("/ws/session/{workspace}/{name}", get(terminal::attach_agent))

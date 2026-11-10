@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, itemTerminal } from "./api";
+import { api, itemChat, itemTerminal } from "./api";
+import { Chat } from "./Chat";
 import { isBlocked, isWaiting, KIND_ICONS, stageLabel, stripFrontmatter } from "./boardState";
 import { Item, Pipelines } from "./types";
 import { Actions } from "./Actions";
@@ -16,9 +17,10 @@ import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
 import { Tab } from "./url";
 import { Terminal } from "./Terminal";
+import { usePhone } from "./usePhone";
 import { usePolling } from "./usePolling";
 import { WaitingChip } from "./WaitingChip";
-import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
+import { IconExternal, IconInfo, IconMessage, IconFileText, IconFolder, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
 
 type Props = {
   item: Item;
@@ -46,7 +48,10 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   useEffect(() => setEditing(undefined), [key]);
   /** Set by the follow-ups chip; the brief scrolls to its `## Follow-ups` once it is shown. */
   const [jump, setJump] = useState(false);
-  const tab = routeTab ?? (live.session || isBlocked(live) ?"terminal" : "brief");
+  // The phone has no Terminal tab (decision 61): an attached phone would shrink the desktop's window.
+  const phone = usePhone();
+  const asked = phone && routeTab === "terminal" ? "chat" : routeTab;
+  const tab = asked ?? (live.session || isBlocked(live) ? (phone ? "chat" : "terminal") : "brief");
   useEffect(() => {
     if (!jump || tab !== "brief" || editing !== undefined || !detail) return;
     setJump(false);
@@ -121,15 +126,21 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             PR
           </button>
         )}
-        <button className={tab === "terminal" ? "active" : ""} onClick={() => onTab("terminal")}>
-          <IconTerminalSquare />
-          Terminal
+        <button className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>
+          <IconMessage />
+          Chat
         </button>
+        {!phone && (
+          <button className={tab === "terminal" ? "active" : ""} onClick={() => onTab("terminal")}>
+            <IconTerminalSquare />
+            Terminal
+          </button>
+        )}
         <button className={tab === "actions" ? "active" : ""} onClick={() => onTab("actions")}>
           <IconSliders />
           Actions
         </button>
-        {live.session && (
+        {live.session && !phone && (
           <a href={popOut} target="_blank" rel="noreferrer">
             <IconExternal />
             Pop out
@@ -184,6 +195,12 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
         <>
           <AgentActions item={live} onDone={() => void reload()} />
           {live.session && <Terminal path={path} />}
+        </>
+      )}
+      {tab === "chat" && (
+        <>
+          <AgentActions item={live} onDone={() => void reload()} />
+          <Chat base={itemChat(item.workspace, item.dir)} blocked={isBlocked(live)} onUnauthorized={onUnauthorized} />
         </>
       )}
       {tab === "actions" && (

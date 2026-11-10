@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""SessionStart hook for workitem and planning tmux sessions.
+
+Writes the `transcript_path` Claude Code hands every hook into the workitem
+(WORKITEM_FILE) or the plan record (WORKITEM_PLAN) as `transcript:`, so the UI's
+Chat tab can read the session. A new session (retry, fixer, resume) overwrites
+it. Does nothing outside such a session.
+"""
+import json
+import os
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from workitem_fields import set_fields  # noqa: E402
+
+target = os.environ.get("WORKITEM_PLAN") or os.environ.get("WORKITEM_FILE")
+if not target:
+    sys.exit(0)
+try:
+    path = json.load(sys.stdin).get("transcript_path", "")
+except (ValueError, AttributeError):
+    path = ""
+if path and "\n" not in path:
+    try:
+        set_fields(target, {"transcript": path})
+    except (OSError, RuntimeError):
+        pass

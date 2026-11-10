@@ -19,6 +19,12 @@ describe("readRoute", () => {
     expect(readRoute("#app/x-1/pr?board=my%20board")).toEqual({ item: { workspace: "app", dir: "x-1" }, tab: "pr", board: "my board" });
   });
 
+  it("reads the inbox and the chat tab, and writes them back", () => {
+    const route = { item: { workspace: "app", dir: "x-1" }, tab: "chat" as const, inbox: true };
+    expect(routeHash(route)).toBe("#app/x-1/chat?inbox=1");
+    expect(readRoute(routeHash(route))).toEqual(route);
+  });
+
   it("reads the workspace filter next to the board", () => {
     expect(readRoute("#?workspace=my%20proj")).toEqual({ workspace: "my proj" });
     expect(readRoute("#app/x-1?workspace=app&board=research")).toEqual({ item: { workspace: "app", dir: "x-1" }, workspace: "app", board: "research" });
