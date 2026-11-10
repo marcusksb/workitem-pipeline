@@ -1,4 +1,4 @@
-import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, StageSource } from "./types";
+import { AgentSession, Chat, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, StageSource } from "./types";
 
 type Launched = { session: string };
 
@@ -69,7 +69,19 @@ export const api = {
     request<{ id: string }>("POST", `/api/workspaces/${segment(workspace)}/plans`, { input }),
   resumePlan: (plan: Plan) => request<void>("POST", `${planUrl(plan.workspace, plan.id)}/resume`),
   deletePlan: (plan: Plan) => request<void>("DELETE", planUrl(plan.workspace, plan.id)),
+  chat: (base: string, after: number, from: string) =>
+    request<Chat>("GET", `${base}/chat?after=${after}&from=${encodeURIComponent(from)}`),
+  sendChat: (base: string, text: string) => request<void>("POST", `${base}/chat`, { text }),
+  pressKey: (base: string, key: ChatKey) => request<void>("POST", `${base}/keys`, { key }),
 };
+
+/** Keys the Chat tab's pending box can press; the backend refuses any other. */
+export const CHAT_KEYS = ["1", "2", "3", "Enter", "Escape", "Up", "Down"] as const;
+export type ChatKey = (typeof CHAT_KEYS)[number];
+
+/** API base of the session a Chat tab reads: a workitem's or a plan's. */
+export const itemChat = (workspace: string, dir: string) => `/api/workitems/${segment(workspace)}/${segment(dir)}`;
+export const planChat = (plan: Plan) => planUrl(plan.workspace, plan.id);
 
 /** URL of one file in a workitem folder; `path` is relative and `/`-separated. */
 export const fileUrl = (item: Item, path: string) => `${itemUrl(item)}/files/${path.split("/").map(segment).join("/")}`;

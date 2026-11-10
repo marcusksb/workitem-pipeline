@@ -124,6 +124,7 @@ fn plan_settings(state: &AppState) -> String {
         "hooks": {
             "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": format!("python3 {}", shell_quote(&script("workitem-plan-guard"))) }] }],
             "Notification": hook("workitem-notify", ""),
+            "SessionStart": hook("workitem-transcript", ""),
             "UserPromptSubmit": hook("workitem-plan-note", " --status working"),
         }
     })

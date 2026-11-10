@@ -10,6 +10,7 @@ import { ReviewStrip } from "./ReviewStrip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import { Item, Pipelines } from "./types";
+import { usePhone } from "./usePhone";
 import { useRun } from "./useRun";
 
 type Props = {
@@ -217,6 +218,11 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
       // the choice just is not remembered
     }
   };
+  // The phone shows one column at a time (decision 61), the first one with items unless another was picked.
+  const phone = usePhone();
+  const [picked, setPicked] = useState<string>();
+  const phoneStage = shown.find((c) => c.name === picked)?.name ?? shown.find((c) => (columns[c.name] ?? []).length > 0)?.name ?? shown[0]?.name;
+  const visible = phone ? shown.filter((c) => c.name === phoneStage) : shown;
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
   const [learning, setLearning] = useState(false);
   const card = (item: Item, depth = 0) => (
@@ -252,14 +258,23 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
             Learnings
           </button>
         )}
-        <div className="view-toggle" role="group" aria-label="View">
+        {!phone && <div className="view-toggle" role="group" aria-label="View">
           {(["board", "list"] as const).map((v) => (
             <button key={v} aria-pressed={view === v} className={view === v ? "active" : ""} onClick={() => chooseView(v)}>
               {v}
             </button>
           ))}
-        </div>
+        </div>}
       </nav>
+      {phone && shown.length > 0 && (
+        <select className="stage-picker" aria-label="Column" value={phoneStage} onChange={(event) => setPicked(event.target.value)}>
+          {shown.map(({ name, label }) => (
+            <option key={name} value={name}>
+              {label} ({(columns[name] ?? []).length})
+            </option>
+          ))}
+        </select>
+      )}
       {learning && workspaces.length === 1 && active && (
         <Learnings workspace={workspaces[0]} board={active} label={boardLabel(pipelines, workspaces[0], active)} onClose={() => setLearning(false)} />
       )}
@@ -268,8 +283,8 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
           {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}
         </p>
       ))}
-      <div className={`board${view === "list" ? " list" : ""}`}>
-        {shown.map(({ name, label, final }) => {
+      <div className={`board${view === "list" || phone ? " list" : ""}`}>
+        {visible.map(({ name, label, final }) => {
           const inColumn = columns[name] ?? [];
           const pause = pauseState(pipelines, workspaces, active, name);
           return (

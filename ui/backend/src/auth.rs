@@ -41,7 +41,8 @@ pub async fn guard(State(state): State<Shared>, request: Request, next: Next) ->
     let headers = request.headers();
     let port = state.port;
     let host = header_str(headers, header::HOST).unwrap_or_default();
-    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+    let allowed = ["127.0.0.1", "localhost"].into_iter().chain(state.extra_host.as_deref());
+    if !allowed.into_iter().any(|name| host == format!("{name}:{port}")) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let path = request.uri().path();
