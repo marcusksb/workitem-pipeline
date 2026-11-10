@@ -7,7 +7,7 @@
     "predev": "npm --prefix frontend run build",
     "dev": "concurrently -k -n fe,be -c cyan,yellow \"npm --prefix frontend run build:watch\" \"cargo watch -q -C backend -x run\"",
     "build": "npm --prefix frontend run build && cargo build --release --manifest-path backend/Cargo.toml",
-    "test": "cargo test --manifest-path backend/Cargo.toml && npm --prefix frontend test"
+    "test": "cargo test --manifest-path backend/Cargo.toml && npm --prefix frontend test && node --test ../skills/workitem-pipeline/agents/glue.test.mjs"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

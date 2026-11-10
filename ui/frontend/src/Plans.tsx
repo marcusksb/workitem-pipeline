@@ -145,7 +145,7 @@ function NewPlan({ workspaces, onClose, onStarted }: { workspaces: string[]; onC
         <Field label="What do you want to plan?">
           <Textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="The first line becomes the topic" rows={5} required autoFocus />
         </Field>
-        <Muted>Runs Claude in the repo root. It can read everything and create workitems, but cannot change code.</Muted>
+        <Muted>Runs the workspace's agent in the repo root. It can read everything and create workitems, but cannot change code.</Muted>
         <Button type="submit" variant="primary" disabled={busy}>
           Start
         </Button>

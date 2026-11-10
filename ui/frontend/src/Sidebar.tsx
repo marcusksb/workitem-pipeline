@@ -7,7 +7,7 @@ import { blockedByBoard, boardColors, boardLabel, boardNames, itemsByBoard } fro
 import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
-import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
+import { AddBoardDialog, AddWorkspaceDialog, agentLabel, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
 
 /** A full-width row of the sidebar; only its icon in the rail. */
 export const navItem =
@@ -237,7 +237,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           <Button
             variant="ghost"
             className={cn(navItem, "gap-2", current.account_error && "text-destructive")}
-            title={current.account_error ? `Stopped: ${current.account_error}` : `Agent: ${current.agent || "default"} · Issues: ${trackerName(current.issue_tracker)}`}
+            title={current.account_error ? `Stopped: ${current.account_error}` : `Agent: ${current.agent ? agentLabel(current.agent) : "default"} · Issues: ${trackerName(current.issue_tracker)}`}
             onClick={() => setOpen("settings")}
           >
             <IconSliders />
