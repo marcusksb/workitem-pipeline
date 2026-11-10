@@ -43,6 +43,11 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
           {workspaces.map((name) => <option key={name}>{name}</option>)}
         </select>
       )}
+      {sources && (
+        <p className="stage-model">
+          Model: {sources.model ? <code>{sources.model}</code> : <span className="muted">agent default</span>}
+        </p>
+      )}
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={shown === "prose"} className={shown === "prose" ? "active" : ""} disabled={!hasProse} onClick={() => setTab("prose")}>
           Skill / prompt

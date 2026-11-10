@@ -117,7 +117,8 @@ export type Source = {
   error: string | null;
 };
 
-export type StageSource = { scripts: Source[]; prose: Source | null };
+/** `model`: the `--model` of the stage's item sessions; `null` means the agent's default. */
+export type StageSource = { scripts: Source[]; prose: Source | null; model: string | null };
 
 /** A workspace's `learnings.md`; `content` is empty while the file does not exist. */
 export type Learnings = { path: string; content: string };

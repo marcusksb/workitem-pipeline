@@ -1619,7 +1619,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
         workitems.join("boards/research.json"),
         board(
             &w,
-            r#"[{"name":"qa","handler":"my-qa","auto":true},
+            r#"[{"name":"qa","handler":"my-qa","auto":true,"model":"sonnet"},
                 {"name":"inline","prompt":"Do the thing."},
                 {"name":"pr","handler":"builtin:pr-review","auto":true,"next":["gate"],"on_merge":"gate"},
                 {"name":"gate"},
@@ -1636,6 +1636,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     };
 
     let qa = source("qa").await;
+    assert_eq!(qa["model"], "sonnet");
     assert_eq!(qa["prose"]["origin"], "board");
     assert!(qa["prose"]["content"].as_str().unwrap().contains("BOARD QA"));
     assert!(qa["prose"]["path"].as_str().unwrap().ends_with("boards/research/skills/my-qa/SKILL.md"));
@@ -1648,6 +1649,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     assert_eq!(inline["prose"]["content"], "Do the thing.");
     assert_eq!(inline["prose"]["note"], "inline in pipeline.json");
     assert!(inline["scripts"].as_array().unwrap().is_empty());
+    assert!(inline["model"].is_null(), "no model: the agent's default");
 
     let pr = source("pr").await;
     assert!(pr["prose"].is_null(), "a builtin handler has no skill");

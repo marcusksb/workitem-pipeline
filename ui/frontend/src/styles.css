@@ -425,6 +425,8 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 }
 
 .dialog:has(.source) { width: min(760px, 100%); }
+.stage-model { margin: 0 0 8px; font-size: 13px; }
+.stage-model .muted { color: var(--muted); }
 .source-path { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
 .source-path code { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .source pre { margin: 0; padding: 10px; max-height: 55vh; overflow: auto; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; white-space: pre; }
