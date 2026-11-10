@@ -1,8 +1,7 @@
-import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
 import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
 import { QUIPS, quipFor } from "./quips";
-import { Item, Pipelines } from "./types";
+import { Item } from "./types";
 
 /** Toasts on screen at once; older ones wait behind "+N more". */
 const SHOWN = 4;
@@ -11,27 +10,22 @@ const BURST = 4;
 
 type Toast = { id: number; events: ActivityEvent[]; quip: string; sticky: boolean; leaving: boolean };
 
-const GOOD: ActivityKind[] = ["done", "approved", "ci_green", "merged"];
-const BAD: ActivityKind[] = ["ci_red", "blocked", "conflict", "changes_requested", "closed"];
-const tone = (kind: ActivityKind) => (GOOD.includes(kind) ? "tone-good" : BAD.includes(kind) ? "tone-bad" : "");
+const tone = (kind: ActivityKind) => (kind === "approved" ? "tone-good" : "tone-bad");
 
 /**
- * A toast for each change between two polls (see `activityEvents`), top right below the header, newest on top, with confetti when an
- * item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
+ * A toast for each approved PR or newly blocked item between two polls (see `activityEvents`), top right below the header,
+ * newest on top. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  */
-export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
+export function ActivityToasts({ items, onOpen }: { items: Item[] | undefined; onOpen: (item: Item) => void }) {
   const before = useRef<Item[]>(undefined);
   const nextId = useRef(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   useEffect(() => {
     if (!items) return;
-    const events = activityEvents(before.current, items, pipelines);
+    const events = activityEvents(before.current, items);
     before.current = items;
     if (events.length === 0) return;
-    if (events.some((e) => e.kind === "done")) {
-      void confetti({ particleCount: 160, spread: 100, startVelocity: 60, origin: { x: 0.5, y: 1 }, disableForReducedMotion: true });
-    }
     const groups = events.length > BURST ? [events] : events.map((e) => [e]);
     const fresh = groups.map((group) => ({
       id: nextId.current++,
@@ -41,7 +35,7 @@ export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | u
       leaving: false,
     }));
     setToasts((shown) => [...shown, ...fresh]);
-  }, [items, pipelines]);
+  }, [items]);
 
   const dismiss = (id: number) => setToasts((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
   const ended = (id: number) => (e: AnimationEvent) => {
@@ -68,7 +62,7 @@ export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | u
                   {single ? QUIPS[first.kind].icon : "🌪️"}
                 </span>
                 {single ? (
-                  <ToastBody event={first} quip={toast.quip} onOpen={first.kind === "removed" ? undefined : () => open(toast, first.item)} />
+                  <ToastBody event={first} quip={toast.quip} onOpen={() => open(toast, first.item)} />
                 ) : (
                   <div className="toast-body">
                     <span className="toast-text">{toast.events.length} things happened</span>
@@ -76,7 +70,7 @@ export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | u
                     <ul className="toast-list">
                       {toast.events.map((event, i) => (
                         <li key={i}>
-                          <button type="button" disabled={event.kind === "removed"} onClick={() => open(toast, event.item)}>
+                          <button type="button" onClick={() => open(toast, event.item)}>
                             {QUIPS[event.kind].icon} {event.text} · {event.item.title}
                           </button>
                         </li>
