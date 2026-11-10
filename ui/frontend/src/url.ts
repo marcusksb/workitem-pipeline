@@ -1,11 +1,11 @@
 /** Hash routes: `#<workspace>/<dir>[/<tab>]` for the detail panel, `?workspace=<name>&board=<name>` for the workspace and the board
- * shown, `?plan=<workspace>/<id>` for an open planning session (instead of an item). `workspace=` is left out when the item or
+ * shown, `?plan=<workspace>/<id>` for an open planning session (instead of an item), `?inbox=1` for the inbox in place of the board. `workspace=` is left out when the item or
  * plan already names it. */
 
-export type Tab = "brief" | "info" | "files" | "pr" | "terminal" | "actions";
-export type Route = { item?: { workspace: string; dir: string }; tab?: Tab; workspace?: string; board?: string; plan?: { workspace: string; id: string } };
+export type Tab = "brief" | "info" | "files" | "pr" | "chat" | "terminal" | "actions";
+export type Route = { item?: { workspace: string; dir: string }; tab?: Tab; workspace?: string; board?: string; plan?: { workspace: string; id: string }; inbox?: boolean };
 
-const TABS: Tab[] = ["brief", "info", "files", "pr", "terminal", "actions"];
+const TABS: Tab[] = ["brief", "info", "files", "pr", "chat", "terminal", "actions"];
 
 /** Parses the location hash into a route; unknown or incomplete paths yield an empty route. */
 export function readRoute(hash: string = location.hash): Route {
@@ -16,6 +16,7 @@ export function readRoute(hash: string = location.hash): Route {
   if (workspace) route.workspace = workspace;
   const board = params.get("board");
   if (board) route.board = board;
+  if (params.get("inbox") === "1") route.inbox = true;
   const plan = params.get("plan");
   const slash = plan?.lastIndexOf("/") ?? -1;
   if (plan && slash > 0 && slash < plan.length - 1) route.plan = { workspace: plan.slice(0, slash), id: plan.slice(slash + 1) };
@@ -38,6 +39,7 @@ export function routeHash(route: Route): string {
   const params = [
     ...(route.workspace && !implied ? [`workspace=${encodeURIComponent(route.workspace)}`] : []),
     ...(route.board ? [`board=${encodeURIComponent(route.board)}`] : []),
+    ...(route.inbox ? ["inbox=1"] : []),
     ...(route.plan ? [`plan=${encodeURIComponent(`${route.plan.workspace}/${route.plan.id}`)}`] : []),
   ];
   const query = params.length ? `?${params.join("&")}` : "";

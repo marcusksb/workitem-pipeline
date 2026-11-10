@@ -1,5 +1,5 @@
 //! Runs the real router against a real tmux server on an isolated socket.
-use std::{future::IntoFuture, sync::Arc, time::Duration};
+use std::{future::IntoFuture, io::Write, sync::Arc, time::Duration};
 
 use axum::{body::Body, http::{header, Request, StatusCode}};
 use futures_util::{SinkExt, StreamExt};
@@ -144,4 +144,71 @@ async fn terminal_bridges_input_and_detaches_without_killing_session() {
     socket.close(None).await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(f.tmux.has("wi-T-1"), "closing the browser must not kill the agent session");
+}
+
+async fn post_json(f: &Fixture, uri: &str, json: &str) -> StatusCode {
+    let request = Request::post(uri)
+        .header(header::HOST, format!("127.0.0.1:{}", f.state.port))
+        .header(header::COOKIE, format!("wi_session={}", f.token))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json.to_string()))
+        .unwrap();
+    router(f.state.clone()).oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn chat_reads_the_transcript_and_types_into_the_session() {
+    let (f, _listener) = fixture().await;
+    let host = format!("127.0.0.1:{}", f.state.port);
+    let cookie = format!("wi_session={}", f.token);
+    let transcript = f._dir.path().join("session.jsonl");
+    let line = |role: &str, text: &str| format!("{}\n", serde_json::json!({ "type": role, "message": { "content": [{ "type": "text", "text": text }] } }));
+    std::fs::write(&transcript, line("user", "launch prompt") + &line("assistant", "Which option?")).unwrap();
+    let file = f.state.store.workspace("app").unwrap().dir.join("T-1/workitem.md");
+    let text = std::fs::read_to_string(&file).unwrap().replacen("---\nbody", &format!("transcript: {}\n---\nbody", transcript.display()), 1);
+    std::fs::write(&file, text).unwrap();
+
+    let (status, body) = get(&f, "/api/workitems/app/T-1/chat", &host, Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    let chat: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(chat["entries"], serde_json::json!([{ "kind": "prompt", "text": "launch prompt" }, { "kind": "assistant", "text": "Which option?" }]));
+    assert_eq!((chat["session"].as_bool(), chat["reset"].as_bool()), (Some(true), Some(true)));
+
+    // The cursor returns only what was appended.
+    std::fs::OpenOptions::new().append(true).open(&transcript).unwrap().write_all(line("user", "B").as_bytes()).unwrap();
+    let uri = format!("/api/workitems/app/T-1/chat?after={}&from={}", chat["next"], transcript.display());
+    let (_, body) = get(&f, &uri, &host, Some(&cookie)).await;
+    let chat: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((chat["entries"].clone(), chat["reset"].as_bool()), (serde_json::json!([{ "kind": "user", "text": "B" }]), Some(false)));
+
+    // `cat` in the pane echoes what is typed.
+    assert_eq!(post_json(&f, "/api/workitems/app/T-1/chat", r#"{"text":"first line\nsecond line"}"#).await, StatusCode::NO_CONTENT);
+    assert_eq!(post_json(&f, "/api/workitems/app/T-1/keys", r#"{"key":"1"}"#).await, StatusCode::NO_CONTENT);
+    assert_eq!(post_json(&f, "/api/workitems/app/T-1/keys", r#"{"key":"C-c"}"#).await, StatusCode::BAD_REQUEST);
+    let mut screen = String::new();
+    for _ in 0..50 {
+        let (_, body) = get(&f, "/api/workitems/app/T-1/chat", &host, Some(&cookie)).await;
+        screen = serde_json::from_str::<serde_json::Value>(&body).unwrap()["screen"].as_str().unwrap_or("").to_string();
+        if screen.contains("second line") && screen.contains('1') {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(screen.contains("first line") && screen.contains("second line"), "{screen}");
+
+    f.tmux.run(&["kill-session", "-t", "=wi-T-1"]);
+    assert_eq!(post_json(&f, "/api/workitems/app/T-1/chat", r#"{"text":"hi"}"#).await, StatusCode::CONFLICT);
+    let (_, body) = get(&f, "/api/workitems/app/T-1/chat", &host, Some(&cookie)).await;
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["session"], false);
+}
+
+#[tokio::test]
+async fn an_extra_host_is_accepted_and_others_still_refused() {
+    let (mut f, _listener) = fixture().await;
+    Arc::get_mut(&mut f.state).unwrap().extra_host = Some("192.168.1.20".into());
+    let cookie = format!("wi_session={}", f.token);
+    let port = f.state.port;
+    assert_eq!(get(&f, "/api/workitems", &format!("192.168.1.20:{port}"), Some(&cookie)).await.0, StatusCode::OK);
+    assert_eq!(get(&f, "/api/workitems", &format!("192.168.1.21:{port}"), Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(get(&f, "/api/workitems", &format!("127.0.0.1:{port}"), Some(&cookie)).await.0, StatusCode::OK);
 }

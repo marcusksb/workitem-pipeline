@@ -3,6 +3,9 @@ import { api } from "./api";
 import { Board } from "./Board";
 import { boardNames, itemKey, shownBoard } from "./boardState";
 import { DetailPanel } from "./DetailPanel";
+import { Inbox } from "./Inbox";
+import { inbox, inboxCount } from "./inboxState";
+import { IconInbox } from "./icons";
 import { ActivityToasts } from "./ActivityToasts";
 import { Login } from "./Login";
 import { PlanPanel } from "./PlanPanel";
@@ -131,19 +134,21 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const inView = workspace ? [workspace] : [];
   const boardsInView = boardNames(pipelines.data, inView);
   const activeBoard = route.board && boardsInView.includes(route.board) ? route.board : boardsInView[0];
-  /** Opens an item in its workspace, switching to its board only when another one is on screen. */
+  /** Opens an item in its workspace, switching to its board only when another one is on screen. The inbox stays open behind it. */
   const open = (item: Item) => {
     const board = shownBoard(item, pipelines.data);
     const sameView = item.workspace === workspace && board === activeBoard;
-    navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir } });
+    navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, inbox: route.inbox });
   };
+  const needsMe = inbox(items.data ?? [], plans.data ?? [], sessions.data ?? []);
+  const needsMeCount = inboxCount(needsMe);
   useAlerts(items.data, open);
   const openFound = (item: Item) => {
     setSearching(false);
     open(item);
   };
   const onTab = (tab: Tab) =>
-    selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
+    selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab, inbox: route.inbox });
 
   return (
     <div className="app">
@@ -161,6 +166,16 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
             void items.reload();
           }}
         />
+        <button
+          className={`inbox-open${route.inbox ? " active" : ""}`}
+          aria-pressed={!!route.inbox}
+          onClick={() => navigate({ inbox: !route.inbox || undefined })}
+          title="What needs you, in every workspace"
+        >
+          <IconInbox />
+          Inbox
+          {needsMeCount > 0 && <span className="count blocked">{needsMeCount}</span>}
+        </button>
         <button className="search-open" onClick={() => setSearching(true)} title="Find a workitem by title, Jira key or PR number">
           Search <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K</kbd>
         </button>
@@ -172,7 +187,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         workspaces={inView}
         showWorkspace={false}
         selected={selectedPlan}
-        onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id } })}
+        onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id }, inbox: route.inbox })}
         onStarted={(planWorkspace, id) => {
           void plans.reload();
           navigate({ plan: { workspace: planWorkspace, id } });
@@ -183,11 +198,15 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         <p className="empty">No boards in {workspace} yet. Add one for a repository with + Board.</p>
       )}
       <main>
-        <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
+        <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({ inbox: route.inbox })}>
+          {route.inbox ? (
+            <Inbox groups={needsMe} onItem={open} onPlan={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id }, inbox: true })} />
+          ) : (
           <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
             void items.reload();
             void pipelines.reload();
           }} />
+          )}
         </div>
         {itemPanel.shown && (
           <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
@@ -198,7 +217,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
               onSelect={open}
               tab={route.tab}
               onTab={onTab}
-              onClose={() => navigate({})}
+              onClose={() => navigate({ inbox: route.inbox })}
               onUnauthorized={onUnauthorized}
             />
           </Leaving>
@@ -212,7 +231,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
                 const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
                 if (item) open(item);
               }}
-              onClose={() => navigate({})}
+              onClose={() => navigate({ inbox: route.inbox })}
               onChanged={() => void plans.reload()}
               onUnauthorized={onUnauthorized}
             />

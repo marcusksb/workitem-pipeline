@@ -2,6 +2,9 @@
   "hooks": {
     "Notification": [
       { "hooks": [{ "type": "command", "command": "python3 ~/.claude/skills/workitem-pipeline/bin/workitem-notify" }] }
+    ],
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "python3 ~/.claude/skills/workitem-pipeline/bin/workitem-transcript" }] }
     ]
   }
 }

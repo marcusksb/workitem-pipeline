@@ -70,6 +70,13 @@ fn record(workspace: &Workspace, id: &str) -> Option<PathBuf> {
     (valid_id(id) && path.is_file()).then_some(path)
 }
 
+/// The `transcript:` the SessionStart hook wrote into plan `id`'s record (decision 57); `None`
+/// when there is no such plan, empty before the session started.
+pub fn transcript(workspace: &Workspace, id: &str) -> Option<String> {
+    let text = fs::read_to_string(record(workspace, id)?).ok()?;
+    Some(frontmatter(&text).remove("transcript").unwrap_or_default())
+}
+
 /// The text between `## <name>` and the next `## ` heading, trimmed.
 fn section(text: &str, name: &str) -> Option<String> {
     let heading = format!("## {name}");
