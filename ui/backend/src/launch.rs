@@ -55,8 +55,10 @@ impl Place<'_> {
 pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope: Scope<'_>, prompt: &str) -> Result<(), String> {
     let mut env = vec![format!("WORKITEM_WORKSPACE={}", workspace.dir.display())];
     let mut dirs: Vec<PathBuf> = vec![];
+    let mut model = None;
     let cwd = match scope {
         Scope::Item(place) => {
+            model = stage_model(state, workspace, place);
             env.push(format!("WORKITEM={}", place.dir));
             env.push(format!("WORKITEM_FILE={}", place.file().display()));
             dirs.push(workspace.dir.clone());
@@ -85,7 +87,17 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
     let mut args = add_dirs(&dirs);
     let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
     args.extend(["--settings".into(), hooks.into()]);
+    if let Some(model) = model {
+        args.extend(["--model".into(), model.into()]);
+    }
     start(state, session, workspace, &cwd, &env, &args, Some(prompt)).await
+}
+
+/// The `model` of the stage the item is in now (decision 60), so every session of the item,
+/// handler, fixer or one started by hand, runs on it.
+fn stage_model(state: &AppState, workspace: &Workspace, place: &Place) -> Option<String> {
+    let (item, _) = workitem::read(workspace, place.dir)?;
+    state.pipeline(workspace, place.board).pipeline?.stage(&item.stage)?.model.clone()
 }
 
 /// A workspace, plan or repo-less item session starts outside every repo, so Claude Code would not read the repos'

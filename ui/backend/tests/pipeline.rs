@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; done; } > "$LOGDIR/args-$(date +%s%N)"
 [ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
@@ -1130,6 +1130,22 @@ async fn items_follow_the_board_they_name_and_boards_are_listed_by_name() {
     eventually("the research board's handler ran", || stub_log(&w.repo).contains(&"T-50-research qa".to_string())).await;
     assert!(!w.tmux.has("wi-T-51-lost"), "no board file, no handler");
     assert!(args_log(&w).contains("RESEARCH QA"));
+}
+
+#[tokio::test]
+async fn item_sessions_run_on_the_model_of_their_stage_and_others_on_the_default() {
+    let w = world();
+    fs::create_dir_all(w.ws.join("boards")).unwrap();
+    fs::write(w.ws.join("boards/research.json"), board(&w, r#"[{"name":"qa","prompt":"QA IT","auto":true,"model":"sonnet[1m]","next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
+    write_item(&w.ws, "T-60-model", "qa", "board: research\n");
+
+    settle(&w).await;
+    eventually("the handler ran on the stage's model", || args_log(&w).contains("model=sonnet[1m]")).await;
+
+    let (status, _) = post(&w, "/api/workspaces/app/create", r#"{"input":"look into x","board":"research"}"#).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    eventually("the create session started", || args_log(&w).contains("--board research")).await;
+    assert_eq!(args_log(&w).matches("model=").count(), 1, "a create session has no stage, so no --model");
 }
 
 #[tokio::test]
