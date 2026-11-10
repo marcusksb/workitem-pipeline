@@ -140,6 +140,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
                 placeholder="Jira key, Sentry URL or task description"
                 rows={4}
                 required
+                autoFocus
               />
             </label>
             {boards.length > 1 && (
