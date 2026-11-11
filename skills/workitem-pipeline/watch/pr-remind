@@ -95,7 +95,7 @@ def mentions_of(pull):
 
 
 def comment_of(mentions):
-    return (f"{REMIND_MARKER}\n{' '.join(mentions)} friendly nudge: this PR is mergeable and required CI is green, "
+    return (f"{REMIND_MARKER}\n{' '.join(mentions)} friendly nudge: required CI is green, "
             "it only needs a review. Thanks!")
 
 
