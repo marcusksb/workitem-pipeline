@@ -1,6 +1,6 @@
 import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
-import { ActivityEvent, ActivityKind, activityEvents, anyDone } from "./activity";
+import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
 import { QUIPS, quipFor } from "./quips";
 import { Item, Pipelines } from "./types";
 
@@ -11,11 +11,11 @@ const BURST = 4;
 
 type Toast = { id: number; events: ActivityEvent[]; quip: string; sticky: boolean; leaving: boolean };
 
-const tone = (kind: ActivityKind) => (kind === "approved" ? "tone-good" : "tone-bad");
+const tone = (kind: ActivityKind) => (kind === "blocked" ? "tone-bad" : "tone-good");
 
 /**
- * A toast for each approved PR or newly blocked item between two polls (see `activityEvents`), top right below the header,
- * newest on top, plus confetti when an item reaches a final stage. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
+ * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), top right below the header,
+ * newest on top, with confetti when an item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  */
 export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
   const before = useRef<Item[]>(undefined);
@@ -24,8 +24,8 @@ export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | u
 
   useEffect(() => {
     if (!items) return;
-    const events = activityEvents(before.current, items);
-    if (anyDone(before.current, items, pipelines)) {
+    const events = activityEvents(before.current, items, pipelines);
+    if (events.some((e) => e.kind === "done")) {
       void confetti({ particleCount: 160, spread: 100, startVelocity: 60, origin: { x: 0.5, y: 1 }, disableForReducedMotion: true });
     }
     before.current = items;

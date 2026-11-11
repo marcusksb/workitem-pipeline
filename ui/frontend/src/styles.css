@@ -538,6 +538,8 @@ button.toast-body { cursor: pointer; }
 .toast-icon { display: inline-block; flex: none; font-size: 22px; line-height: 1; animation: 0.6s ease-out 0.35s both; }
 .icon-approved { animation-name: icon-stamp; }
 @keyframes icon-stamp { 0% { transform: scale(1.8) rotate(-15deg); opacity: 0; } 60% { transform: scale(0.9) rotate(4deg); opacity: 1; } }
+.icon-done { animation: icon-twinkle 0.8s ease-in-out 0.35s 2; }
+@keyframes icon-twinkle { 50% { transform: scale(1.35) rotate(180deg); } }
 .icon-blocked { transform-origin: 70% 80%; animation: icon-wave 2.5s ease-in-out 0.35s infinite; }
 @keyframes icon-wave { 0%, 40%, 100% { transform: none; } 8%, 24% { transform: rotate(20deg); } 16%, 32% { transform: rotate(-10deg); } }
 .icon-burst { animation: icon-spin 0.9s ease-out 0.35s; }
