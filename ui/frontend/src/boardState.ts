@@ -28,6 +28,12 @@ export function newlyMatching(seen: Set<string>, items: Item[], matches: (item: 
   return items.filter((item) => matches(item) && !seen.has(itemKey(item)));
 }
 
+/** The item's stage is final on its board: no stage follows it. */
+export function isFinal(item: Item, pipelines: Pipelines | undefined): boolean {
+  const stage = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.stages.find((s) => s.name === item.stage);
+  return !!stage && stage.next.length === 0;
+}
+
 /** Key of the column for items whose stage is not on their board. */
 export const UNKNOWN_STAGE = "unknown stage";
 

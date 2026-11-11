@@ -1,7 +1,8 @@
+import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
-import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
+import { ActivityEvent, ActivityKind, activityEvents, anyDone } from "./activity";
 import { QUIPS, quipFor } from "./quips";
-import { Item } from "./types";
+import { Item, Pipelines } from "./types";
 
 /** Toasts on screen at once; older ones wait behind "+N more". */
 const SHOWN = 4;
@@ -14,9 +15,9 @@ const tone = (kind: ActivityKind) => (kind === "approved" ? "tone-good" : "tone-
 
 /**
  * A toast for each approved PR or newly blocked item between two polls (see `activityEvents`), top right below the header,
- * newest on top. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
+ * newest on top, plus confetti when an item reaches a final stage. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  */
-export function ActivityToasts({ items, onOpen }: { items: Item[] | undefined; onOpen: (item: Item) => void }) {
+export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
   const before = useRef<Item[]>(undefined);
   const nextId = useRef(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -24,6 +25,9 @@ export function ActivityToasts({ items, onOpen }: { items: Item[] | undefined; o
   useEffect(() => {
     if (!items) return;
     const events = activityEvents(before.current, items);
+    if (anyDone(before.current, items, pipelines)) {
+      void confetti({ particleCount: 160, spread: 100, startVelocity: 60, origin: { x: 0.5, y: 1 }, disableForReducedMotion: true });
+    }
     before.current = items;
     if (events.length === 0) return;
     const groups = events.length > BURST ? [events] : events.map((e) => [e]);
@@ -35,7 +39,7 @@ export function ActivityToasts({ items, onOpen }: { items: Item[] | undefined; o
       leaving: false,
     }));
     setToasts((shown) => [...shown, ...fresh]);
-  }, [items]);
+  }, [items, pipelines]);
 
   const dismiss = (id: number) => setToasts((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
   const ended = (id: number) => (e: AnimationEvent) => {

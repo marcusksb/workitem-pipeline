@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { activityEvents } from "./activity";
-import { item } from "./testFixtures";
-import { Review } from "./types";
+import { activityEvents, anyDone } from "./activity";
+import { item, stage } from "./testFixtures";
+import { Pipelines, Review } from "./types";
+
+const flow: Pipelines = {
+  app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
+};
 
 const review = (over: Partial<Review> = {}): Review => ({ state: "open", approval: "review_required", approved_by_me: false, merge: "mergeable", ci: "pending", failed: [], ...over });
 const events = (before: Parameters<typeof item>[0], after: Parameters<typeof item>[0]) =>
@@ -32,5 +36,14 @@ describe("activityEvents", () => {
     expect(events({ agent_status: "blocked: a" }, { agent_status: "blocked: b" })).toEqual([["blocked", "Blocked: b"]]);
     expect(events({ agent_status: "blocked: a" }, { agent_status: "blocked: a" })).toEqual([]);
     expect(events({ agent_status: "ok" }, { agent_status: "working" })).toEqual([]);
+  });
+});
+
+describe("anyDone", () => {
+  it("is true only when an item moves into a final stage", () => {
+    expect(anyDone([item({ stage: "todo" })], [item({ stage: "done" })], flow)).toBe(true);
+    expect(anyDone([item({ stage: "done" })], [item({ stage: "done" })], flow)).toBe(false);
+    expect(anyDone(undefined, [item({ stage: "done" })], flow)).toBe(false);
+    expect(anyDone([], [item({ stage: "done" })], flow)).toBe(false);
   });
 });

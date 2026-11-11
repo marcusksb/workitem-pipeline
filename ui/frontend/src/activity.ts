@@ -1,5 +1,5 @@
-import { blockedKey, isBlocked, itemKey } from "./boardState";
-import { Item } from "./types";
+import { blockedKey, isBlocked, isFinal, itemKey } from "./boardState";
+import { Item, Pipelines } from "./types";
 
 export type ActivityKind = "approved" | "blocked";
 
@@ -26,4 +26,14 @@ export function activityEvents(before: Item[] | undefined, after: Item[]): Activ
     }
   }
   return events;
+}
+
+/** Whether an item moved into a final stage of its board between two polls; it gets confetti, not a toast. Never on the first poll. */
+export function anyDone(before: Item[] | undefined, after: Item[], pipelines: Pipelines | undefined): boolean {
+  if (!before) return false;
+  const old = new Map(before.map((item) => [itemKey(item), item]));
+  return after.some((item) => {
+    const was = old.get(itemKey(item));
+    return !!was && was.stage !== item.stage && isFinal(item, pipelines);
+  });
 }
