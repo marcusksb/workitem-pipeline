@@ -286,10 +286,18 @@ pub fn learnings(workspace: &Path, board: &str) -> String {
     if !text.lines().any(|l| !l.trim().is_empty() && !l.starts_with('#')) {
         return String::new();
     }
+    // The file keeps each rule's source links for people; the agent only needs the rule.
+    let rules: Vec<&str> = text
+        .lines()
+        .map(|l| match l.rfind(" (source: ") {
+            Some(i) if l.trim_end().ends_with(')') => &l[..i],
+            _ => l,
+        })
+        .collect();
     format!(
         "Rules learned from past reviews in this repo. Follow them like the repo's CLAUDE.md rules.\n\
 --- learnings ---\n{}\n--- end of learnings ---\n",
-        text.trim_end()
+        rules.join("\n").trim_end()
     )
 }
 
@@ -527,6 +535,19 @@ mod tests {
         fs::write(workspace.path().join("boards/dev/learnings.md"), "# Learnings\n\n").unwrap();
         assert_eq!(learnings(workspace.path(), "dev"), "", "a header alone adds nothing");
         assert_eq!(learnings(workspace.path(), "../x"), "");
+    }
+
+    #[test]
+    fn learnings_in_the_prompt_leave_out_source_links() {
+        let workspace = tempfile::tempdir().unwrap();
+        let file = workspace.path().join("boards/dev/learnings.md");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let text = "- Rule one. (source: https://x/1, https://x/2)\n- Rule two.\n";
+        fs::write(&file, text).unwrap();
+        let prompt = learnings(workspace.path(), "dev");
+        assert!(prompt.contains("--- learnings ---\n- Rule one.\n- Rule two.\n--- end of learnings ---"), "{prompt}");
+        assert!(!prompt.contains("source:"), "{prompt}");
+        assert_eq!(fs::read_to_string(&file).unwrap(), text, "the file keeps its links");
     }
 
     #[test]
