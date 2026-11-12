@@ -2,10 +2,10 @@
  * shown, `?plan=<workspace>/<id>` for an open planning session (instead of an item). `workspace=` is left out when the item or
  * plan already names it. */
 
-export type Tab = "brief" | "info" | "files" | "pr" | "children" | "terminal" | "actions";
+export type Tab = "brief" | "info" | "files" | "pr" | "dependencies" | "children" | "terminal" | "actions";
 export type Route = { item?: { workspace: string; dir: string }; tab?: Tab; workspace?: string; board?: string; plan?: { workspace: string; id: string } };
 
-const TABS: Tab[] = ["brief", "info", "files", "pr", "children", "terminal", "actions"];
+const TABS: Tab[] = ["brief", "info", "files", "pr", "dependencies", "children", "terminal", "actions"];
 
 /** Parses the location hash into a route; unknown or incomplete paths yield an empty route. */
 export function readRoute(hash: string = location.hash): Route {

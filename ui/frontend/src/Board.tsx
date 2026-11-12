@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, shownBoard, stageTitle, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Learnings } from "./Learnings";
@@ -10,6 +10,7 @@ import { ReviewStrip } from "./ReviewStrip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import { Item, Pipelines } from "./types";
+import { Tab } from "./url";
 import { useRun } from "./useRun";
 
 type Props = {
@@ -21,7 +22,7 @@ type Props = {
   board: string | undefined;
   onBoard: (name: string) => void;
   selected: string | null;
-  onSelect: (item: Item) => void;
+  onSelect: (item: Item, tab?: Tab) => void;
   showWorkspace: boolean;
   /** Called after items were removed or a column was paused. */
   onChanged: () => void;
@@ -130,23 +131,23 @@ function AddBoard({ workspace, onDone }: { workspace: string; onDone: () => void
   );
 }
 
-/** A dependency that is not merged yet; a click opens it on its own board. */
-function DependencyChip({ item, pipelines, onOpen }: { item: Item; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
+/** How many dependencies are not merged yet; a click opens the item's Depends on tab. */
+function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
     <button
       className="chip waits-on"
-      title={`Waits until ${item.dir} is merged`}
+      title={`Waits until ${count === 1 ? "1 dependency is" : `${count} dependencies are`} merged`}
       onClick={(event) => {
         event.stopPropagation();
-        onOpen(item);
+        onOpen();
       }}
     >
-      waits on {item.dir} · {boardLabel(pipelines, item.workspace, shownBoard(item, pipelines))} · {stageTitle(item, pipelines)}
+      depends on {count}
     </button>
   );
 }
 
-function Card({ item, selected, onSelect, showWorkspace, waitsOn, pipelines, onOpen, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; pipelines: Pipelines | undefined; onOpen: (item: Item) => void; depth?: number }) {
+function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; depth?: number }) {
   const icon = KIND_ICONS[item.kind.trim().toLowerCase()];
   return (
     <div
@@ -169,9 +170,11 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, pipelines, onO
         <span className="badge">{item.kind}</span>
         <LinkBadges item={item} />
       </div>
-      {waitsOn.map((other) => (
-        <DependencyChip key={other.dir} item={other} pipelines={pipelines} onOpen={onOpen} />
-      ))}
+      {waitsOn.length > 0 && (
+        <div className="meta">
+          <DependencyBadge count={waitsOn.length} onOpen={onDependencies} />
+        </div>
+      )}
       {(item.review || icon || !!item.unpushed || item.follow_ups.length > 0) && (
         <div className="card-foot">
           <div className="foot-left">
@@ -228,8 +231,7 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
       onSelect={() => onSelect(item)}
       showWorkspace={showWorkspace}
       waitsOn={openDependencies(item, items, pipelines)}
-      pipelines={pipelines}
-      onOpen={onSelect}
+      onDependencies={() => onSelect(item, "dependencies")}
     />
   );
   return (

@@ -554,13 +554,9 @@ button.toast-body { cursor: pointer; }
   .toast-icon { animation: none !important; }
 }
 
-.dependencies { margin: 8px 0 12px; }
-.dependencies h3 { font-size: 13px; margin: 0 0 4px; color: var(--muted); font-weight: 600; }
-.dependencies ul { list-style: none; padding: 0; margin: 0 0 6px; }
-.dependencies li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
-.children ul { list-style: none; padding: 0; margin: 0; }
-.children li { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
-.children .child-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.children .child-head .link { text-align: left; font-weight: 600; }
-.children .reason { margin: 0; color: var(--blocked); white-space: pre-wrap; }
+:is(.children, .dependencies) ul { list-style: none; padding: 0; margin: 0 0 12px; }
+:is(.children, .dependencies) li { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+:is(.children, .dependencies) .child-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+:is(.children, .dependencies) .child-head .link { text-align: left; font-weight: 600; }
+:is(.children, .dependencies) .reason { margin: 0; color: var(--blocked); white-space: pre-wrap; }
 .tabs .chip { margin-left: 4px; }

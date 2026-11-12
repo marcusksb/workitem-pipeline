@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, itemTerminal } from "./api";
-import { isBlocked, isWaiting, KIND_ICONS, stageLabel, stripFrontmatter } from "./boardState";
+import { isBlocked, isWaiting, KIND_ICONS, openDependencies, stageLabel, stripFrontmatter } from "./boardState";
 import { Item, Pipelines } from "./types";
 import { Actions } from "./Actions";
 import { AgentActions } from "./AgentActions";
@@ -8,6 +8,7 @@ import { BriefActions } from "./BriefActions";
 import { BriefEditor } from "./BriefEditor";
 import { BriefView } from "./BriefView";
 import { Children } from "./Children";
+import { Dependencies } from "./Dependencies";
 import { PrActions } from "./PrActions";
 import { PrConversation } from "./PrConversation";
 import { Files } from "./Files";
@@ -19,7 +20,7 @@ import { Tab } from "./url";
 import { Terminal } from "./Terminal";
 import { usePolling } from "./usePolling";
 import { WaitingChip } from "./WaitingChip";
-import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconListTree, IconSliders, IconTerminalSquare, IconX } from "./icons";
+import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconLink, IconListTree, IconSliders, IconTerminalSquare, IconX } from "./icons";
 
 type Props = {
   item: Item;
@@ -51,6 +52,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   const parent = family.find((i) => i.dir === live.parent);
   const children = family.filter((i) => i.parent === item.dir);
   const blockedChildren = children.filter(isBlocked).length;
+  const waitsOn = openDependencies(live, items, pipelines).length;
   /** A blocked parent without a session is most likely held up by its children (the features board's watcher blocks it for them). */
   const tab = routeTab ?? (!live.session && isBlocked(live) && blockedChildren > 0 ? "children" : live.session || isBlocked(live) ? "terminal" : "brief");
   useEffect(() => {
@@ -116,6 +118,10 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             PR
           </button>
         )}
+        <button className={tab === "dependencies" ? "active" : ""} onClick={() => onTab("dependencies")}>
+          <IconLink />
+          Depends on{waitsOn > 0 && <span className="chip waiting">{waitsOn}</span>}
+        </button>
         {children.length > 0 && (
           <button className={tab === "children" ? "active" : ""} onClick={() => onTab("children")}>
             <IconListTree />
@@ -159,7 +165,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           {detail ? <BriefView item={live} body={stripFrontmatter(detail.content)} onSaved={() => void reload()} /> : "Loading…"}
         </div>
       )}
-      {tab === "info" && <div className="brief">{detail ? <Info item={live} items={items} pipelines={pipelines} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
+      {tab === "info" && <div className="brief">{detail ? <Info item={live} content={detail.content} onSaved={() => void reload()} /> : "Loading…"}</div>}
       {tab === "files" && <Files item={live} onUnauthorized={onUnauthorized} />}
       {tab === "pr" && live.pr && (
         <div className="brief">
@@ -181,6 +187,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           <PrConversation item={live} onUnauthorized={onUnauthorized} />
         </div>
       )}
+      {tab === "dependencies" && <Dependencies item={live} items={items} pipelines={pipelines} onSelect={onSelect} onSaved={() => void reload()} />}
       {tab === "children" && <Children items={children} onSelect={onSelect} onDone={() => void reload()} />}
       {tab === "terminal" && (
         <>

@@ -230,24 +230,30 @@ test("the selected workspace stays in the URL and survives a reload", async ({ p
   await expect(page.locator(".board")).toContainText("Demo blocked item");
 });
 
-test("a card that waits on an unmerged item opens it on its own board", async ({ page }) => {
+test("a card that waits on an unmerged item opens its Depends on tab, which opens the dependency on its own board", async ({ page }) => {
   await page.goto(base);
   await expect(page.locator(".board")).toContainText("Demo blocked item");
   await page.goto(`${base.split("#")[0]}#?workspace=demo&board=research`);
   const chip = page.locator(".card", { hasText: "Show the new field" }).locator(".chip.waits-on");
-  await expect(chip).toHaveText("waits on T-1-demo · default · analyze");
+  await expect(chip).toHaveText("depends on 1");
   await chip.click();
+  await expect(page).toHaveURL(/#demo\/T-7-ui\/dependencies/);
+  const deps = page.locator(".dependencies");
+  await expect(deps).toContainText("default");
+  await expect(deps).toContainText("not merged");
+  await deps.locator(".child-head .link").first().click();
   await expect(page).toHaveURL(/#demo\/T-1-demo\?board=default$/);
   await expect(page.getByRole("tablist").getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
 
-  // The Info tab edits the list.
+  // The tab edits the list; Info no longer shows it.
   await page.goto(`${base.split("#")[0]}#demo/T-7-ui/info`);
-  const deps = page.locator(".dependencies");
-  await expect(deps).toContainText("T-1-demo");
+  await expect(page.locator(".dependencies")).toHaveCount(0);
+  await page.goto(`${base.split("#")[0]}#demo/T-7-ui/dependencies`);
+  await expect(deps.locator("li")).toContainText("Demo blocked item");
   await deps.getByRole("button", { name: "Remove T-1-demo" }).click();
   await expect(deps).toContainText("nothing");
   await deps.getByRole("combobox", { name: "Add a dependency" }).selectOption("T-2-gate");
-  await expect(deps.locator("li")).toContainText("T-2-gate");
+  await expect(deps.locator("li")).toContainText("Brief waiting");
   expect(readFileSync(join(ws, "T-7-ui/workitem.md"), "utf8")).toContain("depends_on: T-2-gate\n");
 });
 
