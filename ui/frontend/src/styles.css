@@ -146,9 +146,11 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .board.list .column { min-height: 0; }
 .board.list .column h2 { position: static; }
 .board.list .cards { gap: 6px; }
-.board.list .card { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-radius: 8px; }
+.board.list .card { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 16px; border-radius: 8px; }
 .board.list .card::before { border-radius: 8px; }
-.board.list .card .title { flex: 1; min-width: 0; margin-bottom: 0; }
+/* The basis keeps the title readable: chips that do not fit wrap to the next line instead of squeezing it. */
+.board.list .card .title { flex: 1 1 240px; min-width: 0; margin-bottom: 0; }
+.board.list .card .chip.waits-on { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .board.list .card-foot { margin-top: 0; justify-content: flex-end; flex: none; min-height: 0; }
 .board.list .card .chip, .board.list .card .review-strip { margin-top: 0; }
 .count.blocked { --tint: var(--blocked); }
