@@ -133,6 +133,24 @@ class WorkitemMoveTest(unittest.TestCase):
         self.other("A-1", {"board": "api", "stage": "done"})
         self.assertEqual(self.run_move(str(self.item), "build").returncode, 0, "on_merge stage, pr_state and a gone item all count")
 
+    def test_children_merged_waits_for_every_child_and_needs_one(self):
+        self.named_board("api", stages=[{"name": "dev", "next": ["review"]}, {"name": "review", "next": ["done"], "on_merge": "done"}, {"name": "done"}], entry="dev")
+        self.named_board("dev", stages=[{"name": "idea", "next": ["build"]}, {"name": "build", "require": {"children": "merged"}}])
+        self.write("idea")
+        result = self.run_move(str(self.item), "build")
+        self.assertEqual(result.returncode, 1, "an item without children is not done")
+        self.assertIn("children", result.stderr)
+        self.other("C-1", {"board": "api", "stage": "review", "parent": "X-1-test"})
+        self.other("C-2", {"board": "api", "stage": "review", "parent": "X-1-test", "pr_state": "merged"})
+        self.other("C-3", {"board": "api", "stage": "dev", "parent": "someone-else"})
+        result = self.run_move(str(self.item), "build")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("C-1", result.stderr)
+        self.assertNotIn("C-2", result.stderr)
+        self.assertNotIn("C-3", result.stderr, "only this item's children count")
+        self.other("C-1", {"board": "api", "stage": "done", "parent": "X-1-test"})
+        self.assertEqual(self.run_move(str(self.item), "build").returncode, 0, "on_merge stage and pr_state both count")
+
     def test_a_new_stage_starts_the_handler_attempts_over(self):
         self.named_board("dev", stages=[{"name": "idea", "next": ["build"]}, {"name": "build"}])
         self.write("idea", extra="handler_attempts: 2\n")

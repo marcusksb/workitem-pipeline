@@ -115,8 +115,8 @@ def brief_problems(text, sections):
 
 
 def requirement_problem(key, wanted, fields, text, sections, path):
-    """Why `require: {key: wanted}` is not met, or None. `issue: linked`, `brief: complete` and
-    `depends_on: merged` are checks; anything else compares a frontmatter value."""
+    """Why `require: {key: wanted}` is not met, or None. `issue: linked`, `brief: complete`,
+    `depends_on: merged` and `children: merged` are checks; anything else compares a frontmatter value."""
     if (key, wanted) == ("issue", "linked"):
         if fields.get("issue", "none").lower() in ("", "none"):
             return "a linked issue (issue: is 'none')"
@@ -128,9 +128,25 @@ def requirement_problem(key, wanted, fields, text, sections, path):
         waiting = [d for d in dependencies(fields) if not merged(path.parent.parent, d)]
         if waiting:
             return "these dependencies merged first: " + ", ".join(waiting)
+    elif (key, wanted) == ("children", "merged"):
+        kids = children(path)
+        waiting = [d for d in kids if not merged(path.parent.parent, d)]
+        if not kids:
+            return "children (no item has parent: " + path.parent.name + ")"
+        if waiting:
+            return "these children merged first: " + ", ".join(waiting)
     elif fields.get(key) != wanted:
         return f"{key}: {wanted} (is '{fields.get(key)}')"
     return None
+
+
+def children(path):
+    """Dirs of the items of the workspace whose `parent:` is the item at `path`, sorted."""
+    return sorted(
+        other.parent.name
+        for other in path.parent.parent.glob("*/workitem.md")
+        if other != path and read(other)[2].get("parent") == path.parent.name
+    )
 
 
 def dependencies(fields):
