@@ -18,7 +18,7 @@ export function AgentActions({ item, onDone }: { item: Item; onDone: () => void 
           Start development
         </button>
       )}
-      {!item.session && !isBlocked(item) && (
+      {!item.session && (
         <button disabled={busy} onClick={() => run("Start session", () => api.startSession(item))}>
           <IconBot />
           Start agent session

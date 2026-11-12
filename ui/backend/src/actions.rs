@@ -230,7 +230,7 @@ pub async fn start(
     let repo = repo_of(&state, &workspace, &item)?;
     let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::handler_prompt(&state, &place, &stage, &instructions);
-    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
+    launch_item_session(&state, &workspace, &path, &place, &prompt, Admit::NotBlocked).await
 }
 
 #[derive(Deserialize)]
@@ -285,7 +285,7 @@ pub async fn fix(
         "comments" => launch::comments_fix_prompt(&place, &repo, &item.pr),
         other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
     };
-    launch_item_session(&state, &workspace, &path, &place, &prompt, true).await
+    launch_item_session(&state, &workspace, &path, &place, &prompt, Admit::Ok).await
 }
 
 /// A free-form agent session on the workitem, in any stage: the human drives it from the
@@ -298,7 +298,7 @@ pub async fn start_session(
     let repo = repo_of(&state, &workspace, &item)?;
     let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::session_prompt(&place);
-    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
+    launch_item_session(&state, &workspace, &path, &place, &prompt, Admit::Human).await
 }
 
 /// Like `start_session`, but the agent opens on the brief and plan so the human can discuss
@@ -311,21 +311,32 @@ pub async fn discuss_brief(
     let repo = repo_of(&state, &workspace, &item)?;
     let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: repo.as_deref(), board: &item.board };
     let prompt = launch::brief_prompt(&place);
-    launch_item_session(&state, &workspace, &path, &place, &prompt, false).await
+    launch_item_session(&state, &workspace, &path, &place, &prompt, Admit::Human).await
+}
+
+/// Which `agent_status` an item session may start from.
+#[derive(Clone, Copy, PartialEq)]
+enum Admit {
+    /// Only `ok`: fixers start on an idle item only.
+    Ok,
+    /// Anything but blocked: Start development runs the handler, and a block means "not yet".
+    NotBlocked,
+    /// Anything: a human-driven session, which may be started to resolve the block.
+    Human,
 }
 
 /// Starts `wi-<dir>` with `prompt`. The status is `working` while it runs: an `ok` item with
 /// a live session is reaped by the dispatcher. Session and status are checked under `busy`, on
 /// the file as it is now: a copy read before the lock can be stale (a watcher may have started
 /// a handler meanwhile), and restoring it would make the dispatcher kill that handler.
-/// `require_ok` refuses any status but `ok` (fixers only start on an idle item).
+/// `admit` says which statuses the launch accepts.
 async fn launch_item_session(
     state: &AppState,
     workspace: &Workspace,
     path: &Path,
     place: &Place<'_>,
     prompt: &str,
-    require_ok: bool,
+    admit: Admit,
 ) -> Result<(StatusCode, Json<Launched>)> {
     let dir = place.dir;
     let _busy = state.busy.lock().await;
@@ -333,15 +344,22 @@ async fn launch_item_session(
         return Err(conflict(format!("{dir} already has a session")));
     }
     let (item, _) = workitem::read(workspace, dir).ok_or(ApiError::not_found("workitem"))?;
-    if item.agent_status.starts_with("blocked") {
+    let blocked = item.agent_status.starts_with("blocked");
+    if blocked && admit != Admit::Human {
         return Err(conflict("clear the blocked status first"));
     }
-    if require_ok && item.agent_status != "ok" {
+    if admit == Admit::Ok && item.agent_status != "ok" {
         return Err(conflict(format!("{dir} is {}, not ok", item.agent_status)));
     }
+    // `working` replaces the block, so the agent learns the reason from its prompt.
+    let prompt = if blocked {
+        format!("{prompt}\nThe workitem was `{}` when the human started this session, most likely to resolve that.\n", item.agent_status)
+    } else {
+        prompt.to_string()
+    };
     let session = format!("wi-{dir}");
     set_status(path, "working").map_err(internal)?;
-    if let Err(e) = launch::spawn(state, &session, workspace, Scope::Item(place), prompt).await {
+    if let Err(e) = launch::spawn(state, &session, workspace, Scope::Item(place), &prompt).await {
         let _ = set_status(path, &item.agent_status);
         return Err(conflict(e));
     }

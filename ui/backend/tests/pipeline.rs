@@ -509,7 +509,13 @@ async fn a_manual_session_starts_in_any_stage_and_survives_the_dispatcher() {
     let stuck = fs::read_to_string(w.ws.join("T-13-stuck/workitem.md")).unwrap().replace("agent_status: ok", "agent_status: blocked: x");
     fs::write(w.ws.join("T-13-stuck/workitem.md"), stuck).unwrap();
     let (status, _) = post(&w, "/api/workitems/app/T-13-stuck/session", "").await;
-    assert_eq!(status, StatusCode::CONFLICT, "clear blocked first");
+    assert_eq!(status, StatusCode::ACCEPTED, "a human may start a session to resolve the block");
+    assert_eq!(field(&w.ws, "T-13-stuck", "agent_status"), "working");
+    let logs = w.dir.path().join("logs");
+    eventually("stub recorded the block in the session prompt", || {
+        fs::read_dir(&logs).unwrap().filter_map(Result::ok).any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t.contains("T-13-stuck") && t.contains("was `blocked: x` when the human started")))
+    })
+    .await;
 }
 
 #[tokio::test]

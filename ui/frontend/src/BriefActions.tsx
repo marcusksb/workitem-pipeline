@@ -1,5 +1,4 @@
 import { api } from "./api";
-import { isBlocked } from "./boardState";
 import { Item } from "./types";
 import { useRun } from "./useRun";
 import { IconCheck, IconMessage, IconPencil } from "./icons";
@@ -10,7 +9,7 @@ type Props = { item: Item; onDone: () => void; onStarted: () => void; onEdit: ()
  * terminal), or opens the editor. */
 export function BriefActions({ item, onDone, onStarted, onEdit }: Props) {
   const { busy, error, run } = useRun(onDone);
-  const canDiscuss = !item.session && !isBlocked(item);
+  const canDiscuss = !item.session;
   const gate = item.gate;
 
   return (
