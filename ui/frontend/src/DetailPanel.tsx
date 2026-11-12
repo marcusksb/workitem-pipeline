@@ -7,6 +7,7 @@ import { AgentActions } from "./AgentActions";
 import { BriefActions } from "./BriefActions";
 import { BriefEditor } from "./BriefEditor";
 import { BriefView } from "./BriefView";
+import { Children } from "./Children";
 import { PrActions } from "./PrActions";
 import { PrConversation } from "./PrConversation";
 import { Files } from "./Files";
@@ -18,13 +19,13 @@ import { Tab } from "./url";
 import { Terminal } from "./Terminal";
 import { usePolling } from "./usePolling";
 import { WaitingChip } from "./WaitingChip";
-import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconSliders, IconTerminalSquare, IconX } from "./icons";
+import { IconExternal, IconInfo, IconFileText, IconFolder, IconGitPullRequest, IconListTree, IconSliders, IconTerminalSquare, IconX } from "./icons";
 
 type Props = {
   item: Item;
   /** Items of the visible workspaces, used to find the parent and children. */
   items: Item[];
-  onSelect: (item: Item) => void;
+  onSelect: (item: Item, tab?: Tab) => void;
   pipelines: Pipelines | undefined;
   /** Tab from the URL hash; unset falls back to the state-dependent default. */
   tab?: Tab;
@@ -46,7 +47,12 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   useEffect(() => setEditing(undefined), [key]);
   /** Set by the follow-ups chip; the brief scrolls to its `## Follow-ups` once it is shown. */
   const [jump, setJump] = useState(false);
-  const tab = routeTab ?? (live.session || isBlocked(live) ?"terminal" : "brief");
+  const family = items.filter((i) => i.workspace === item.workspace);
+  const parent = family.find((i) => i.dir === live.parent);
+  const children = family.filter((i) => i.parent === item.dir);
+  const blockedChildren = children.filter(isBlocked).length;
+  /** A blocked parent without a session is most likely held up by its children (the features board's watcher blocks it for them). */
+  const tab = routeTab ?? (!live.session && isBlocked(live) && blockedChildren > 0 ? "children" : live.session || isBlocked(live) ? "terminal" : "brief");
   useEffect(() => {
     if (!jump || tab !== "brief" || editing !== undefined || !detail) return;
     setJump(false);
@@ -55,10 +61,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   const path = itemTerminal(item.workspace, item.dir);
   const popOut = `/?terminal=${encodeURIComponent(path)}`;
   const kindIcon = KIND_ICONS[live.kind.trim().toLowerCase()];
-
-  const family = items.filter((i) => i.workspace === item.workspace);
-  const parent = family.find((i) => i.dir === live.parent);
-  const children = family.filter((i) => i.parent === item.dir);
 
   return (
     <aside className="detail">
@@ -82,18 +84,11 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             {!!live.unpushed && <span className="chip unpushed" title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</span>}
             <ReviewStrip review={live.review} />
           </div>
-          {(parent || children.length > 0) && (
+          {parent && (
             <div className="meta family">
-              {parent && (
-                <button className="link" onClick={() => onSelect(parent)}>
-                  ↑ Parent: {parent.title}
-                </button>
-              )}
-              {children.map((child) => (
-                <button key={child.dir} className="link" onClick={() => onSelect(child)}>
-                  ↳ {child.title} ({stageLabel(child.stage)})
-                </button>
-              ))}
+              <button className="link" onClick={() => onSelect(parent)}>
+                ↑ Parent: {parent.title}
+              </button>
             </div>
           )}
         </div>
@@ -119,6 +114,12 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           <button className={tab === "pr" ? "active" : ""} onClick={() => onTab("pr")}>
             <IconGitPullRequest />
             PR
+          </button>
+        )}
+        {children.length > 0 && (
+          <button className={tab === "children" ? "active" : ""} onClick={() => onTab("children")}>
+            <IconListTree />
+            Children{blockedChildren > 0 && <span className="chip blocked">{blockedChildren}</span>}
           </button>
         )}
         <button className={tab === "terminal" ? "active" : ""} onClick={() => onTab("terminal")}>
@@ -180,6 +181,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           <PrConversation item={live} onUnauthorized={onUnauthorized} />
         </div>
       )}
+      {tab === "children" && <Children items={children} onSelect={onSelect} onDone={() => void reload()} />}
       {tab === "terminal" && (
         <>
           <AgentActions item={live} onDone={() => void reload()} />

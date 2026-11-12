@@ -139,3 +139,12 @@ export const IconFolder = make(
   <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />,
 );
 export const IconPencil = make(<path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />);
+export const IconListTree = make(
+  <>
+    <path d="M21 12h-8" />
+    <path d="M21 6H8" />
+    <path d="M21 18h-8" />
+    <path d="M3 6v4c0 1.1.9 2 2 2h3" />
+    <path d="M3 10v6c0 1.1.9 2 2 2h3" />
+  </>,
+);

@@ -132,10 +132,10 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const boardsInView = boardNames(pipelines.data, inView);
   const activeBoard = route.board && boardsInView.includes(route.board) ? route.board : boardsInView[0];
   /** Opens an item in its workspace, switching to its board only when another one is on screen. */
-  const open = (item: Item) => {
+  const open = (item: Item, tab?: Tab) => {
     const board = shownBoard(item, pipelines.data);
     const sameView = item.workspace === workspace && board === activeBoard;
-    navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir } });
+    navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
   useAlerts(items.data, open);
   const openFound = (item: Item) => {
