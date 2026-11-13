@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; done; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; done; } > "$LOGDIR/args-$(date +%s%N)"
 [ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
@@ -135,6 +135,7 @@ fn world() -> World {
     state.skills_dir = skills();
     state.claude = stub.display().to_string();
     state.gh = gh.display().to_string();
+    state.ask_wait = std::time::Duration::from_millis(1500);
     state.add_board(&state.store.workspace("app").unwrap(), "default", repo.to_str().unwrap()).unwrap();
     let state = Arc::new(state);
     tokio::spawn(axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), router(state.clone())).into_future());
@@ -558,7 +559,7 @@ async fn a_session_starts_in_the_worktree_and_still_belongs_to_the_workspace() {
 
     let logs = w.dir.path().join("logs");
     eventually("stub ran with the workspace and the repo added", || {
-        fs::read_dir(&logs).unwrap().filter_map(Result::ok).any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t.starts_with("argc=6\n")))
+        fs::read_dir(&logs).unwrap().filter_map(Result::ok).any(|e| fs::read_to_string(e.path()).is_ok_and(|t| t.starts_with("argc=8\n")))
     })
     .await;
 
@@ -1513,7 +1514,7 @@ async fn an_item_on_a_board_without_a_repo_runs_in_its_folder_with_every_repo_ad
     assert_eq!(Path::new(&pwd).canonicalize().unwrap(), w.ws.join("T-60-idea").canonicalize().unwrap(), "starts in the item folder");
     assert_eq!(repo, "", "no WORKITEM_REPO");
     let log = args_log(&w);
-    assert!(log.starts_with("argc=6\nclaude_md=1\n"), "--add-dir, workspace, the other boards' repo, --settings, hooks, prompt: {log}");
+    assert!(log.starts_with("argc=8\nclaude_md=1\n"), "--add-dir, workspace, the other boards' repo, --mcp-config, its file, --settings, hooks, prompt: {log}");
     assert!(log.contains("ANALYZE STEPS") && log.contains("board without a repo"), "{log}");
     let pipelines = get(&w, "/api/pipelines").await;
     assert!(pipelines.contains(r#""name":"intake""#) && !pipelines.contains(r#""repo":null"#), "{pipelines}");
@@ -1881,4 +1882,140 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
     let ui_item = items.as_array().unwrap().iter().find(|i| i["dir"] == "T-71-ui").unwrap();
     assert_eq!((&ui_item["workspace"], &ui_item["depends_on"]), (&serde_json::json!("app"), &serde_json::json!(["T-70-api"])));
+}
+
+/// One JSON-RPC message to an item's MCP endpoint (`questions.rs`), as an agent sends it: with the
+/// Bearer token, not the cookie.
+async fn mcp(w: &World, dir: &str, message: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let request = Request::post(format!("/api/mcp/app/{dir}"))
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::AUTHORIZATION, format!("Bearer {}", w.token))
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream")
+        .body(Body::from(message.to_string()))
+        .unwrap();
+    let response = router(w.state.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+/// `tools/call` of `tool`: (its text, isError).
+async fn tool(w: &World, dir: &str, tool: &str, arguments: serde_json::Value) -> (String, bool) {
+    let (status, reply) = mcp(w, dir, serde_json::json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": tool, "arguments": arguments } })).await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    (reply["result"]["content"][0]["text"].as_str().unwrap().to_string(), reply["result"]["isError"].as_bool().unwrap())
+}
+
+fn status_of(w: &World, dir: &str) -> String {
+    let text = fs::read_to_string(w.ws.join(dir).join("workitem.md")).unwrap();
+    text.lines().find_map(|l| l.strip_prefix("agent_status: ")).unwrap().to_string()
+}
+
+#[tokio::test]
+async fn the_mcp_endpoint_speaks_enough_mcp_for_an_agent() {
+    let w = world();
+    write_item(&w.ws, "T-70-item", "backlog", "");
+    let (status, reply) = mcp(&w, "T-70-item", serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } } })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reply["id"], 1);
+    assert_eq!(reply["result"]["protocolVersion"], "2025-06-18", "the client's version is accepted");
+    assert!(reply["result"]["capabilities"]["tools"].is_object());
+    let (status, _) = mcp(&w, "T-70-item", serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "a notification gets no response");
+    let (_, reply) = mcp(&w, "T-70-item", serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
+    let names: Vec<&str> = reply["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["ask_parent", "wait_for_answer", "list_child_questions", "answer_child"]);
+    let (_, reply) = mcp(&w, "T-70-item", serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "resources/list" })).await;
+    assert_eq!(reply["error"]["code"], -32601);
+
+    let (status, _) = mcp(&w, "T-71-missing", serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let request = Request::get("/api/mcp/app/T-70-item").header(header::HOST, format!("127.0.0.1:{}", w.state.port)).header(header::AUTHORIZATION, format!("Bearer {}", w.token)).body(Body::empty()).unwrap();
+    assert_eq!(router(w.state.clone()).oneshot(request).await.unwrap().status(), StatusCode::METHOD_NOT_ALLOWED, "no SSE stream");
+    let request = Request::post("/api/mcp/app/T-70-item").header(header::HOST, format!("127.0.0.1:{}", w.state.port)).body(Body::from("{}")).unwrap();
+    assert_eq!(router(w.state.clone()).oneshot(request).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_child_asks_its_parent_and_gets_the_answer_back() {
+    let w = world();
+    write_item(&w.ws, "T-72-parent", "backlog", "answers_children: true\n");
+    write_item(&w.ws, "T-73-child", "backlog", "parent: T-72-parent\n");
+    write_item(&w.ws, "T-74-other", "backlog", "");
+
+    let asking = {
+        let w_state = w.state.clone();
+        let token = w.token.clone();
+        tokio::spawn(async move {
+            let request = Request::post("/api/mcp/app/T-73-child")
+                .header(header::HOST, format!("127.0.0.1:{}", w_state.port))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "ask_parent", "arguments": { "question": "Create a doc request\nfor the new param?", "recommendation": "No, internal only." } } }).to_string()))
+                .unwrap();
+            let response = router(w_state).oneshot(request).await.unwrap();
+            let reply: serde_json::Value = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+            reply["result"]["content"][0]["text"].as_str().unwrap().to_string()
+        })
+    };
+    eventually("the child is blocked on its question", || status_of(&w, "T-73-child") == "blocked: asking parent: Create a doc request for the new param?").await;
+
+    let (open, error) = tool(&w, "T-72-parent", "list_child_questions", serde_json::json!({})).await;
+    assert!(!error);
+    let open: serde_json::Value = serde_json::from_str(&open).unwrap();
+    assert_eq!(open[0]["child"], "T-73-child");
+    assert_eq!(open[0]["id"], 1);
+    assert_eq!(open[0]["recommendation"], "No, internal only.");
+
+    let (text, error) = tool(&w, "T-74-other", "answer_child", serde_json::json!({ "child": "T-73-child", "id": 1, "answer": "yes", "source": "x" })).await;
+    assert!(error && text.contains("not a child"), "only the parent answers: {text}");
+    let (_, error) = tool(&w, "T-72-parent", "answer_child", serde_json::json!({ "child": "T-73-child", "id": 1, "answer": "No: the param is internal.", "source": "the human" })).await;
+    assert!(!error);
+
+    assert_eq!(asking.await.unwrap(), "Answer to question 1 (from the human):\nNo: the param is internal.");
+    assert_eq!(status_of(&w, "T-73-child"), "ok", "no session waits, so its handler runs again");
+    let saved = fs::read_to_string(w.ws.join("T-73-child/questions.json")).unwrap();
+    assert!(saved.contains("\"answered_at\""), "{saved}");
+    let (text, error) = tool(&w, "T-72-parent", "answer_child", serde_json::json!({ "child": "T-73-child", "id": 1, "answer": "again", "source": "x" })).await;
+    assert!(error && text.contains("already answered"), "{text}");
+}
+
+#[tokio::test]
+async fn an_unanswered_question_can_be_waited_for_again() {
+    let w = world();
+    write_item(&w.ws, "T-75-parent", "backlog", "answers_children: true\n");
+    write_item(&w.ws, "T-76-child", "backlog", "parent: T-75-parent\n");
+    let (text, error) = tool(&w, "T-76-child", "ask_parent", serde_json::json!({ "question": "Which endpoint?" })).await;
+    assert!(!error);
+    assert_eq!(text, "No answer to question 1 yet. Call wait_for_answer with id 1 to keep waiting.");
+    tool(&w, "T-75-parent", "answer_child", serde_json::json!({ "child": "T-76-child", "id": 1, "answer": "The batch one.", "source": "## Refinement" })).await;
+    let (text, _) = tool(&w, "T-76-child", "wait_for_answer", serde_json::json!({ "id": 1 })).await;
+    assert_eq!(text, "Answer to question 1 (from ## Refinement):\nThe batch one.");
+
+    let (text, error) = tool(&w, "T-75-parent", "ask_parent", serde_json::json!({ "question": "x" })).await;
+    assert!(error && text.contains("no parent"), "{text}");
+    assert_eq!(status_of(&w, "T-75-parent"), "ok");
+
+    write_item(&w.ws, "T-78-plain-parent", "backlog", "");
+    write_item(&w.ws, "T-79-split", "backlog", "parent: T-78-plain-parent\n");
+    let (text, error) = tool(&w, "T-79-split", "ask_parent", serde_json::json!({ "question": "x" })).await;
+    assert!(error && text.contains("does not answer questions"), "a parent nothing answers for: {text}");
+    assert_eq!(status_of(&w, "T-79-split"), "ok");
+    assert!(!w.ws.join("T-79-split/questions.json").exists());
+}
+
+#[tokio::test]
+async fn item_sessions_get_the_questions_server_with_the_token_in_a_private_file() {
+    let w = world();
+    write_item(&w.ws, "T-77-item", "backlog", "");
+    let (status, _) = post(&w, "/api/workitems/app/T-77-item/session", "{}").await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    eventually("the session started", || args_log(&w).contains("mcp=")).await;
+    let log = args_log(&w);
+    let file = log.lines().find_map(|l| l.strip_prefix("mcp=")).unwrap();
+    assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+    let config: serde_json::Value = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
+    let server = &config["mcpServers"]["workitem"];
+    assert_eq!(server["url"], format!("http://127.0.0.1:{}/api/mcp/app/T-77-item", w.state.port));
+    assert_eq!(server["headers"]["Authorization"], format!("Bearer {}", w.token));
 }

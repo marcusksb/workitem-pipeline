@@ -1,4 +1,7 @@
 {
+  "permissions": {
+    "allow": ["mcp__workitem"]
+  },
   "hooks": {
     "Notification": [
       { "hooks": [{ "type": "command", "command": "python3 ~/.claude/skills/workitem-pipeline/bin/workitem-notify" }] }

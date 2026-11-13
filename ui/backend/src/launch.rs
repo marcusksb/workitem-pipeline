@@ -85,6 +85,9 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
         }
     };
     let mut args = add_dirs(&dirs);
+    if let Scope::Item(place) = &scope {
+        args.extend(["--mcp-config".into(), mcp_config(state, workspace, place.dir)?.into()]);
+    }
     let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
     args.extend(["--settings".into(), hooks.into()]);
     if let Some(model) = model {
@@ -98,6 +101,24 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
 fn stage_model(state: &AppState, workspace: &Workspace, place: &Place) -> Option<String> {
     let (item, _) = workitem::read(workspace, place.dir)?;
     state.pipeline(workspace, place.board).pipeline?.stage(&item.stage)?.model.clone()
+}
+
+/// The MCP config of an item session (decision 61): the backend's `questions` server for this
+/// item, with the token. Written to `<root>/mcp/` with mode 0600, because argv is visible to every
+/// local user; rewritten on each launch.
+fn mcp_config(state: &AppState, workspace: &Workspace, dir: &str) -> Result<PathBuf, String> {
+    use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
+    let folder = state.store.sibling("mcp");
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let path = folder.join(format!("{}--{dir}.json", workspace.name));
+    let url = format!("http://127.0.0.1:{}/api/mcp/{}/{dir}", state.port, workspace.name);
+    let config = json!({ "mcpServers": { crate::questions::SERVER: {
+        "type": "http", "url": url, "headers": { "Authorization": format!("Bearer {}", state.store.token()) },
+    } } });
+    let _ = fs::remove_file(&path);
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(config.to_string().as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 /// A workspace, plan or repo-less item session starts outside every repo, so Claude Code would not read the repos'
@@ -217,6 +238,9 @@ There is no tool for it: set it by editing that line in the file.\n\
 A human may attach to this tmux session ({session}). If you need input,\n\
 set agent_status: blocked: <reason>, ask the question here and wait.\n\
 After the answer, set agent_status: working and continue.\n\
+If the frontmatter has a parent: line, ask with the ask_parent tool of the workitem MCP server\n\
+first: it blocks the item for you and returns the answer. If it refuses, ask here.\n\
+Permission prompts stay here.\n\
 Before you idle on something that needs no human (CI, a deploy), set\n\
 agent_status: waiting: <what>. When it is done, set agent_status: working and continue.\n";
 

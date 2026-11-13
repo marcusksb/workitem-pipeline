@@ -8,6 +8,7 @@ pub mod git;
 pub mod launch;
 pub mod locate;
 pub mod pipeline;
+pub mod questions;
 pub mod plans;
 pub mod review;
 pub mod static_files;
@@ -45,6 +46,8 @@ pub struct AppState {
     pub wake: tokio::sync::Notify,
     /// Stages (`workspace/board/stage`) whose watchers do not start; see `watch::set_paused`.
     pub paused: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// How long one `ask_parent` or `wait_for_answer` call waits for its answer (`questions.rs`).
+    pub ask_wait: std::time::Duration,
 }
 
 impl AppState {
@@ -63,6 +66,7 @@ impl AppState {
             watching: Default::default(),
             wake: Default::default(),
             paused: std::sync::Mutex::new(watch::load_paused(&store)),
+            ask_wait: std::time::Duration::from_secs(240),
             store,
         }
     }
@@ -101,6 +105,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workitems/{workspace}/{dir}/merge",post(actions::merge))
         .route("/api/workitems/{workspace}/{dir}/rebase", post(actions::rebase))
         .route("/api/workitems/{workspace}/{dir}/remove", post(actions::remove))
+        .route("/api/mcp/{workspace}/{dir}", post(questions::mcp).get(questions::mcp_stream))
         .route("/api/workspaces/{workspace}/create", post(actions::create))
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/plans", get(plans::list_plans))
