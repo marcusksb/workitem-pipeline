@@ -137,6 +137,12 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
                 placeholder="Jira key, Sentry URL or task description"
                 rows={4}
                 required
@@ -155,7 +161,10 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
                 </select>
               </label>
             )}
-            <span className="hint">A task that needs changes in the repos of several boards becomes one linked item per board.</span>
+            <span className="hint">
+              Enter creates, Shift+Enter adds a line. A task that needs changes in the repos of several boards becomes one linked item per
+              board.
+            </span>
             <button type="submit">Create</button>
             {error && <span className="error">{error}</span>}
           </form>
