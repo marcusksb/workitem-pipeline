@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { cardChildren, orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -167,6 +167,21 @@ describe("treeOrder", () => {
   it("does not drop items in a parent cycle", () => {
     const rows = treeOrder([item({ dir: "a", parent: "b" }), item({ dir: "b", parent: "a" })]);
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe("cardChildren", () => {
+  it("lists the parent's children outside its column, blocked first", () => {
+    const parent = item({ dir: "p", board: "features", stage: "children" });
+    const rows = cardChildren(parent, [
+      parent,
+      item({ dir: "a", title: "A", parent: "p", board: "fe", stage: "analyze" }),
+      item({ dir: "b", title: "B", parent: "p", board: "be", stage: "pr", agent_status: "blocked: ci" }),
+      item({ dir: "same", parent: "p", board: "features", stage: "children" }),
+      item({ dir: "other", parent: "p", board: "fe", workspace: "lib" }),
+      item({ dir: "stranger", parent: "q", board: "fe" }),
+    ]);
+    expect(rows.map((i) => i.dir)).toEqual(["b", "a"]);
   });
 });
 

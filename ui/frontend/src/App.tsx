@@ -131,10 +131,12 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const inView = workspace ? [workspace] : [];
   const boardsInView = boardNames(pipelines.data, inView);
   const activeBoard = route.board && boardsInView.includes(route.board) ? route.board : boardsInView[0];
-  /** Opens an item in its workspace, switching to its board only when another one is on screen. */
+  /** Opens an item in its workspace, switching to its board only when another one is on screen
+   * and its parent is not on this one (children are shown under their parent too). */
   const open = (item: Item, tab?: Tab) => {
     const board = shownBoard(item, pipelines.data);
-    const sameView = item.workspace === workspace && board === activeBoard;
+    const underParent = shown.some((p) => p.dir === item.parent && shownBoard(p, pipelines.data) === activeBoard);
+    const sameView = item.workspace === workspace && (board === activeBoard || underParent);
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
   useAlerts(items.data, open);

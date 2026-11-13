@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { blockedByBoard, boardNames, byStage, cardChildren, stageTitle, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Learnings } from "./Learnings";
@@ -147,7 +147,8 @@ function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void 
   );
 }
 
-function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; depth?: number }) {
+/** `where`: board and stage of a child shown under its parent outside its own column. */
+function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, where, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; where?: string; depth?: number }) {
   const icon = KIND_ICONS[item.kind.trim().toLowerCase()];
   return (
     <div
@@ -167,6 +168,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
       <div className="title">{item.title}</div>
       <div className="meta">
         {showWorkspace && <span className="badge">{item.workspace}</span>}
+        {where && <span className="badge where">{where}</span>}
         <span className="badge">{item.kind}</span>
         <LinkBadges item={item} />
       </div>
@@ -222,11 +224,12 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
   };
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
   const [learning, setLearning] = useState(false);
-  const card = (item: Item, depth = 0) => (
+  const card = (item: Item, depth = 0, where?: string) => (
     <Card
       key={itemKey(item)}
       item={item}
       depth={depth}
+      where={where}
       selected={selected === itemKey(item)}
       onSelect={() => onSelect(item)}
       showWorkspace={showWorkspace}
@@ -286,7 +289,10 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
                 {pause.workspaces.length > 0 && <PauseColumn workspaces={pause.workspaces} board={active} stage={name} label={label} paused={pause.paused} onDone={onChanged} />}
                 {final && inColumn.length > 0 && <ClearColumn items={inColumn} onDone={onChanged} />}
               </h2>
-              <div className="cards">{treeOrder(inColumn, orderFor(pipelines, workspaces, active, name)).map(({ item, depth }) => card(item, depth))}</div>
+              <div className="cards">{treeOrder(inColumn, orderFor(pipelines, workspaces, active, name)).flatMap(({ item, depth }) => [
+                  card(item, depth),
+                  ...cardChildren(item, items).map((child) => card(child, depth + 1, `${boardLabel(pipelines, child.workspace, child.board)} · ${stageTitle(child, pipelines)}`)),
+                ])}</div>
             </section>
           );
         })}

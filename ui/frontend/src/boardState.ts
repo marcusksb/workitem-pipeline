@@ -199,6 +199,16 @@ export function treeOrder(unsorted: Item[], order: string[] = []): { item: Item;
   return out;
 }
 
+/**
+ * The children a parent's card lists: items of its workspace whose `parent:` is it, except those
+ * in its own column (`treeOrder` already shows them under it). Blocked first, then by title.
+ */
+export function cardChildren(parent: Item, items: Item[]): Item[] {
+  return items
+    .filter((i) => i.workspace === parent.workspace && i.parent === parent.dir && i.dir !== parent.dir && !(i.board === parent.board && i.stage === parent.stage))
+    .sort((a, b) => Number(isBlocked(b)) - Number(isBlocked(a)) || a.title.localeCompare(b.title));
+}
+
 export const itemKey = (item: Item) => `${item.workspace}/${item.dir}`;
 
 /** `issue:` is `KEY (url)` or `none`. */
