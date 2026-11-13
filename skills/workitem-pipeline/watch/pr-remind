@@ -37,7 +37,8 @@ MENTION_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
 
 
 def parse_time(text):
-    return datetime.fromisoformat(text)
+    # Python before 3.11 (macOS /usr/bin/python3 is 3.9) does not accept GitHub's trailing "Z".
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 def business_time(start, end):
