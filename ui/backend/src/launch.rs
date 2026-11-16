@@ -466,13 +466,15 @@ pub fn conflict_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
     format!(
         "{pr}, the PR of workitem {dir} in repo {repo}, conflicts with its base branch.\n\
 1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Get the base branch name (gh pr view {pr} --json baseRefName), git fetch origin <base>, then rebase onto origin/<base>, \
-never a local copy of it. Resolve a conflict only when the result is obvious \
-and keeps both sides' behavior. Lockfiles: take the base version, then rerun the tool. No -X ours/theirs.\n\
-3. Give up when a db schema, structure or migration file is in conflict, more than 5 files or about 150 lines conflict, \
-or you would have to guess what someone meant: git rebase --abort, then step 5.\n\
-4. Run the affected tests and the linter. Only if they pass, git push --force-with-lease, then set agent_status: ok and stop.\n\
-5. Cannot resolve it safely: set agent_status: blocked: merge conflict needs manual rebase: <one line reason>, explain here and wait.\n\
+2. Get the base branch name (gh pr view {pr} --json baseRefName), git fetch origin <base>, then git merge origin/<base>, \
+never a local copy of it. Do not rebase.\n\
+3. Resolve every conflict. Read what each side changed (git log --merge -p <file>) and keep both sides' behavior. \
+When it is unclear what someone meant, pick the most likely meaning and go on. \
+Generated files (lockfiles, schema dumps, generated docs): take the base version, then rerun the tool that writes them; \
+if the tool cannot run, merge both sides by hand. No -X ours/theirs, never git merge --abort.\n\
+4. Run the affected tests and the linter, and fix what the merge broke. Commit the merge and git push (no force push). \
+If failures remain that you cannot fix, push anyway and name them here in one line: the CI fixer takes over.\n\
+5. Set agent_status: ok and stop. Do not block on the conflict.\n\
 {learnings}The workitem file is {file} (in the workspace folder, outside the repo): set agent_status there.\n\
 Never change stage:.\n\
 {protocol}",
@@ -531,6 +533,16 @@ mod tests {
         for prompt in [ci_fix_prompt(&place, repo, "#7"), comments_fix_prompt(&place, repo, "#7"), conflict_fix_prompt(&place, repo, "#7"), session_prompt(&place), brief_prompt(&place)] {
             assert!(prompt.contains(want), "missing workitem path in: {prompt}");
             assert!(prompt.contains("/r/proj"), "missing repo in: {prompt}");
+        }
+    }
+
+    #[test]
+    fn the_conflict_fixer_merges_the_base_and_never_blocks() {
+        let place = place(Path::new("/w/main"), "dev");
+        let prompt = conflict_fix_prompt(&place, Path::new("/r/proj"), "#7");
+        assert!(prompt.contains("git merge origin/<base>"), "{prompt}");
+        for word in ["rebase onto", "--force", "needs manual rebase", "Give up", "git rebase --abort"] {
+            assert!(!prompt.contains(word), "{word} in: {prompt}");
         }
     }
 

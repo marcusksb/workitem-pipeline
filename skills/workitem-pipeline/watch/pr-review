@@ -5,14 +5,16 @@
 
 Reads only the items' frontmatter, never GitHub. For each item with a PR link, at most one of:
   - pr_state merged: move it to WORKITEM_ON_MERGE; closed: block it;
-  - pr_merge conflicting: start the conflict fixer, once per PR head;
+  - pr_merge conflicting: start the conflict fixer, at most --max-attempts times per PR head
+    (pr_conflict_attempts);
   - pr_ci_fix failing: start the CI fixer, once per PR head and at most --max-attempts times
     per red streak (pr_fix_attempts);
   - pr_unseen_comments: start the comments fixer and move the ids into pr_seen_comments.
 Fixers only start for an idle item (ok, no session). A fixer is remembered as pr_fixing; when its
 session is gone the script stamps pr_fix_ended_at and waits until pr-status read the PR after it
-(pr_checked_at), so it never acts on what it read before the fixer pushed. A CI or conflict fixer
-whose head is still red or conflicting then pushed nothing, and the item is blocked. While an
+(pr_checked_at), so it never acts on what it read before the fixer pushed. A CI fixer whose head
+is still red then pushed nothing, and the item is blocked; a conflict fixer whose head still
+conflicts is started again until its attempts run out, then the item is blocked. While an
 item is blocked its heads and attempts are forgotten, so clearing the block tries again.
 """
 import json, os, subprocess, sys
@@ -24,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOV
                 else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
 from workitem_fields import read_fields, set_fields  # noqa: E402
 
-FORGOTTEN_WHILE_BLOCKED = ("pr_conflict_head", "pr_ci_head", "pr_fix_attempts")
+FORGOTTEN_WHILE_BLOCKED = ("pr_conflict_head", "pr_conflict_attempts", "pr_ci_head", "pr_fix_attempts")
 
 
 def unquote(value):
@@ -75,11 +77,13 @@ def decide(fields, busy, max_attempts, stamp):
     # conflict goes first, and comments after it, since fixing them on a stale base would
     # conflict again.
     if fields.get("pr_merge") == "conflicting" and head:
-        if fields.get("pr_conflict_head") == head:
-            return {"agent_status": "blocked: merge conflict still open after the conflict fixer; rebase by hand, or clear to retry",
-                    "pr_conflict_head": None}, None
-        # The rebase starts a new CI streak.
-        return {"pr_conflict_head": head, "pr_fix_attempts": None, "pr_fixing": "conflict"}, ("fix", "conflict")
+        tries = int(fields.get("pr_conflict_attempts") or 0) if fields.get("pr_conflict_head") == head else 0
+        if tries >= max_attempts:
+            return {"agent_status": f"blocked: merge conflict still open after {tries} conflict fixer runs; resolve by hand, or clear to retry",
+                    "pr_conflict_head": None, "pr_conflict_attempts": None}, None
+        # The merge starts a new CI streak.
+        return {"pr_conflict_head": head, "pr_conflict_attempts": str(tries + 1), "pr_fix_attempts": None,
+                "pr_fixing": "conflict"}, ("fix", "conflict")
     if ci == "failing":
         if head and fields.get("pr_ci_head") == head:
             return {"agent_status": "blocked: CI still failing and the CI fixer pushed nothing; fix by hand, or clear to retry",

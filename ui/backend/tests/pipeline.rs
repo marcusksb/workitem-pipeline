@@ -804,7 +804,7 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
 }
 
 #[tokio::test]
-async fn review_starts_one_conflict_fixer_per_pr_head() {
+async fn review_retries_the_conflict_fixer_up_to_the_cap_per_pr_head() {
     let w = world();
     write_item(&w.ws, "T-26-conflict", "in_review", PR);
     let set_head = |sha: &str| {
@@ -822,28 +822,24 @@ async fn review_starts_one_conflict_fixer_per_pr_head() {
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("conflicts with its base branch"), "{prompts}");
 
-    for _ in 0..3 {
+    // The fixer said ok without a push: it runs again on the same head, up to the cap (3), and
+    // then the item is blocked, so it never sits on ok with the conflict unseen.
+    for _ in 0..20 {
+        if field(&w.ws, "T-26-conflict", "agent_status").starts_with("blocked") {
+            break;
+        }
         settle_pr(&w).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
-    assert_eq!(stub_log(&w.repo).len(), 1, "the same head starts no second fixer");
-    // The fixer said ok without a push: the item must not sit on ok with the conflict unseen.
-    assert!(field(&w.ws, "T-26-conflict", "agent_status").starts_with("blocked: merge conflict still open"));
+    assert_eq!(stub_log(&w.repo).len(), 3, "the same head gets at most three fixers");
+    assert!(field(&w.ws, "T-26-conflict", "agent_status").starts_with("blocked: merge conflict still open after 3"));
     assert_eq!(field(&w.ws, "T-26-conflict", "pr_conflict_head"), "", "the head is forgotten while blocked");
+    assert_eq!(field(&w.ws, "T-26-conflict", "pr_conflict_attempts"), "", "the attempts are forgotten while blocked");
 
-    // Clearing the block tries again on the same head; a new head does too.
+    // Clearing the block tries again on the same head.
     set_ok(&w.ws, "T-26-conflict");
     settle_pr(&w).await;
-    eventually("clearing the block retries the fixer", || stub_log(&w.repo).len() == 2).await;
-
-    for _ in 0..3 {
-        settle_pr(&w).await;
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    }
-    set_ok(&w.ws, "T-26-conflict");
-    set_head("bbb");
-    settle_pr(&w).await;
-    eventually("a new head starts a new fixer", || stub_log(&w.repo).len() == 3).await;
+    eventually("clearing the block retries the fixer", || stub_log(&w.repo).len() == 4).await;
 }
 
 #[tokio::test]
