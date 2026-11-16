@@ -43,6 +43,7 @@ Items live in a workspace folder, outside the repo. The workitem file is the one
 Read the matched `workitem.md` and parse the frontmatter.
 
 - If `stage` is `backlog`, `analyze` or `ready_for_development` with `approved: false`, stop: it is not approved. Tell the user which stage it is in.
+- If `stage` is `in_development` and the last `### Round` under `## Self-review` has unchecked `Blocking` findings, the self-review sent it back: this is a **fix round**. Do not ask whether to resume or restart. Set `agent_status: working`, reuse the worktree (Step 5, step 3), and fix only those blockers, nothing else from the review. Commit each fix and tick its line `- [x]`, adding ` (fixed in <short sha>)` to the end of its title line. Run `rubocop -a` and the relevant `bin/rspec` target, push, then follow Step 7 from `/monitor-pr` on (the PR exists already). A blocker you cannot fix: leave it unticked and set `agent_status: blocked: cannot fix self-review blocker: <title>`.
 - If `stage` is already `in_development`, `in_review`, or `done`, tell the user and ask whether to resume as-is or restart — do not silently reset it.
   - If it's `in_development` and a `session:` field is present, that's a previously spawned background agent (see Step 4b) — offer to reconnect to it (Step 6) instead of restarting.
 
@@ -117,11 +118,19 @@ Then review your own diff (`git diff origin/master...`) against the repo's CLAUD
 
 Read `pr_mode` from the frontmatter.
 
-- `none` → skip this step.
+`<next>` is the stage marked `(default)` under "Allowed next stages" in your prompt (`in_review` on the bundled board). Only when `<next>` is `in_review` does this skill mark the PR ready. Otherwise the stage before `in_review` (a self-review or QA stage) does it, and the PR stays a draft here.
+
+- `none` → no PR. If `<next>` is not `in_review`, run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` once rubocop and the specs pass (it also sets `agent_status: ok`). Otherwise skip this step.
 - `draft` or `ready` → this repo's own rule is to **always** create PRs as drafts regardless of `pr_mode`; if `pr_mode: ready`, tell the user about the conflict and default to draft unless they explicitly override.
 - As soon as the PR is opened, write its URL into the workitem frontmatter as a new `pr:` field — the board's PR watchers need it to find this PR later.
-- Start `/monitor-pr {pr}` per AGENTS.md. While it idles until CI finishes, keep `agent_status: waiting: CI on PR #{pr}`; set `agent_status: working` whenever it acts. Once it reports CI green and comments addressed, mark the PR ready for review and request the `backend` team as reviewer (`gh pr ready {pr} && gh pr edit {pr} --add-reviewer "$(gh repo view --json owner -q .owner.login)/backend"`; if adding the team fails, say so in your report but still move on), then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` (the stage marked `(default)` under "Allowed next stages" in your prompt; `in_review` on the bundled board; it also sets `agent_status: ok`) — from here, the board's PR watchers take over monitoring.
-- Right after marking the PR ready, move the linked Jira issue to `In Review` the same way as in Step 3 (Rovo MCP tools; skip if `issue:` is `none` or another item depends on this one; do nothing if it is already `In Review`). If there is no `In Review` transition or the call fails, do not stop: list the available transitions in the report.
+- Start `/monitor-pr {pr}` per AGENTS.md. While it idles until CI finishes, keep `agent_status: waiting: CI on PR #{pr}`; set `agent_status: working` whenever it acts. Once it reports CI green and comments addressed: if `<next>` is `in_review`, do **Mark ready for review** below. Then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` (it also sets `agent_status: ok`) — from here, the next stage's handler or the board's PR watchers take over.
+
+#### Mark ready for review
+
+Other handlers (self-review, QA) point here, so this is written once.
+
+1. `gh pr ready {pr} && gh pr edit {pr} --add-reviewer "$(gh repo view --json owner -q .owner.login)/backend"`. If adding the team fails, say so in your report but still move on.
+2. Move the linked Jira issue to `In Review` the same way as in Step 3 (Rovo MCP tools; skip if `issue:` is `none` or another item depends on this one; do nothing if it is already `In Review`). If there is no `In Review` transition or the call fails, do not stop: list the available transitions in the report.
 
 ### Step 8 — Report
 
