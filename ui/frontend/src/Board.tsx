@@ -28,12 +28,17 @@ type Props = {
   onChanged: () => void;
 };
 
-/** Removes every item of a final column, one by one, the same way as "Remove workitem". */
+/** Removes the items of a final column, one by one, the same way as "Remove workitem". A dialog
+ * picks which: by default only those without open follow-ups, so the ones with work left stay. */
 function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
   const { busy, error, run } = useRun(onDone);
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const withoutFollowUps = items.filter((item) => item.follow_ups.length === 0);
+  const chosen = all ? items : withoutFollowUps;
   const clear = async () => {
     const problems: string[] = [];
-    for (const item of items) {
+    for (const item of chosen) {
       try {
         const { worktree_left } = await api.remove(item);
         if (worktree_left) problems.push(`${item.title}: worktree stays: ${worktree_left}`);
@@ -43,24 +48,46 @@ function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
     }
     if (problems.length) throw new Error(problems.join("\n"));
   };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setOpen(false);
+    run("Clear", clear);
+  };
   return (
     <>
       <button
         className="link clear"
         disabled={busy}
-        title="Remove every workitem in this column"
-        onClick={() =>
-          run(
-            "Clear",
-            clear,
-            `Remove all ${items.length} workitems in this column?\nTheir agent sessions are stopped, and their worktrees and workitem folders are deleted. This cannot be recovered. Branches and PRs stay.`,
-          )
-        }
+        title="Remove workitems in this column"
+        onClick={() => {
+          setAll(false);
+          setOpen(true);
+        }}
       >
         <IconTrash />
         Clear
       </button>
       {error && <p className="error clear-error">{error}</p>}
+      {open && (
+        <Dialog title="Clear column" onClose={() => setOpen(false)}>
+          <form className="dialog-form" onSubmit={submit}>
+            <label className="choice">
+              <input type="radio" name="clear" checked={!all} onChange={() => setAll(false)} />
+              Only workitems without follow-ups ({withoutFollowUps.length})
+            </label>
+            <label className="choice">
+              <input type="radio" name="clear" checked={all} onChange={() => setAll(true)} />
+              All workitems ({items.length})
+            </label>
+            <span className="hint">
+              Their agent sessions are stopped, and their worktrees and workitem folders are deleted. This cannot be recovered. Branches and PRs stay.
+            </span>
+            <button type="submit" disabled={chosen.length === 0}>
+              Remove {chosen.length} workitem{chosen.length === 1 ? "" : "s"}
+            </button>
+          </form>
+        </Dialog>
+      )}
     </>
   );
 }

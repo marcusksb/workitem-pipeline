@@ -402,6 +402,8 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .dialog-form { display: grid; gap: 10px; justify-items: start; }
 .dialog-form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); width: 100%; }
 .dialog-form textarea, .dialog-form input { width: 100%; }
+.dialog-form label.choice { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.dialog-form label.choice input { width: auto; margin: 0; }
 .dialog-form textarea:focus-visible, .dialog-form input:focus-visible {
   outline: none;
   border-color: var(--accent);
@@ -418,7 +420,8 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
   color: #fff;
   transition: background-color 0.15s, transform 0.05s;
 }
-.dialog-form button[type="submit"]:hover { background: color-mix(in srgb, var(--accent) 85%, #000); }
+.dialog-form button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
+.dialog-form button[type="submit"]:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, #000); }
 .dialog-form button[type="submit"]:active { transform: translateY(1px); }
 .dialog-form button[type="submit"]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
 @media (prefers-color-scheme: dark) {
