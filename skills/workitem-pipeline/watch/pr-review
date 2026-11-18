@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Column watcher for the PR stage: react to the PR facts that watch/pr-status wrote.
 
-  pr-review [--max-attempts 3]
+  pr-review [--max-attempts 3] [--issue-status "Waiting for Deployment"]
 
 Reads only the items' frontmatter, never GitHub. For each item with a PR link, at most one of:
-  - pr_state merged: move it to WORKITEM_ON_MERGE; closed: block it;
+  - pr_state merged: move it to WORKITEM_ON_MERGE; closed: block it. With --issue-status, a
+    successful move also moves the item's Jira issue to that status (jira-cli setup, see
+    bin/workitem_jira.py), unless the issue is done or there already, or another item of the
+    workspace depends on this one (only the last item of a chain moves the shared ticket). A
+    Jira error is logged and never holds back the move;
   - pr_merge conflicting: start the conflict fixer, at most --max-attempts times per PR head
     (pr_conflict_attempts);
   - pr_ci_fix failing: start the CI fixer, once per PR head and at most --max-attempts times
@@ -25,6 +29,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
                 else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
 from workitem_fields import read_fields, set_fields  # noqa: E402
+from workitem_jira import credentials, issue_key, transition_to  # noqa: E402
 
 FORGOTTEN_WHILE_BLOCKED = ("pr_conflict_head", "pr_conflict_attempts", "pr_ci_head", "pr_fix_attempts")
 
@@ -100,9 +105,21 @@ def decide(fields, busy, max_attempts, stamp):
     return updates, None
 
 
+def depended_on(root, name):
+    """True when another item of the workspace names `name` in its `depends_on:`."""
+    for other in os.listdir(root):
+        path = os.path.join(root, other, "workitem.md")
+        if other == name or not os.path.isfile(path):
+            continue
+        if name in (d.strip() for d in read_fields(path).get("depends_on", "").split(",")):
+            return True
+    return False
+
+
 class Watcher:
-    def __init__(self, max_attempts):
+    def __init__(self, max_attempts, issue_status=None):
         self.max_attempts = max_attempts
+        self.issue_status = issue_status
         self.on_merge = os.environ.get("WORKITEM_ON_MERGE", "")
         self.busy = set(filter(None, os.environ.get("WORKITEM_BUSY", "").split(",")))
         self.root = os.environ["WORKITEM_DIR_ROOT"]
@@ -116,13 +133,30 @@ class Watcher:
             print(f"cannot start the {kind} fixer of {name}: {result.stderr.strip()}", file=sys.stderr)
         return result.returncode == 0
 
+    def jira(self, name, fields):
+        """Moves the item's Jira issue to --issue-status; logs every failure, never raises."""
+        key = issue_key(fields.get("issue"))
+        if not key or depended_on(self.root, name):
+            return
+        try:
+            result = transition_to(*credentials(), key, self.issue_status)
+        except Exception as e:  # a Jira problem must never stop the watcher
+            print(f"cannot move {key} of {name} to {self.issue_status}: {e}", file=sys.stderr)
+            return
+        if result == "moved":
+            print(f"moved {key} of {name} to {self.issue_status}", file=sys.stderr)
+
     def check(self, item):
         name = item["dir"]
         path = os.path.join(self.root, name, "workitem.md")
-        updates, action = decide(read_fields(path), name in self.busy, self.max_attempts, now())
+        fields = read_fields(path)
+        updates, action = decide(fields, name in self.busy, self.max_attempts, now())
         if action == ("move",):
             if self.on_merge:
-                subprocess.run([sys.executable, self.move, path, self.on_merge], capture_output=True)
+                moved = subprocess.run([sys.executable, self.move, path, self.on_merge], capture_output=True)
+                # A refused move is retried on the next pass; Jira is only asked once it went through.
+                if moved.returncode == 0 and self.issue_status:
+                    self.jira(name, fields)
             return
         if action and not self.fixer(name, action[1]):
             return
@@ -130,16 +164,18 @@ class Watcher:
 
 
 def main(argv):
-    max_attempts = 3
+    max_attempts, issue_status = 3, None
     while argv:
         flag = argv.pop(0)
         if flag == "--max-attempts":
             max_attempts = int(argv.pop(0))
+        elif flag == "--issue-status":
+            issue_status = argv.pop(0)
         elif flag == "--ignore":
             argv.pop(0)  # moved to pr-status; accepted so older boards still run
         else:
             sys.exit(f"unknown option {flag}")
-    watcher = Watcher(max_attempts)
+    watcher = Watcher(max_attempts, issue_status)
     for item in json.load(sys.stdin):
         if item["pr"].startswith("http"):
             watcher.check(item)
