@@ -170,7 +170,7 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .card { text-align: left; background: var(--panel); border: 1px solid transparent; border-radius: 12px; padding: 14px 16px; display: block; width: 100%; cursor: pointer; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 1px 3px rgb(0 0 0 / 0.06); }
 .card[style*="margin-left"] { width: auto; border-left: 3px solid var(--border); }
 .card:hover { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
-.card.selected { border-color: var(--accent); }
+.card.selected { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .card.blocked { --ring: var(--blocked); }
 .card.waiting { --ring: var(--waiting); }
 .card.blocked, .card.waiting { position: relative; border-color: var(--ring); }
@@ -196,7 +196,6 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 }
 @media (prefers-color-scheme: dark) {
   .card { border-color: var(--border); }
-  .card.selected { border-color: var(--accent); }
   .card.blocked, .card.waiting { border-color: var(--ring); }
 }
 .card .title { font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere; }
