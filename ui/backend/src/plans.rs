@@ -234,6 +234,8 @@ fn prompt(state: &AppState, workspace: &Workspace, session: &str, input: &str) -
 with you: explore the code, answer questions, compare options and work towards a plan. Ask when something is unclear.\n\
 The workspace has these boards, each with its repo; all of the repos are added to this session:\n{boards}\
 You do not change code here. Edits outside {workspace} are refused; prefer read-only shell commands, others ask the human first.\n\
+Only when the human asks, you may edit the workspace's board files ({workspace}/boards/<board>.json) and skills ({workspace}/skills/, \
+{workspace}/boards/<board>/skills/). Do not edit existing workitems; their stage changes only through workitem-move.\n\
 Keep the record of this session current, always with exactly these commands:\n\
 - Right after reading the request, and after each meaningful step: python3 {note} \"<one line: what this is about and where it stands>\"\n\
 - Only when the human wants a plan saved: python3 {note} --plan <<'PLAN' ... PLAN (the whole plan as markdown on stdin).\n\
