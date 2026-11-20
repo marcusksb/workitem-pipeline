@@ -472,7 +472,7 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .plans-cards { display: flex; gap: 10px; overflow-x: auto; padding: 8px 2px 2px; align-items: stretch; }
 .plan-card { flex: 0 0 260px; align-items: flex-start; text-align: left; font-size: 14px; font-weight: 400; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; color: var(--text); }
 .plan-card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
-.plan-card.selected { border-color: var(--accent); }
+.plan-card.selected { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .plan-card.waiting { border-color: var(--working); }
 .plan-card.ended { opacity: 0.75; }
 .plan-topic { font-weight: 600; display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
