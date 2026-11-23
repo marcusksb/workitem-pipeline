@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { boardLabel, boardOfWorkspace, repoName } from "./boardState";
-import { IconPlus } from "./icons";
+import { IconPlus, IconSearch } from "./icons";
 import { Pipelines, Workspace } from "./types";
 import { NewWorkitemDialog } from "./Workspaces";
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export type View = "board" | "list";
 
@@ -15,13 +17,14 @@ type Props = {
   board: string | undefined;
   view: View;
   onView: (view: View) => void;
+  onSearch: () => void;
   error: string | undefined;
   /** Called once a workitem session was started. */
   onCreated: () => void;
 };
 
-/** The bar above the board: which board and repo, Board or List, and New workitem. */
-export function TopBar({ workspace, pipelines, board, view, onView, error, onCreated }: Props) {
+/** The bar above the board: which board and repo, Search, Board or List, and New workitem. */
+export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
   const repo = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline?.repo : undefined;
@@ -36,6 +39,11 @@ export function TopBar({ workspace, pipelines, board, view, onView, error, onCre
         )}
       </div>
       {error && <span className="error text-[13px]">{error}</span>}
+      <Button variant="secondary" className="h-[30px] gap-2 px-2 font-normal text-muted-foreground" onClick={onSearch} title="Find a workitem by title, issue key or PR number">
+        <IconSearch />
+        Search
+        <kbd className="rounded border border-border px-1 font-sans text-[11px]">{isMac ? "⌘" : "Ctrl+"}K</kbd>
+      </Button>
       {board && (
         <div role="group" aria-label="View" className="flex rounded-[7px] bg-muted p-0.5">
           {(["board", "list"] as const).map((v) => (

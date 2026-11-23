@@ -178,7 +178,6 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         board={activeBoard}
         onWorkspace={(name) => navigate({ workspace: name, board: undefined })}
         onBoard={(board) => navigate({ ...route, board })}
-        onSearch={() => setSearching(true)}
         onChanged={() => {
           void workspaces.reload();
           void items.reload();
@@ -205,6 +204,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           board={activeBoard}
           view={view}
           onView={chooseView}
+          onSearch={() => setSearching(true)}
           error={error}
           onCreated={() => void sessions.reload()}
         />

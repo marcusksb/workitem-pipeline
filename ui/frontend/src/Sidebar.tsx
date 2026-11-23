@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { blockedByBoard, boardLabel, boardNames, itemsByBoard } from "./boardState";
-import { IconBoard, IconBook, IconChevronDown, IconEye, IconPlus, IconSearch, IconSliders } from "./icons";
+import { IconBoard, IconBook, IconChevronDown, IconEye, IconPlus, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
@@ -14,7 +14,6 @@ export const navItem = "h-[30px] w-full justify-start px-2 font-normal text-fore
 /** A section's small heading. */
 export const navHeading = "px-2 py-1 text-[11.5px] font-medium text-muted-foreground";
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 type Props = {
   workspaces: Workspace[];
@@ -27,7 +26,6 @@ type Props = {
   board: string | undefined;
   onWorkspace: (name: string) => void;
   onBoard: (name: string) => void;
-  onSearch: () => void;
   /** Called after a workspace or board was added or changed. */
   onChanged: () => void;
   /** The Plans section. */
@@ -36,8 +34,8 @@ type Props = {
 
 type Open = "workspace" | "board" | "settings" | "watchers" | "learnings";
 
-/** The app's left column: workspace, search, boards, plans and the workspace's settings. */
-export function Sidebar({ workspaces, workspace, pipelines, items, board, onWorkspace, onBoard, onSearch, onChanged, children }: Props) {
+/** The app's left column: workspace, boards, plans and the workspace's settings. */
+export function Sidebar({ workspaces, workspace, pipelines, items, board, onWorkspace, onBoard, onChanged, children }: Props) {
   const [open, setOpen] = useState<Open>();
   const close = () => setOpen(undefined);
   const current = workspaces.find((w) => w.name === workspace);
@@ -77,12 +75,6 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <Button variant="secondary" className="h-[30px] w-full justify-start gap-2 px-2 font-normal text-muted-foreground" onClick={onSearch} title="Find a workitem by title, issue key or PR number">
-        <IconSearch />
-        <span className="flex-1 text-left">Search</span>
-        <kbd className="rounded border border-border px-1 font-sans text-[11px]">{isMac ? "⌘" : "Ctrl+"}K</kbd>
-      </Button>
 
       {current && (
         <div className="flex flex-col gap-px">
