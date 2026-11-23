@@ -3,7 +3,6 @@ import { api, itemTerminal } from "./api";
 import { AgentStatus } from "./AgentStatus";
 import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, shownBoard, stageLabel, stageTitle, stripFrontmatter } from "./boardState";
 import { Gate, Item, Pipelines } from "./types";
-import { Actions } from "./Actions";
 import { AgentActions } from "./AgentActions";
 import { BriefEditor } from "./BriefEditor";
 import { BriefView } from "./BriefView";
@@ -26,7 +25,6 @@ import { useRun } from "./useRun";
 import {
   IconBoard,
   IconCheck,
-  IconExternal,
   IconFileText,
   IconFolder,
   IconGitPullRequest,
@@ -35,8 +33,8 @@ import {
   IconListTree,
   IconMessage,
   IconPencil,
-  IconSliders,
   IconTerminalSquare,
+  IconTrash,
   IconUndo,
   IconUnlock,
   IconX,
@@ -126,7 +124,7 @@ function BlockedBar({ item, runner: { busy, run } }: { item: Item; runner: Runne
   );
 }
 
-/** Stage, board (click to show it), issue and PR of the item, as the pills the card uses. */
+/** Stage, board (click to show it), issue and PR of the item, as the pills the card uses, then the agent status unless blocked. */
 function Properties({ item, pipelines, onBoard }: { item: Item; pipelines: Pipelines | undefined; onBoard: (board: string) => void }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 *:max-w-full">
@@ -142,6 +140,7 @@ function Properties({ item, pipelines, onBoard }: { item: Item; pipelines: Pipel
       </Badge>
       <IssueBadge item={item} />
       <PrStatus item={item} />
+      {!isBlocked(item) && <AgentStatus item={{ agent_status: item.agent_status, gate: null, approved: item.approved }} />}
     </div>
   );
 }
@@ -184,11 +183,19 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   }, [jump, tab, editing, detail]);
   const kindIcon = KIND_ICONS[live.kind.trim().toLowerCase()];
   const path = itemTerminal(item.workspace, item.dir);
-  const popOut = `/?terminal=${encodeURIComponent(path)}`;
   const edit = () => {
     if (!detail) return;
     setEditing(stripFrontmatter(detail.content));
   };
+  const remove = () =>
+    runner.run(
+      "Remove",
+      async () => {
+        const { worktree_left } = await api.remove(live);
+        if (worktree_left) throw new Error(`Workitem removed, but the worktree stays: ${worktree_left}`);
+      },
+      `Remove workitem "${live.title}"?\nThe agent session is stopped, and the worktree and workitem folder are deleted. This cannot be recovered. Branch and PR stay.`,
+    );
   const discuss = () =>
     runner.run("Discuss brief", async () => {
       await api.discussBrief(live);
@@ -213,7 +220,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
-            {!isBlocked(live) && <AgentStatus item={{ agent_status: live.agent_status, gate: null, approved: live.approved }} className="basis-full" />}
             <FollowUpsChip
               followUps={live.follow_ups}
               onClick={() => {
@@ -265,17 +271,11 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
                 <IconTerminalSquare />
                 Terminal
               </TabsTrigger>
-              <TabsTrigger value="actions">
-                <IconSliders />
-                Actions
-              </TabsTrigger>
             </TabsList>
-            {live.session && (
-              <a className="mb-2 inline-flex shrink-0 items-center gap-1.5 text-[13px] text-primary no-underline hover:underline" href={popOut} target="_blank" rel="noreferrer">
-                <IconExternal />
-                Pop out
-              </a>
-            )}
+            <Button variant="ghost" className="mb-1.5 shrink-0 text-destructive hover:text-destructive" disabled={runner.busy} onClick={remove}>
+              <IconTrash />
+              Remove
+            </Button>
           </div>
           <TabsContent value="brief" className="flex min-h-0 flex-col">
             {editing !== undefined ? (
@@ -342,9 +342,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           <TabsContent value="terminal" className="flex min-h-0 flex-col pb-4">
             <AgentActions item={live} onDone={() => void reload()} />
             {live.session && <Terminal path={path} />}
-          </TabsContent>
-          <TabsContent value="actions" className={scroll}>
-            <Actions item={live} onDone={() => void reload()} />
           </TabsContent>
         </Tabs>
       </div>

@@ -182,16 +182,16 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.locator(".board").getByText("Demo blocked item").click();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
   await expect(page.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "Actions" }).click();
-  await expect(page).toHaveURL(/#demo\/T-1-demo\/actions$/);
-  await expect(page.getByRole("button", { name: "Remove workitem" })).toBeVisible();
+  await page.getByRole("tab", { name: "Info" }).click();
+  await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
   // T-1 is blocked with a live session, so the default tab is the terminal.
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
   await page.goForward();
-  await expect(page).toHaveURL(/#demo\/T-1-demo\/actions$/);
+  await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
 
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator(".detail")).toHaveCount(0);
