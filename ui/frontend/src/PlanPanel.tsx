@@ -2,34 +2,41 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, planTerminal } from "./api";
-import { IconFileText, IconTerminalSquare, IconTrash, IconX } from "./icons";
+import { Children } from "./Children";
+import { IconFileText, IconListTree, IconTerminalSquare, IconTrash, IconX } from "./icons";
 import { ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
 import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
-import { Plan } from "./types";
+import { Item, Plan } from "./types";
+import { Tab as ItemTab } from "./url";
 import { usePolling } from "./usePolling";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
+type Tab = "terminal" | "plan" | "workitems";
+
 type Props = {
   plan: Plan;
-  /** Opens the workitem made from this plan. */
-  onWorkitem: (workspace: string, dir: string) => void;
+  /** The workitems made from this plan that still exist. */
+  workitems: Item[];
+  onSelect: (item: Item, tab?: ItemTab) => void;
+  onItemsChanged: () => void;
   onClose: () => void;
   onChanged: () => void;
   onUnauthorized: () => void;
 };
 
-/** Right panel for one planning session: its terminal (or Resume) and the saved plan. */
-export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized }: Props) {
+/** Right panel for one planning session: its terminal (or Resume), the saved plan and the workitems made from it. */
+export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, onChanged, onUnauthorized }: Props) {
   const key = `${plan.workspace}/${plan.id}`;
   const { data: detail, error: loadError, reload } = usePolling(() => api.plan(plan.workspace, plan.id), 3000, key, onUnauthorized);
   const live = detail ?? plan;
   const status = planStatus(live);
-  const [tab, setTab] = useState<"terminal" | "plan">();
-  const shown = tab === "plan" && !detail?.text ? "terminal" : tab ?? (live.live || !detail?.text ? "terminal" : "plan");
+  const [tab, setTab] = useState<Tab>();
+  const gone = (tab === "plan" && !detail?.text) || (tab === "workitems" && !workitems.length);
+  const shown = gone ? "terminal" : tab ?? (live.live || !detail?.text ? "terminal" : "plan");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const path = planTerminal(live);
@@ -77,16 +84,11 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={status === "working" ? "good" : status === "waiting" ? "wait" : "outline"}>{planLabel(status)}</Badge>
-            {live.workitems.map((dir) => (
-              <button key={dir} className="cursor-pointer text-[13px] text-primary hover:underline" onClick={() => onWorkitem(live.workspace, dir)}>
-                → {dir}
-              </button>
-            ))}
           </div>
           {live.summary && <Muted>{live.summary}</Muted>}
           {(error ?? loadError) && <ErrorText>{error ?? loadError}</ErrorText>}
         </div>
-        <Tabs value={shown} activationMode="manual" onValueChange={(value) => setTab(value as "terminal" | "plan")} className="min-h-[420px] flex-1 gap-3">
+        <Tabs value={shown} activationMode="manual" onValueChange={(value) => setTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
           <div className="flex items-end gap-2 border-b border-border">
             <TabsList className="min-w-0 flex-1 border-b-0">
               <TabsTrigger value="terminal">
@@ -97,6 +99,13 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
                 <TabsTrigger value="plan">
                   <IconFileText />
                   Plan
+                </TabsTrigger>
+              )}
+              {workitems.length > 0 && (
+                <TabsTrigger value="workitems">
+                  <IconListTree />
+                  Workitems
+                  <Badge>{workitems.length}</Badge>
                 </TabsTrigger>
               )}
             </TabsList>
@@ -126,6 +135,11 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
           {detail?.text && (
             <TabsContent value="plan" className={cn("brief", scroll, prose)}>
               <Markdown remarkPlugins={[remarkGfm]}>{detail.text}</Markdown>
+            </TabsContent>
+          )}
+          {workitems.length > 0 && (
+            <TabsContent value="workitems" className={scroll}>
+              <Children items={workitems} onSelect={onSelect} onDone={onItemsChanged} />
             </TabsContent>
           )}
         </Tabs>

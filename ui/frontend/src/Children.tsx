@@ -11,7 +11,7 @@ import { IconBot, IconTerminalSquare } from "./icons";
 
 type Props = { items: Item[]; onSelect: (item: Item, tab?: Tab) => void; onDone: () => void };
 
-/** The items whose `parent:` is this one: where each stands, why it is blocked, and a way into
+/** A list of items (an item's children, a plan's workitems): where each stands, why it is blocked, and a way into
  * its session (starting one first when it has none, which a blocked item allows). Blocked ones
  * come first. */
 export function Children({ items, onSelect, onDone }: Props) {

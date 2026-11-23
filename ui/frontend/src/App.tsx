@@ -13,7 +13,7 @@ import { Terminal } from "./Terminal";
 import { TopBar, View } from "./TopBar";
 import { useAlerts } from "./useAlerts";
 import { usePolling } from "./usePolling";
-import { Item } from "./types";
+import { Item, Plan } from "./types";
 import { readRoute, Route, routeHash, Tab } from "./url";
 
 /** Exchanges `#token=…` from the printed URL for the session cookie, then strips it from the address bar. */
@@ -161,6 +161,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
   useAlerts(items.data, open);
+  /** The workitems made from a plan that still exist. */
+  const planWorkitems = (plan: Plan) => (items.data ?? []).filter((i) => i.workspace === plan.workspace && plan.workitems.includes(i.dir));
   const openFound = (item: Item) => {
     setSearching(false);
     open(item);
@@ -240,10 +242,9 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
               <PlanPanel
                 key={`${planPanel.shown.workspace}/${planPanel.shown.id}`}
                 plan={planPanel.shown}
-                onWorkitem={(itemWorkspace, dir) => {
-                  const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
-                  if (item) open(item);
-                }}
+                workitems={planWorkitems(planPanel.shown)}
+                onSelect={open}
+                onItemsChanged={() => void items.reload()}
                 onClose={() => navigate({})}
                 onChanged={() => void plans.reload()}
                 onUnauthorized={onUnauthorized}

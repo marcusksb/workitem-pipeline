@@ -61,7 +61,7 @@ function seed() {
   );
   write(
     join(ws, "plans/abc123.md"),
-    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
+    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nworkitems: T-2-gate\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
   );
   write(
     join(ws, "plans/def456.md"),
@@ -517,6 +517,10 @@ test("planning sessions show in the sidebar and open in the side panel", async (
   await page.getByRole("tab", { name: "Plan", exact: true }).click();
   await expect(page.locator(".detail .brief")).toContainText("Extract the token store");
   expect(page.url()).toContain("plan=demo%2Fabc123");
+  await page.getByRole("tab", { name: /Workitems/ }).click();
+  await page.locator(".detail").getByRole("button", { name: "Brief waiting" }).click();
+  await expect(page).toHaveURL(/#demo\/T-2-gate/);
+  await page.goBack();
 
   await bar.locator(".plan-card", { hasText: "Old idea" }).click();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
