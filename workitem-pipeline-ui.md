@@ -106,7 +106,7 @@ Build order: (1) `workitem-issue` and the shared tracker module, `issue-status` 
 
 ## UI
 
-Kanban, one column per stage, project filter in the header (with add and remove project, and "New workitem").
+Kanban, one column per stage. A left sidebar (`Sidebar.tsx`) holds the workspace switcher (with *Add workspace*), Search ⌘K, the workspace's boards as vertical tabs with their item count and blocked count, *New board*, the Plans list and, at the bottom, *Learnings* (of the board on screen), *Watchers* and *Settings*. The content column has a top bar (`TopBar.tsx`) with the board's name and repo, the Board/List toggle and *New workitem*, then the board. Below 768px the sidebar stacks above a full-height content column.
 
 - **Card:** title, project badge, `agent_status` chip (blocked in red with reason, working with spinner, waiting as a calm 💤 chip with the reason in its tooltip and no alert), terminal icon when a session is alive. In `in_review`: approval, merge and CI pills.
 - **Detail panel** (right, on card click), tabs: *Brief* (rendered `workitem.md`; *Edit* swaps in a textarea for the body after the frontmatter, and the save is refused with 409 if the file changed since the editor opened), *Terminal* (xterm.js, can pop out to its own browser tab), *Actions* (approve/reject with comment, clear blocked, kill session, start, start agent session, remove; only those valid for the state are shown). The header has "New workitem".

@@ -7,9 +7,10 @@ import { ActivityToasts } from "./ActivityToasts";
 import { Login } from "./Login";
 import { PlanPanel } from "./PlanPanel";
 import { Plans } from "./Plans";
-import { Workspaces } from "./Workspaces";
 import { QuickSearch } from "./QuickSearch";
+import { Sidebar } from "./Sidebar";
 import { Terminal } from "./Terminal";
+import { TopBar, View } from "./TopBar";
 import { useAlerts } from "./useAlerts";
 import { usePolling } from "./usePolling";
 import { Item } from "./types";
@@ -76,6 +77,16 @@ function Leaving({ leaving, onDone, children }: { leaving: boolean; onDone: () =
   );
 }
 
+const VIEW_KEY = "workload.view";
+
+function storedView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "board";
+  } catch {
+    return "board";
+  }
+}
+
 function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [route, setRoute] = useState<Route>(readRoute);
   const workspaces = usePolling(api.workspaces, 3000, "workspaces", onUnauthorized);
@@ -93,6 +104,16 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  const [view, setView] = useState<View>(storedView);
+  const chooseView = (next: View) => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // the choice just is not remembered
+    }
+  };
 
   const [searching, setSearching] = useState(false);
   useEffect(() => {
@@ -149,78 +170,86 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
 
   return (
     <div className="app">
-      <header className="top">
-        <h1 className="brand"><img src="/favicon.svg" alt="" width={22} height={22} />Workload</h1>
-        <Workspaces
-          workspaces={workspaces.data ?? []}
-          pipelines={pipelines.data}
-          board={route.board}
-          selected={workspace}
-          onLaunched={() => void sessions.reload()}
-          onSelect={(name) => navigate({ workspace: name, board: undefined })}
-          onChanged={() => {
-            void workspaces.reload();
-            void items.reload();
+      <Sidebar
+        workspaces={workspaces.data ?? []}
+        workspace={workspace}
+        pipelines={pipelines.data}
+        items={shown}
+        board={activeBoard}
+        onWorkspace={(name) => navigate({ workspace: name, board: undefined })}
+        onBoard={(board) => navigate({ ...route, board })}
+        onSearch={() => setSearching(true)}
+        onChanged={() => {
+          void workspaces.reload();
+          void items.reload();
+          void pipelines.reload();
+        }}
+      >
+        <Plans
+          plans={plans.data ?? []}
+          sessions={sessions.data ?? []}
+          workspaces={inView}
+          showWorkspace={false}
+          selected={selectedPlan}
+          onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id } })}
+          onStarted={(planWorkspace, id) => {
+            void plans.reload();
+            navigate({ plan: { workspace: planWorkspace, id } });
           }}
         />
-        <button className="search-open" onClick={() => setSearching(true)} title="Find a workitem by title, issue key or PR number">
-          Search <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K</kbd>
-        </button>
-        {error && <span className="error">{error}</span>}
-      </header>
-      <Plans
-        plans={plans.data ?? []}
-        sessions={sessions.data ?? []}
-        workspaces={inView}
-        showWorkspace={false}
-        selected={selectedPlan}
-        onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id } })}
-        onStarted={(planWorkspace, id) => {
-          void plans.reload();
-          navigate({ plan: { workspace: planWorkspace, id } });
-        }}
-      />
-      {workspaces.data?.length === 0 && <p className="empty">No workspaces yet. Add a workspace, then a board for each repository.</p>}
-      {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
-        <p className="empty">No boards in {workspace} yet. Add one for a repository with + Board.</p>
-      )}
-      <main>
-        <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
-          <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} onBoard={(board) => navigate({ ...route, board })} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
-            void items.reload();
-            void pipelines.reload();
-          }} />
-        </div>
-        {itemPanel.shown && (
-          <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
-            <DetailPanel
-              item={itemPanel.shown}
-              items={shown}
-              pipelines={pipelines.data}
-              onSelect={open}
-              tab={route.tab}
-              onTab={onTab}
-              onClose={() => navigate({})}
-              onUnauthorized={onUnauthorized}
-            />
-          </Leaving>
+      </Sidebar>
+      <div className="content">
+        <TopBar
+          workspace={workspaces.data?.find((w) => w.name === workspace)}
+          pipelines={pipelines.data}
+          board={activeBoard}
+          view={view}
+          onView={chooseView}
+          error={error}
+          onCreated={() => void sessions.reload()}
+        />
+        {workspaces.data?.length === 0 && <p className="empty">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+        {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
+          <p className="empty">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
-        {planPanel.shown && (
-          <Leaving leaving={planPanel.leaving} onDone={planPanel.done}>
-            <PlanPanel
-              key={`${planPanel.shown.workspace}/${planPanel.shown.id}`}
-              plan={planPanel.shown}
-              onWorkitem={(itemWorkspace, dir) => {
-                const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
-                if (item) open(item);
-              }}
-              onClose={() => navigate({})}
-              onChanged={() => void plans.reload()}
-              onUnauthorized={onUnauthorized}
-            />
-          </Leaving>
-        )}
-      </main>
+        <main>
+          <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
+            <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
+              void items.reload();
+              void pipelines.reload();
+            }} />
+          </div>
+          {itemPanel.shown && (
+            <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
+              <DetailPanel
+                item={itemPanel.shown}
+                items={shown}
+                pipelines={pipelines.data}
+                onSelect={open}
+                tab={route.tab}
+                onTab={onTab}
+                onClose={() => navigate({})}
+                onUnauthorized={onUnauthorized}
+              />
+            </Leaving>
+          )}
+          {planPanel.shown && (
+            <Leaving leaving={planPanel.leaving} onDone={planPanel.done}>
+              <PlanPanel
+                key={`${planPanel.shown.workspace}/${planPanel.shown.id}`}
+                plan={planPanel.shown}
+                onWorkitem={(itemWorkspace, dir) => {
+                  const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
+                  if (item) open(item);
+                }}
+                onClose={() => navigate({})}
+                onChanged={() => void plans.reload()}
+                onUnauthorized={onUnauthorized}
+              />
+            </Leaving>
+          )}
+        </main>
+      </div>
       <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} />
       {searching && <QuickSearch items={items.data ?? []} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>

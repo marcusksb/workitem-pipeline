@@ -32,7 +32,7 @@ Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/
    cd ui && npm install && npm run build
    ./backend/target/release/workload
    ```
-3. Open the printed `http://127.0.0.1:7373/#token=…` URL. Add a workspace, then a board for each repository with **+ Board**, then use **New workitem**.
+3. Open the printed `http://127.0.0.1:7373/#token=…` URL. Add a workspace, then a board for each repository with **New board** in the sidebar, then use **New workitem**.
 
 `./uninstall.sh` removes the symlinks and restores any folders `install.sh` backed up.
 
@@ -57,7 +57,7 @@ Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/
 
 ### Custom boards
 
-Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **+ Board** starts it as a copy of the bundled `skills/workitem-pipeline/pipeline.json`. Edit the file to change it. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, a `require`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board (`boards/<name>/skills/`) or per workspace (`skills/`). Details: [`workitem-pipeline.md`](workitem-pipeline.md).
+Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **New board** starts it as a copy of the bundled `skills/workitem-pipeline/pipeline.json`. Edit the file to change it. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, a `require`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board (`boards/<name>/skills/`) or per workspace (`skills/`). Details: [`workitem-pipeline.md`](workitem-pipeline.md).
 
 ## Skills
 

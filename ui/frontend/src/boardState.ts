@@ -40,7 +40,7 @@ export const UNKNOWN_STAGE = "unknown stage";
 /** `final`: no stage follows it on any of the workspaces (`next` is empty), so its items can be cleared. */
 export type Column = { name: string; label: string; final: boolean };
 
-const boardOfWorkspace = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
+export const boardOfWorkspace = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
   pipelines?.[workspace]?.find((b) => b.name === board);
 
 /** Column title of the item's stage: its `label` on the item's board, else the name with `_` as a space. */
@@ -100,8 +100,16 @@ export function openDependencies(item: Item, items: Item[], pipelines: Pipelines
 
 /** Number of blocked items on each board of `items`. */
 export function blockedByBoard(items: Item[], pipelines: Pipelines | undefined): Record<string, number> {
+  return itemsByBoard(items.filter(isBlocked), pipelines);
+}
+
+/** Number of `items` on each board, counting each on the board it is shown on. */
+export function itemsByBoard(items: Item[], pipelines: Pipelines | undefined): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const item of items) if (isBlocked(item)) counts[shownBoard(item, pipelines)] = (counts[shownBoard(item, pipelines)] ?? 0) + 1;
+  for (const item of items) {
+    const board = shownBoard(item, pipelines);
+    counts[board] = (counts[board] ?? 0) + 1;
+  }
   return counts;
 }
 

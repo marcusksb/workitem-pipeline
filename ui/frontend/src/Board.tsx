@@ -1,14 +1,14 @@
 import { FormEvent, useState } from "react";
 
 import { api } from "./api";
-import { blockedByBoard, boardNames, byStage, cardChildren, stageTitle, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, repoName, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
-import { Learnings } from "./Learnings";
 import { LinkBadges } from "./LinkBadges";
 import { ReviewStrip } from "./ReviewStrip";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
+import type { View } from "./TopBar";
 import { Item, Pipelines } from "./types";
 import { Tab } from "./url";
 import { useRun } from "./useRun";
@@ -20,7 +20,7 @@ type Props = {
   workspaces: string[];
   /** Board asked for by the URL; falls back to the first one that exists. */
   board: string | undefined;
-  onBoard: (name: string) => void;
+  view: View;
   selected: string | null;
   onSelect: (item: Item, tab?: Tab) => void;
   showWorkspace: boolean;
@@ -113,68 +113,6 @@ function PauseColumn({ workspaces, board, stage, label, paused, onDone }: { work
   );
 }
 
-/** Adds a board for a repo to the workspace: a copy of the bundled board with that repo, where its
- * new issues go and the team that reviews its PRs. */
-function AddBoard({ workspace, onDone }: { workspace: string; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [repo, setRepo] = useState("");
-  const [issueProject, setIssueProject] = useState("");
-  const [reviewers, setReviewers] = useState("");
-  const [error, setError] = useState<string>();
-  const add = async (event: FormEvent) => {
-    event.preventDefault();
-    try {
-      await api.addBoard(workspace, { name, repo, issue_project: issueProject, reviewers });
-      setName("");
-      setRepo("");
-      setIssueProject("");
-      setReviewers("");
-      setOpen(false);
-      setError(undefined);
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-  return (
-    <>
-      <button className="add-board" title="Add a board for a repository" onClick={() => setOpen(true)}>
-        + Board
-      </button>
-      {open && (
-        <Dialog title={`Add a board to ${workspace}`} onClose={() => setOpen(false)}>
-          <form className="dialog-form" onSubmit={add}>
-            <label>
-              Name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="backend" pattern="[A-Za-z0-9_-]+" required autoFocus />
-            </label>
-            <label>
-              Repository path
-              <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="/absolute/path/to/repo" required />
-            </label>
-            <label>
-              Issue project
-              <input value={issueProject} onChange={(e) => setIssueProject(e.target.value)} placeholder="GitHub owner/repo or Jira project key (optional)" />
-            </label>
-            <label>
-              Reviewers
-              <input value={reviewers} onChange={(e) => setReviewers(e.target.value)} placeholder="org/team (optional)" />
-            </label>
-            <span className="hint">
-              Starts with the bundled stages and the issue states of the workspace's tracker. On GitHub an empty issue project means the
-              repo's own issues; on Jira it is needed to create issues. Edit boards/{name || "<name>"}.json in the workspace folder to change
-              any of it.
-            </span>
-            <button type="submit">Add</button>
-            {error && <span className="error">{error}</span>}
-          </form>
-        </Dialog>
-      )}
-    </>
-  );
-}
-
 /** How many dependencies are not merged yet; a click opens the item's Depends on tab. */
 function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
@@ -235,39 +173,17 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
   );
 }
 
-type View = "board" | "list";
-const VIEW_KEY = "workload.view";
-
-function storedView(): View {
-  try {
-    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "board";
-  } catch {
-    return "board";
-  }
-}
-
-export function Board({ items, pipelines, workspaces, board, onBoard, selected, onSelect, showWorkspace, onChanged }: Props) {
+export function Board({ items, pipelines, workspaces, board, view, selected, onSelect, showWorkspace, onChanged }: Props) {
   const names = boardNames(pipelines, workspaces);
   const active = board && names.includes(board) ? board : (names[0] ?? "");
   const columns = byStage(items, pipelines, active);
   const shown = columnsFor(pipelines, workspaces, active);
   if (pipelines && columns[UNKNOWN_STAGE].length) shown.push({ name: UNKNOWN_STAGE, label: UNKNOWN_STAGE, final: false });
-  const blocked = blockedByBoard(items, pipelines);
   const broken = workspaces.flatMap((name) => {
     const found = pipelines?.[name]?.find((b) => b.name === active);
     return found?.error ? [{ workspace: name, pipeline: found.pipeline, error: found.error }] : [];
   });
-  const [view, setView] = useState<View>(storedView);
-  const chooseView = (next: View) => {
-    setView(next);
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      // the choice just is not remembered
-    }
-  };
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
-  const [learning, setLearning] = useState(false);
   const card = (item: Item, depth = 0, where?: string) => (
     <Card
       key={itemKey(item)}
@@ -283,35 +199,6 @@ export function Board({ items, pipelines, workspaces, board, onBoard, selected, 
   );
   return (
     <>
-      <nav className="board-tabs" role="tablist">
-        {names.map((name) => {
-          const board = workspaces.map((w) => pipelines?.[w]?.find((b) => b.name === name)?.pipeline).find(Boolean);
-          const repo = board?.repo;
-          return (
-            <button key={name} role="tab" aria-selected={name === active} className={name === active ? "active" : ""} onClick={() => onBoard(name)} title={repo}>
-              {board?.label || name}
-              {repo && !board?.label && <span className="repo-name">{repoName(repo)}</span>}
-              {blocked[name] ? <span className="count blocked" title="blocked items">{blocked[name]}</span> : null}
-            </button>
-          );
-        })}
-        {workspaces.length === 1 && <AddBoard workspace={workspaces[0]} onDone={onChanged} />}
-        {workspaces.length === 1 && active && (
-          <button className="link learnings-button" onClick={() => setLearning(true)}>
-            Learnings
-          </button>
-        )}
-        <div className="view-toggle" role="group" aria-label="View">
-          {(["board", "list"] as const).map((v) => (
-            <button key={v} aria-pressed={view === v} className={view === v ? "active" : ""} onClick={() => chooseView(v)}>
-              {v}
-            </button>
-          ))}
-        </div>
-      </nav>
-      {learning && workspaces.length === 1 && active && (
-        <Learnings workspace={workspaces[0]} board={active} label={boardLabel(pipelines, workspaces[0], active)} onClose={() => setLearning(false)} />
-      )}
       {broken.map(({ workspace, pipeline, error }) => (
         <p className="error" key={workspace}>
           {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}

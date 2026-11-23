@@ -1,6 +1,10 @@
 import { FormEvent, useState } from "react";
 import { agentTerminal, api } from "./api";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Dialog } from "./Dialog";
+import { IconChevronDown, IconPlus } from "./icons";
+import { navHeading, navItem } from "./Sidebar";
 import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
 import { AgentSession, Plan } from "./types";
 
@@ -18,7 +22,7 @@ function saveCollapsed(collapsed: boolean) {
   try {
     localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
   } catch {
-    // Not remembered; the bar still works.
+    // Not remembered; the list still works.
   }
 }
 
@@ -34,7 +38,7 @@ type Props = {
   onStarted: (workspace: string, id: string) => void;
 };
 
-/** The planning sessions of the workspaces in view, above the board (decision 36). */
+/** The planning sessions of the workspaces in view, in the sidebar (decision 36). */
 export function Plans({ plans, sessions, workspaces, showWorkspace, selected, onSelect, onStarted }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [showDone, setShowDone] = useState(false);
@@ -50,58 +54,59 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
   const card = (plan: Plan) => {
     const status = planStatus(plan);
     const isSelected = selected?.workspace === plan.workspace && selected.id === plan.id;
+    const summary = plan.summary || (status === "ended" ? "No summary" : "Starting…");
     return (
-      <button key={`${plan.workspace}/${plan.id}`} className={`plan-card ${status}${isSelected ? " selected" : ""}`} onClick={() => onSelect(plan)}>
-        <span className="plan-topic">
-          <span className={`plan-dot ${status}`} title={planLabel(status)} />
-          {plan.topic || plan.id}
-        </span>
-        <span className="plan-summary">{plan.summary || (status === "ended" ? "No summary" : "Starting…")}</span>
-        {(showWorkspace || plan.workitems.length > 0) && (
-          <span className="plan-meta">
-            {showWorkspace && <span className="badge">{plan.workspace}</span>}
-            {plan.workitems.map((dir) => (
-              <span key={dir} className="badge">→ {dir}</span>
-            ))}
-          </span>
-        )}
-      </button>
+      <Button
+        key={`${plan.workspace}/${plan.id}`}
+        variant="ghost"
+        className={cn(navItem, "plan-card gap-2", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
+        title={`${planLabel(status)}: ${summary}`}
+        aria-current={isSelected || undefined}
+        onClick={() => onSelect(plan)}
+      >
+        <span className={`plan-dot ${status}`} aria-hidden="true" />
+        <span className="flex-1 truncate text-left">{plan.topic || plan.id}</span>
+        {showWorkspace && <span className="text-[11.5px] text-muted-foreground">{plan.workspace}</span>}
+      </Button>
     );
   };
 
   return (
-    <section className={`plans${collapsed ? " collapsed" : ""}`} aria-label="Planning sessions">
-      <div className="plans-head">
-        <button className="link plans-toggle" onClick={toggle} aria-expanded={!collapsed}>
-          {collapsed ? "▸" : "▾"} Plans · {planCounts(open)}
-        </button>
-        <button className="link" onClick={() => setCreating(true)}>
-          + Plan
-        </button>
-        {shownSessions.map((session) => (
-          <a
-            key={`${session.workspace}/${session.name}`}
-            className="plans-session"
-            href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
-            target="_blank"
-            rel="noreferrer"
-            title="A workitem is being created; a blocked one can only be answered here"
-          >
-            {session.workspace} · {session.name} ↗
-          </a>
-        ))}
+    <section className="plans flex flex-col gap-px" aria-label="Planning sessions">
+      <div className="flex items-center">
+        <Button variant="ghost" size="sm" className={cn(navHeading, "plans-toggle h-auto flex-1 justify-start hover:bg-foreground/5")} onClick={toggle} aria-expanded={!collapsed}>
+          Plans · {planCounts(open)}
+          <span className={collapsed ? "-rotate-90" : undefined}>
+            <IconChevronDown />
+          </span>
+        </Button>
+        <Button variant="ghost" size="icon" className="size-[22px]" aria-label="New plan" title="Start a planning session" onClick={() => setCreating(true)}>
+          <IconPlus />
+        </Button>
       </div>
-      {!collapsed && (open.length > 0 || done.length > 0) && (
-        <div className="plans-cards">
+      {!collapsed && (
+        <>
           {open.map(card)}
           {done.length > 0 && (
-            <button className="link plans-done" onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>
+            <Button variant="ghost" size="sm" className={cn(navItem, "h-6 text-xs text-muted-foreground")} onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>
               {showDone ? "Hide" : "Show"} {done.length} done
-            </button>
+            </Button>
           )}
           {showDone && done.map(card)}
-        </div>
+        </>
       )}
+      {shownSessions.map((session) => (
+        <a
+          key={`${session.workspace}/${session.name}`}
+          className="plans-session truncate px-2 py-1 text-xs"
+          href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
+          target="_blank"
+          rel="noreferrer"
+          title="A workitem is being created; a blocked one can only be answered here"
+        >
+          {session.workspace} · {session.name} ↗
+        </a>
+      ))}
       {creating && (
         <NewPlan
           workspaces={workspaces}

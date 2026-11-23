@@ -161,3 +161,25 @@ export const IconLink = make(
     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
   </>,
 );
+export const IconSearch = make(
+  <>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-4-4" />
+  </>,
+);
+/** A kanban board: three columns. */
+export const IconBoard = make(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18M15 3v12" />
+  </>,
+);
+export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
+export const IconChevronDown = make(<path d="m6 9 6 6 6-6" />);
+export const IconBook = make(<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />);
+export const IconEye = make(
+  <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+);

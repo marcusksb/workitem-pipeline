@@ -115,14 +115,15 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   await expect(page.getByText("No workspaces yet")).toBeVisible();
   expect(page.url()).not.toContain("token");
 
-  await page.getByRole("button", { name: "Add workspace" }).click();
+  await page.getByRole("button", { name: /^Workspace/ }).click();
+  await page.getByRole("menuitem", { name: "Add workspace" }).click();
   await page.getByPlaceholder("content-delivery").fill("demo");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText("No boards in demo yet")).toBeVisible();
   seed();
 
   // The default board is the bundled one for the repo.
-  await page.getByRole("button", { name: "+ Board" }).click();
+  await page.getByRole("button", { name: "New board" }).click();
   await page.getByPlaceholder("backend").fill("default");
   await page.getByPlaceholder("/absolute/path/to/repo").fill(repo);
   await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -195,13 +196,17 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await expect(page.locator(".detail")).toHaveCount(0);
 });
 
-test("a workspace's boards are tabs and the chosen board stays in the URL", async ({ page }) => {
+test("a workspace's boards are tabs in the sidebar and the chosen board stays in the URL", async ({ page }) => {
   await page.goto(base);
-  const tabs = page.getByRole("tablist");
+  const tabs = page.getByRole("tablist", { name: "Boards" });
   await expect(tabs.getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".column", { hasText: "idea" })).toHaveCount(0);
 
-  await expect(tabs.getByRole("tab", { name: "default" })).toContainText("repo");
+  // Each board shows how many items it has, and how many of them are blocked.
+  await expect(tabs.getByRole("tab", { name: /default/ })).toHaveText("default15");
+  await expect(tabs.getByRole("tab", { name: /research/ })).toHaveText("research2");
+  await expect(page.locator(".top-bar h1")).toHaveText("default");
+  await expect(page.locator(".top-bar")).toContainText("repo");
   await tabs.getByRole("tab", { name: /research/ }).click();
   await expect(page).toHaveURL(/#\?workspace=demo&board=research$/);
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
@@ -214,18 +219,83 @@ test("a workspace's boards are tabs and the chosen board stays in the URL", asyn
   await expect(page).toHaveURL(/#demo\/T-4-research\?board=research$/);
 });
 
+test("the top bar switches Board and List and opens New workitem on the board on screen", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Demo blocked item");
+  await page.goto(`${base.split("#")[0]}#?workspace=demo&board=research`);
+  const view = page.getByRole("group", { name: "View" });
+  await expect(view.getByRole("button", { name: "board" })).toHaveAttribute("aria-pressed", "true");
+  await view.getByRole("button", { name: "list" }).click();
+  await expect(page.locator(".board.list")).toContainText("Research item");
+  await page.reload();
+  await expect(view.getByRole("button", { name: "list" })).toHaveAttribute("aria-pressed", "true");
+  await view.getByRole("button", { name: "board" }).click();
+  await expect(page.locator(".board.list")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "New workitem" }).click();
+  const dialog = page.getByRole("dialog", { name: "New workitem in demo" });
+  await expect(dialog.getByRole("combobox")).toHaveValue("research");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("the sidebar opens the workspace's settings, watchers and a new plan", async ({ page }) => {
+  await page.goto(base);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("dialog", { name: "Settings of demo" }).getByLabel("Agent")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Watchers" }).click();
+  await expect(page.getByRole("dialog", { name: "Watchers of demo" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "New plan" }).click();
+  await expect(page.getByRole("dialog", { name: "New planning session" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("at phone width every shell action stays reachable without horizontal scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Demo blocked item");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+
+  const opens = async (button: string, dialog: string) => {
+    await page.getByRole("button", { name: button, exact: true }).click();
+    await expect(page.getByRole("dialog", { name: dialog })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  };
+  await opens("New board", "Add a board to demo");
+  await opens("New plan", "New planning session");
+  await opens("Learnings", "Learnings in demo · default");
+  await opens("Watchers", "Watchers of demo");
+  await opens("Settings", "Settings of demo");
+  await opens("New workitem", "New workitem in demo");
+  await page.getByRole("button", { name: /^Workspace/ }).click();
+  await page.getByRole("menuitem", { name: "Add workspace" }).click();
+  await expect(page.getByRole("dialog", { name: "Add workspace" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Search/ }).click();
+  await expect(page.getByRole("combobox", { name: "Search workitems" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
 test("the selected workspace stays in the URL and survives a reload", async ({ page }) => {
   await page.goto(base);
-  await page.getByRole("button", { name: "Add workspace" }).click();
+  const switcher = page.getByRole("button", { name: /^Workspace/ });
+  await switcher.click();
+  await page.getByRole("menuitem", { name: "Add workspace" }).click();
   await page.getByPlaceholder("content-delivery").fill("other");
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  const select = page.locator(".workspaces select");
-  await expect(select).toHaveValue("other");
+  await expect(switcher).toHaveAccessibleName("Workspace: other");
   await expect(page).toHaveURL(/#\?workspace=other$/);
   await expect(page.locator(".board")).not.toContainText("Demo blocked item");
   await page.reload();
-  await expect(select).toHaveValue("other");
-  await select.selectOption("demo");
+  await expect(switcher).toHaveAccessibleName("Workspace: other");
+  await switcher.click();
+  await expect(page.getByRole("menuitemradio", { name: "other" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "demo" }).click();
   await expect(page).toHaveURL(/#\?workspace=demo$/);
   await expect(page.locator(".board")).toContainText("Demo blocked item");
 });
@@ -367,12 +437,12 @@ test("open follow-ups show on the card and the detail chip jumps to them", async
   await expect(page.locator("#follow-ups")).toBeInViewport();
 });
 
-test("planning sessions show above the board and open in the side panel", async ({ page }) => {
+test("planning sessions show in the sidebar and open in the side panel", async ({ page }) => {
   await page.goto(base);
   const bar = page.locator(".plans");
   await expect(bar.getByRole("button", { name: /Plans · 2 · 1 needs input/ })).toBeVisible();
   const live = bar.locator(".plan-card", { hasText: "Split the auth module" });
-  await expect(live).toContainText("Comparing a facade with a full split");
+  await expect(live).toHaveAttribute("title", /Comparing a facade with a full split/);
   await expect(bar.locator(".plan-card.ended")).toContainText("Old idea");
 
   await live.click();
