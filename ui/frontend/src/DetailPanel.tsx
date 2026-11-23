@@ -222,12 +222,12 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               }}
             />
           </div>
+          <Properties item={live} pipelines={pipelines} onBoard={onBoard} />
           {isBlocked(live) && <BlockedBar item={live} runner={runner} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
         </div>
-        <Properties item={live} pipelines={pipelines} onBoard={onBoard} />
         <Tabs value={tab} activationMode="manual" onValueChange={(value) => onTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
           <div className="flex items-end gap-2 border-b border-border">
             <TabsList className="min-w-0 flex-1 flex-wrap border-b-0">
