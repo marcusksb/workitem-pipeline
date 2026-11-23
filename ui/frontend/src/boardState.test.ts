@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, prState, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -298,6 +298,33 @@ describe("waiting", () => {
     expect(isBlocked(waiting)).toBe(false);
     expect(waitingFor(waiting)).toBe("CI on PR #12");
     expect(isWaiting(item({ agent_status: "working" }))).toBe(false);
+  });
+});
+
+describe("prState", () => {
+  const open: Review = { state: "open", approval: "review_required", approved_by_me: false, merge: "mergeable", ci: "passing", failed: [] };
+  it("shows the most urgent state: merged or closed, conflict, changes requested, then CI", () => {
+    expect(prState(null)).toBeUndefined();
+    expect(prState({ ...open, state: "merged", ci: "failing" })).toEqual({ label: "merged", tone: "merged" });
+    expect(prState({ ...open, state: "closed" })?.label).toBe("closed");
+    expect(prState({ ...open, merge: "conflicting", approval: "changes_requested", ci: "failing" })).toEqual({ label: "merge conflict", tone: "bad" });
+    expect(prState({ ...open, approval: "changes_requested", ci: "failing" })?.label).toBe("changes requested");
+    expect(prState({ ...open, ci: "failing" })).toEqual({ label: "CI failing", tone: "bad" });
+    expect(prState({ ...open, ci: "pending" })).toEqual({ label: "CI running", tone: "wait" });
+    expect(prState(open)).toEqual({ label: "CI passing", tone: "good" });
+    expect(prState({ ...open, ci: "none" })?.label).toBe("open");
+  });
+});
+
+describe("agentLine", () => {
+  const gate = { label: "Approve", approve_to: "doing", reject_to: "todo" };
+  it("says blocked with its reason, working, waiting for what, or that a gate needs approval", () => {
+    expect(agentLine(item({ agent_status: "blocked: which flag?" }))).toEqual({ label: "Blocked · which flag?", tone: "bad" });
+    expect(agentLine(item({ agent_status: "blocked", gate }))?.label).toBe("Blocked");
+    expect(agentLine(item({ agent_status: "working" }))).toEqual({ label: "Working", tone: "wait" });
+    expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "idle" });
+    expect(agentLine(item({ gate }))).toEqual({ label: "Needs approval", tone: "gate" });
+    expect(agentLine(item({}))).toBeUndefined();
   });
 });
 

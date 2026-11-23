@@ -1,4 +1,4 @@
-import { Item, Pipelines } from "./types";
+import { Item, Pipelines, Review } from "./types";
 
 export const isBlocked = (item: Item) => item.agent_status.startsWith("blocked");
 
@@ -256,6 +256,40 @@ export function issueCategory(category: string): "todo" | "progress" | "done" | 
 
 /** Number of a GitHub PR URL, or undefined. */
 export const prNumber = (pr: string) => pr.match(/\/pull\/(\d+)/)?.[1];
+
+/** How a status reads: `good` green, `bad` red, `wait` amber, `merged` purple, `gate` blue, `idle` grey. */
+export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
+
+/**
+ * The one PR state a card shows, the most urgent first: merged or closed, a merge conflict,
+ * changes requested, then CI. Undefined before `pr-status` read the PR.
+ */
+export function prState(review: Review | null): { label: string; tone: Tone } | undefined {
+  if (!review) return undefined;
+  if (review.state === "merged") return { label: "merged", tone: "merged" };
+  if (review.state === "closed") return { label: "closed", tone: "idle" };
+  if (review.merge === "conflicting") return { label: "merge conflict", tone: "bad" };
+  if (review.approval === "changes_requested") return { label: "changes requested", tone: "bad" };
+  if (review.ci === "failing") return { label: "CI failing", tone: "bad" };
+  if (review.ci === "pending") return { label: "CI running", tone: "wait" };
+  if (review.ci === "passing") return { label: "CI passing", tone: "good" };
+  return { label: "open", tone: "idle" };
+}
+
+/** What the agent is doing, for the card's status line: blocked (with its reason), working, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
+export function agentLine(item: Pick<Item, "agent_status" | "gate">): { label: string; tone: Tone } | undefined {
+  const status = item.agent_status;
+  if (status.startsWith("blocked")) {
+    const reason = status.replace(/^blocked:?\s*/, "");
+    return { label: reason ? `Blocked · ${reason}` : "Blocked", tone: "bad" };
+  }
+  if (status === "working") return { label: "Working", tone: "wait" };
+  if (status.startsWith("waiting")) {
+    const what = status.replace(/^waiting:?\s*/, "");
+    return { label: what ? `Waiting · ${what}` : "Waiting", tone: "idle" };
+  }
+  if (item.gate) return { label: "Needs approval", tone: "gate" };
+}
 
 /**
  * Items matching every word of `query` in their title, issue key or PR number (`#123` or `123`).
