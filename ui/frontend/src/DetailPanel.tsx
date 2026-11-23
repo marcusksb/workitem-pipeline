@@ -38,6 +38,7 @@ import {
   IconSliders,
   IconTerminalSquare,
   IconUndo,
+  IconUnlock,
   IconX,
 } from "./icons";
 import { Badge } from "@/components/ui/badge";
@@ -101,6 +102,26 @@ function GateBar({ item, gate, runner: { busy, run } }: { item: Item; gate: Gate
           </DialogForm>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+/** Shown while the item is blocked: why, and a button that clears it. */
+function BlockedBar({ item, runner: { busy, run } }: { item: Item; runner: Runner }) {
+  const reason = item.agent_status.replace(/^blocked:?\s*/, "");
+  return (
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-blocked/30 bg-blocked/5 px-3 py-2.5 text-[13px]">
+      <span className="flex h-7 items-center text-blocked">
+        <IconInfo />
+      </span>
+      <span className="min-w-0 flex-1 py-1 leading-5 [overflow-wrap:anywhere]">
+        <span className="font-medium text-blocked">Blocked</span>
+        {reason && <> · {reason}</>}
+      </span>
+      <Button disabled={busy} onClick={() => run("Clear blocked", () => api.clearBlocked(item))}>
+        <IconUnlock />
+        Clear
+      </Button>
     </div>
   );
 }
@@ -195,7 +216,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             {live.title}
           </h2>
           <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
-            <AgentStatus item={{ agent_status: live.agent_status, gate: null }} className="basis-full" />
+            {!isBlocked(live) && <AgentStatus item={{ agent_status: live.agent_status, gate: null, approved: live.approved }} className="basis-full" />}
             <FollowUpsChip
               followUps={live.follow_ups}
               onClick={() => {
@@ -204,6 +225,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               }}
             />
           </div>
+          {isBlocked(live) && <BlockedBar item={live} runner={runner} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
