@@ -263,14 +263,13 @@ export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
 /** In a gate stage and not approved yet. */
 export const needsApproval = (item: Pick<Item, "gate" | "approved">) => !!item.gate && !item.approved;
 
-/** What the agent is doing, for the card's status line: blocked (with its reason), working, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
+/** What the agent is doing, for the card's status line: blocked (with its reason), waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
 export function agentLine(item: Pick<Item, "agent_status" | "gate" | "approved">): { label: string; tone: Tone } | undefined {
   const status = item.agent_status;
   if (status.startsWith("blocked")) {
     const reason = status.replace(/^blocked:?\s*/, "");
     return { label: reason ? `Blocked · ${reason}` : "Blocked", tone: "bad" };
   }
-  if (status === "working") return { label: "Working", tone: "wait" };
   if (status.startsWith("waiting")) {
     const what = status.replace(/^waiting:?\s*/, "");
     return { label: what ? `Waiting · ${what}` : "Waiting", tone: "idle" };

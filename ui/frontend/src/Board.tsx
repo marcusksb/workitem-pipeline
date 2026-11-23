@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -138,7 +138,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
   return (
     <div
       style={depth ? { marginLeft: depth * 16 } : undefined}
-      className={`card${selected ? " selected" : ""}${isBlocked(item) ? " blocked" : needsApproval(item) ? " gate" : ""}`}
+      className={`card${selected ? " selected" : ""}${isWorking(item) ? " working" : ""}${isBlocked(item) ? " blocked" : needsApproval(item) ? " gate" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}

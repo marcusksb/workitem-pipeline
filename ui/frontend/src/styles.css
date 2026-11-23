@@ -246,6 +246,26 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .card.blocked { border-color: color-mix(in srgb, var(--blocked) 40%, var(--border)); background: color-mix(in srgb, var(--blocked) 3%, var(--card)); }
 .card.gate { border-color: color-mix(in srgb, var(--gate) 35%, var(--border)); }
 .card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+@property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes card-spin { to { --card-angle: 360deg; } }
+.card.working { position: relative; }
+.card.working::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--card-angle), #f43f5e, #f97316, #facc15, #34d399, #38bdf8, #818cf8, #e879f9, #f43f5e);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  pointer-events: none;
+  animation: card-spin 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.working::before { animation: none; }
+}
 .card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-foot:empty { display: none; }
 .card-pr { margin-left: auto; flex: none; }
