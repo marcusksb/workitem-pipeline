@@ -86,7 +86,7 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
           {live.summary && <Muted>{live.summary}</Muted>}
           {(error ?? loadError) && <ErrorText>{error ?? loadError}</ErrorText>}
         </div>
-        <Tabs value={shown} onValueChange={(value) => setTab(value as "terminal" | "plan")} className="min-h-[420px] flex-1 gap-3">
+        <Tabs value={shown} activationMode="manual" onValueChange={(value) => setTab(value as "terminal" | "plan")} className="min-h-[420px] flex-1 gap-3">
           <div className="flex items-end gap-2 border-b border-border">
             <TabsList className="min-w-0 flex-1 border-b-0">
               <TabsTrigger value="terminal">

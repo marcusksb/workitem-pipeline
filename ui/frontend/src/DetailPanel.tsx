@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { api, itemTerminal } from "./api";
 import { AgentStatus } from "./AgentStatus";
 import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, repoName, stageLabel, stageTitle, stripFrontmatter, ticket } from "./boardState";
@@ -69,7 +69,10 @@ function GateBar({ item, gate, runner: { busy, run } }: { item: Item; gate: Gate
   const sendBack = (event: FormEvent) => {
     event.preventDefault();
     setSending(false);
-    run("Send back", () => api.reject(item, comment));
+    run("Send back", async () => {
+      await api.reject(item, comment);
+      setComment("");
+    });
   };
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-[13px]">
@@ -186,7 +189,14 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   const runner = useRun(() => void reload());
   /** The body the editor started from; set while the brief is being edited. */
   const [editing, setEditing] = useState<string>();
-  useEffect(() => setEditing(undefined), [key]);
+  /** False once the panel is gone; App keys it per item, so switching items unmounts it. */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   /** Set by the follow-ups chip; the brief scrolls to its `## Follow-ups` once it is shown. */
   const [jump, setJump] = useState(false);
   const family = items.filter((i) => i.workspace === item.workspace);
@@ -215,7 +225,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   const discuss = () =>
     runner.run("Discuss brief", async () => {
       await api.discussBrief(live);
-      onTab("terminal");
+      if (mounted.current) onTab("terminal");
     });
 
   return (
@@ -258,7 +268,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           {error && <ErrorText>{error}</ErrorText>}
         </div>
         <Properties item={live} parent={parent} pipelines={pipelines} onSelect={onSelect} />
-        <Tabs value={tab} onValueChange={(value) => onTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
+        <Tabs value={tab} activationMode="manual" onValueChange={(value) => onTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
           <div className="flex items-end gap-2 border-b border-border">
             <TabsList className="min-w-0 flex-1 flex-wrap border-b-0">
               <TabsTrigger value="brief">

@@ -222,6 +222,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           {itemPanel.shown && (
             <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
               <DetailPanel
+                key={`${itemPanel.shown.workspace}/${itemPanel.shown.dir}`}
                 item={itemPanel.shown}
                 items={shown}
                 pipelines={pipelines.data}
