@@ -167,12 +167,14 @@ type NewWorkitemProps = {
   pipelines: Pipelines | undefined;
   /** The board on screen, pre-selected. */
   board: string;
+  /** The task text; it lives with the opener so a closed dialog keeps it. */
+  input: string;
+  onInput: (input: string) => void;
   onClose: () => void;
   onCreated: () => void;
 };
 
-export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, onClose, onCreated }: NewWorkitemProps) {
-  const [input, setInput] = useState("");
+export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input, onInput, onClose, onCreated }: NewWorkitemProps) {
   const [board, setBoard] = useState(onScreen);
   const [error, setError] = useState<string>();
   const boards = (pipelines?.[workspace.name] ?? []).map((b) => b.name);
@@ -192,7 +194,7 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, onClo
           Task
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => onInput(e.target.value)}
             placeholder={`${workspace.issue_tracker === "github" ? "GitHub issue" : "Jira key"}, Sentry URL or task description`}
             rows={4}
             required

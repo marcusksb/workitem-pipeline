@@ -23,6 +23,7 @@ type Props = {
 /** The bar above the board: which board and repo, Board or List, and New workitem. */
 export function TopBar({ workspace, pipelines, board, view, onView, error, onCreated }: Props) {
   const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState("");
   const repo = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline?.repo : undefined;
   return (
     <header className="top-bar flex min-h-12 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-5 py-2">
@@ -61,9 +62,12 @@ export function TopBar({ workspace, pipelines, board, view, onView, error, onCre
           workspace={workspace}
           pipelines={pipelines}
           board={board}
+          input={draft}
+          onInput={setDraft}
           onClose={() => setCreating(false)}
           onCreated={() => {
             setCreating(false);
+            setDraft("");
             onCreated();
           }}
         />

@@ -61,7 +61,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
         <DropdownMenuContent align="start" className="w-[212px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
           {workspaces.length > 0 && (
             <>
-              <DropdownMenuRadioGroup value={workspace} onValueChange={onWorkspace}>
+              <DropdownMenuRadioGroup value={workspace} onValueChange={(name) => name !== workspace && onWorkspace(name)}>
                 {workspaces.map((w) => (
                   <DropdownMenuRadioItem key={w.name} value={w.name}>
                     {w.name}
