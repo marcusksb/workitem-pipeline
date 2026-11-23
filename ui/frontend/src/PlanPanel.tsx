@@ -82,10 +82,10 @@ export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, 
               <IconX />
             </Button>
           </div>
+          {live.summary && <Muted>{live.summary}</Muted>}
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={status === "working" ? "good" : status === "waiting" ? "wait" : "outline"}>{planLabel(status)}</Badge>
           </div>
-          {live.summary && <Muted>{live.summary}</Muted>}
           {(error ?? loadError) && <ErrorText>{error ?? loadError}</ErrorText>}
         </div>
         <Tabs value={shown} activationMode="manual" onValueChange={(value) => setTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
