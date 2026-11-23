@@ -243,7 +243,7 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .card[style*="margin-left"] { width: auto; border-left: 3px solid var(--border); }
 .card:hover { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
 .card:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
-.card.blocked { border-color: color-mix(in srgb, var(--blocked) 40%, var(--border)); background: color-mix(in srgb, var(--blocked) 3%, var(--card)); }
+.card.blocked { border-color: color-mix(in srgb, var(--blocked) 75%, var(--border)); background: color-mix(in srgb, var(--blocked) 3%, var(--card)); }
 .card.gate { border-color: color-mix(in srgb, var(--gate) 35%, var(--border)); }
 .card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
 @property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }

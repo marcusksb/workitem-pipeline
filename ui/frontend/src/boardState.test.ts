@@ -303,8 +303,8 @@ describe("waiting", () => {
 
 describe("agentLine", () => {
   const gate = { label: "Approve", approve_to: "doing", reject_to: "todo" };
-  it("says blocked with its reason, waiting for what, or that a gate needs approval", () => {
-    expect(agentLine(item({ agent_status: "blocked: which flag?" }))).toEqual({ label: "Blocked · which flag?", tone: "bad" });
+  it("says blocked, waiting for what, or that a gate needs approval", () => {
+    expect(agentLine(item({ agent_status: "blocked: which flag?" }))).toEqual({ label: "Blocked", tone: "bad" });
     expect(agentLine(item({ agent_status: "blocked", gate }))?.label).toBe("Blocked");
     expect(agentLine(item({ agent_status: "working" }))).toBeUndefined();
     expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "idle" });
