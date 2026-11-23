@@ -13,8 +13,12 @@ export type StageConfig = {
   order: string[];
 };
 
-/** `repo`: the repo every item of the board belongs to. `order`: item fields each column is sorted by, first one first; title breaks ties. */
-export type Pipeline = { repo?: string; label?: string | null; entry: string; stages: StageConfig[]; order: string[] };
+/** `repo`: the repo every item of the board belongs to. `order`: item fields each column is sorted by, first one first; title breaks ties.
+ * `issue_project`: where new issues go (`owner/repo` or a Jira key). `reviewers`: the `org/team` a ready PR asks for review. */
+export type Pipeline = { repo?: string; label?: string | null; entry: string; stages: StageConfig[]; order: string[]; issue_project?: string; reviewers?: string };
+
+/** What the board settings dialog changes; an empty value (all but `entry`) removes the key from the file. */
+export type BoardSettings = { label: string; entry: string; order: string[]; issue_project: string; reviewers: string };
 
 /**
  * A board of a workspace: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.

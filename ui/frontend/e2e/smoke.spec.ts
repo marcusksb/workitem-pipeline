@@ -248,7 +248,7 @@ test("the top bar switches Board and List and opens New workitem on the board on
 
 test("the sidebar opens the workspace's settings, watchers and a new plan", async ({ page }) => {
   await page.goto(base);
-  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Settings of demo" }).getByLabel("Agent")).toBeFocused();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Watchers" }).click();

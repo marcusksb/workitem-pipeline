@@ -113,6 +113,38 @@ pub async fn add_board(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What the board settings dialog sends (decision 73). `repo` is not among them, and a body that
+/// names it is refused.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoardChange {
+    #[serde(default)]
+    label: String,
+    entry: String,
+    #[serde(default)]
+    order: Vec<String>,
+    #[serde(default)]
+    issue_project: String,
+    #[serde(default)]
+    reviewers: String,
+}
+
+/// Changes a board's top-level settings; an empty optional one is removed from the file.
+pub async fn update_board(
+    State(state): State<Shared>,
+    Path((workspace, board)): Path<(String, String)>,
+    Json(body): Json<BoardChange>,
+) -> Result<StatusCode, ApiError> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    if !state.board_names(&workspace).contains(&board) {
+        return Err(ApiError::not_found("board"));
+    }
+    let settings = crate::pipeline::BoardSettings { label: &body.label, entry: &body.entry, order: &body.order, issue_project: &body.issue_project, reviewers: &body.reviewers };
+    state.update_board(&workspace, &board, &settings).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    state.wake.notify_one();
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct WorkspaceChange {
     agent: Option<String>,

@@ -177,10 +177,10 @@ pub struct Pipeline {
     pub label: Option<String>,
     /// Where new issues go and what a bare `#123` means (decision 64): `owner/repo` on GitHub, a
     /// project key on Jira.
-    #[serde(default, skip_serializing)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issue_project: Option<String>,
     /// The team (`org/team`) a ready PR asks for review (decision 70).
-    #[serde(default, skip_serializing)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewers: Option<String>,
     pub entry: String,
     pub stages: Vec<Stage>,
@@ -367,6 +367,16 @@ pub struct NewBoard<'a> {
     pub reviewers: &'a str,
 }
 
+/// What the board settings dialog changes (decision 73): the top-level keys a human sets. `repo`,
+/// the stages and the watchers stay file-only.
+pub struct BoardSettings<'a> {
+    pub label: &'a str,
+    pub entry: &'a str,
+    pub order: &'a [String],
+    pub issue_project: &'a str,
+    pub reviewers: &'a str,
+}
+
 impl AppState {
     /// Reads a board of the workspace. When its file is invalid the last valid one stays in use, so
     /// a typo never stops the dispatcher or empties the board.
@@ -445,6 +455,50 @@ impl AppState {
         fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
         fs::write(&path, text).map_err(|e| e.to_string())
     }
+
+    /// Sets the keys of `settings` in `boards/<name>.json` and writes it only if the result is a
+    /// valid board for the workspace's tracker. Every other key is kept as it is on disk, in its order.
+    pub fn update_board(&self, workspace: &Workspace, name: &str, settings: &BoardSettings) -> Result<(), String> {
+        if !valid_board_name(name) {
+            return Err(format!("'{name}' is not a board name"));
+        }
+        let path = workspace.dir.join("boards").join(format!("{name}.json"));
+        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let text = board_with_settings(&text, settings).map_err(|e| format!("{}: {e}", path.display()))?;
+        check_tracker(&Pipeline::parse(&text)?, &workspace.issue_tracker)?;
+        let tmp = path.with_extension("json.tmp");
+        fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    }
+}
+
+/// The board file `text` with the keys of `settings` set, each trimmed; an empty optional one
+/// (all but `entry`) is removed.
+fn board_with_settings(text: &str, settings: &BoardSettings) -> Result<String, String> {
+    use serde_json::{json, Value};
+    let Value::Object(mut board) = serde_json::from_str::<Value>(text).map_err(|e| e.to_string())? else {
+        return Err("the board file is not a JSON object".into());
+    };
+    let optional = |value: &str| Some(value.trim()).filter(|v| !v.is_empty()).map(|v| json!(v));
+    let order: Vec<&str> = settings.order.iter().map(|o| o.trim()).filter(|o| !o.is_empty()).collect();
+    let keys = [
+        ("label", optional(settings.label)),
+        ("entry", Some(json!(settings.entry.trim()))),
+        ("order", (!order.is_empty()).then(|| json!(order))),
+        ("issue_project", optional(settings.issue_project)),
+        ("reviewers", optional(settings.reviewers)),
+    ];
+    for (key, value) in keys {
+        match value {
+            Some(value) => {
+                board.insert(key.into(), value);
+            }
+            None => {
+                board.shift_remove(key);
+            }
+        }
+    }
+    serde_json::to_string_pretty(&board).map(|text| text + "\n").map_err(|e| e.to_string())
 }
 
 /// The board file `template` with `repo` first, then `issue_project` and `reviewers` when given,
@@ -682,6 +736,32 @@ mod tests {
         assert_eq!(states(&jira), ["In development|In Progress", "In Review", ""]);
         let github = Pipeline::parse(&board_text(template, Path::new("/"), "", "", "github").unwrap()).unwrap();
         assert_eq!((states(&github), github.issue_project), (vec!["assigned".to_string(), "".into(), "".into()], None));
+    }
+
+    #[test]
+    fn settings_set_their_keys_and_keep_every_other_key_in_its_order() {
+        let file = r#"{"repo": "/", "label": "Old", "x-own": 1, "brief_sections": ["A"], "entry": "a", "order": ["title"], "watch": {"every": "1m", "command": "x"}, "stages": [{"name": "a", "next": ["b"]}, {"name": "b"}]}"#;
+        let order = vec![" created desc ".to_string(), "".into(), "title".into()];
+        let settings = BoardSettings { label: " New ", entry: "b", order: &order, issue_project: "MNT", reviewers: "acme/web" };
+        let text = board_with_settings(file, &settings).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["repo", "label", "x-own", "brief_sections", "entry", "order", "watch", "stages", "issue_project", "reviewers"]);
+        let pipeline = Pipeline::parse(&text).unwrap();
+        assert_eq!((pipeline.label.as_deref(), pipeline.entry.as_str()), (Some("New"), "b"));
+        assert_eq!(pipeline.order, ["created desc", "title"]);
+        assert_eq!((pipeline.issue_project.as_deref(), pipeline.reviewers.as_deref()), (Some("MNT"), Some("acme/web")));
+        assert_eq!((pipeline.watch.len(), &value["x-own"], &value["repo"]), (1, &serde_json::json!(1), &serde_json::json!("/")));
+        assert!(text.ends_with("}\n"));
+
+        let cleared = BoardSettings { label: " ", entry: "a", order: &[], issue_project: "", reviewers: "" };
+        let value: serde_json::Value = serde_json::from_str(&board_with_settings(&text, &cleared).unwrap()).unwrap();
+        for key in ["label", "order", "issue_project", "reviewers"] {
+            assert!(value.get(key).is_none(), "{key}");
+        }
+        assert_eq!(value["entry"], "a");
+        assert!(board_with_settings("[]", &cleared).unwrap_err().contains("not a JSON object"));
+        assert!(board_with_settings("{", &cleared).is_err());
     }
 
     #[test]
