@@ -60,14 +60,17 @@ async fn has_session(state: &AppState, workspace: &Workspace, dir: &str) -> bool
     tmux::session_for(&sessions, workspace, dir).is_some()
 }
 
-/// Runs `workitem-move` on the full path, so it never depends on the backend's cwd.
-pub fn move_stage(state: &AppState, path: &Path, stage: &str) -> std::result::Result<(), String> {
+/// Runs `workitem-move` on the full path, so it never depends on the backend's cwd. It may wait
+/// on the issue tracker (a stage's `issue_state`), so it runs without blocking a worker thread.
+pub async fn move_stage(state: &AppState, path: &Path, stage: &str) -> std::result::Result<(), String> {
     let script = state.skills_dir.join("workitem-pipeline/bin/workitem-move");
-    let output = std::process::Command::new("python3")
+    let output = tokio::process::Command::new("python3")
         .arg(script)
         .arg(path)
         .arg(stage)
+        .kill_on_drop(true)
         .output()
+        .await
         .map_err(|e| format!("cannot run workitem-move: {e}"))?;
     if output.status.success() {
         Ok(())
@@ -91,7 +94,7 @@ pub async fn approve(State(state): State<Shared>, UrlPath((workspace, dir)): Url
     let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let gate = stage_of(&state, &workspace, &item)?.gate.ok_or(conflict(format!("stage {} has no gate", item.stage)))?;
     workitem::set_fields(&path, &[("approved", "true"), ("approved_at", &today()?)]).map_err(internal)?;
-    if let Err(e) = move_stage(&state, &path, &gate.approve_to) {
+    if let Err(e) = move_stage(&state, &path, &gate.approve_to).await {
         let _ = workitem::set_fields(&path, &[("approved", "false")]);
         return Err(conflict(e));
     }
@@ -115,7 +118,7 @@ pub async fn reject(
         return Err(ApiError(StatusCode::BAD_REQUEST, "a rejection needs a comment".into()));
     }
     workitem::set_rejection(&path, &body.comment).map_err(internal)?;
-    move_stage(&state, &path, &gate.reject_to).map_err(conflict)?;
+    move_stage(&state, &path, &gate.reject_to).await.map_err(conflict)?;
     state.wake.notify_one();
     Ok(StatusCode::NO_CONTENT)
 }

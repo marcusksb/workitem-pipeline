@@ -401,6 +401,19 @@ impl AppState {
         self.pipeline(workspace, board).pipeline.map(|p| p.repo).ok_or_else(|| format!("board '{board}' has no valid file"))
     }
 
+    /// The boards of the workspace that would be invalid under `tracker`, each with why, so a
+    /// tracker switch can be refused before it breaks them. A file that is invalid anyway is not
+    /// listed.
+    pub fn tracker_conflicts(&self, workspace: &Workspace, tracker: &str) -> Vec<String> {
+        self.board_names(workspace)
+            .into_iter()
+            .filter_map(|board| {
+                let text = fs::read_to_string(workspace.dir.join("boards").join(format!("{board}.json"))).ok()?;
+                check_tracker(&Pipeline::parse(&text).ok()?, tracker).err().map(|e| format!("{board}: {e}"))
+            })
+            .collect()
+    }
+
     /// The distinct repos of the workspace's boards, for sessions that are not tied to one board.
     pub fn repos(&self, workspace: &Workspace) -> Vec<PathBuf> {
         let mut repos: Vec<PathBuf> = self.board_names(workspace).iter().filter_map(|b| self.repo_of(workspace, b).ok().flatten()).collect();

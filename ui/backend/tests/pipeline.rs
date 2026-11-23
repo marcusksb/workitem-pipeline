@@ -1751,6 +1751,12 @@ async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_
     let (status, body) = post(&w, "/api/workitems/app/T-40-gh/session", "").await;
     assert!(!status.is_success() && body.contains("GitHub account gone is not logged in"), "{status} {body}");
     assert!(get(&w, "/api/workspaces").await.contains("GitHub account gone is not logged in"), "the header says why");
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"agent":"","issue_tracker":"jira","github_account":"gone"}"#).await;
+    assert_eq!(status, StatusCode::OK, "a broken saved account does not block the other settings: {body}");
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"issue_tracker":"github"}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("default: ") && body.contains("can only be assigned or closed"), "the Jira states of the board would break: {body}");
+    assert!(!fs::read_to_string(w.ws.join("workspace.toml")).unwrap().contains("github\""), "nothing was written");
     fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"1m\"\ncommand = \"token-probe\"\n").unwrap();
     settle(&w).await;
     assert!(!get(&w, "/api/workspaces").await.contains("account_error"));

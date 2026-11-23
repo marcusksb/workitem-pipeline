@@ -133,6 +133,26 @@ class WorkitemIssueTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("this workspace uses GitHub", result.stderr)
 
+    def test_the_folder_prefix_keeps_only_letters_digits_and_hyphens(self):
+        self.setup("github")
+        result = self.run_script(ISSUE, "parse", "--workspace", self.workspace, "--board", "dev", "vercel/next.js#42")
+        self.assertEqual(result.stdout.splitlines()[1], "prefix: next-js-42", "tmux turns . into _ in session names")
+
+    def test_a_jira_url_needs_a_server(self):
+        self.setup("jira")
+        with open(self.jira_config, "w") as f:
+            f.write("login: me@example.com\n")
+        self.assertEqual(self.run_script(ISSUE, "parse", self.item("x"), "MNT-7").stdout, "issue: MNT-7\nprefix: MNT-7\n")
+
+    def test_an_issue_of_the_other_tracker_is_refused(self):
+        self.setup("github")
+        path = self.item("x", "SBD-123 (https://jira/browse/SBD-123)")
+        for command in (["pr-line"], ["read"], ["set-state", "assigned"]):
+            result = self.run_script(ISSUE, command[0], path, *command[1:])
+            self.assertEqual(result.returncode, 2, command)
+            self.assertIn("is not a GitHub issue", result.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_parse_without_issue_project_asks_gh_for_the_boards_repo(self):
         self.setup("github")
         self.answers([[["repo", "view"], ["acme/api\n", 0]]])
@@ -263,6 +283,20 @@ class WorkitemIssueTest(unittest.TestCase):
         self.answers([[["api", "graphql"], [json.dumps(data), 1]]])
         items = [{"dir": "a", "issue": "acme/web#1"}, {"dir": "b", "issue": "acme/web#2"}]
         self.assertEqual(self.run_script(STATUS, stdin=json.dumps(items), WORKITEM_DIR_ROOT=self.workspace).returncode, 0)
+        self.assertIn("issue_status: Closed\n", self.read(a))
+
+    def test_issue_status_reads_the_other_repos_when_one_fails(self):
+        self.setup("github")
+        a = self.item("a", "acme/api#1")
+        self.item("b", "acme/web#2")
+        data = {"data": {"repository": {"i1": {"state": "CLOSED", "assignees": {"totalCount": 0}}}}}
+        # The fake answers by argv prefix: the web repo's query fails, the api repo's is read.
+        self.answers([[["api", "graphql", "-f", "query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { i2: issue(number: 2) { state assignees(first: 1) { totalCount } } } }"], ["", 1]],
+                      [["api", "graphql"], [json.dumps(data), 0]]])
+        items = [{"dir": "a", "issue": "acme/api#1"}, {"dir": "b", "issue": "acme/web#2"}]
+        result = self.run_script(STATUS, stdin=json.dumps(items), WORKITEM_DIR_ROOT=self.workspace)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("cannot read the issues of acme/web", result.stderr)
         self.assertIn("issue_status: Closed\n", self.read(a))
 
     def test_a_move_sets_the_stages_issue_state_and_stands_when_it_fails(self):

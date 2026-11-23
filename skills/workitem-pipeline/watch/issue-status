@@ -61,8 +61,12 @@ def main():
         for directory in keys[key]:
             path = os.path.join(root, directory, "workitem.md")
             values = {"issue_status": status, "issue_status_category": category}
-            fields = read_fields(path)
-            set_fields(path, {k: v for k, v in values.items() if fields.get(k) != v})
+            try:
+                fields = read_fields(path)
+                set_fields(path, {k: v for k, v in values.items() if fields.get(k) != v})
+            except (RuntimeError, OSError) as e:
+                # An item an agent is busy writing waits for the next run; the others are written.
+                print(f"{directory}: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

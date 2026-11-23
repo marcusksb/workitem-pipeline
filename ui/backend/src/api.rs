@@ -121,33 +121,34 @@ pub struct WorkspaceChange {
 }
 
 /// Sets the workspace's agent (decision 39), issue tracker (62) and GitHub account (67), each
-/// only when given; an empty one clears it. A GitHub account must be one gh is logged in to.
+/// only when given; an empty one clears it. Everything is checked before anything is written: a
+/// new GitHub account must be one gh is logged in to, and a new tracker must suit every board's
+/// `issue_project` and `issue_state`.
 pub async fn update_workspace(
     State(state): State<Shared>,
     Path(name): Path<String>,
     Json(body): Json<WorkspaceChange>,
 ) -> Result<Json<Workspace>, ApiError> {
     let bad = |e: String| ApiError(StatusCode::BAD_REQUEST, e);
-    if state.store.workspace(&name).is_none() {
-        return Err(ApiError::not_found("workspace"));
-    }
-    if let Some(login) = body.github_account.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+    let current = state.store.workspace(&name).ok_or(ApiError::not_found("workspace"))?;
+    // Only a changed account is checked, so a broken saved one does not block the other settings.
+    let login = body.github_account.as_deref().map(str::trim);
+    if let Some(login) = login.filter(|l| !l.is_empty() && Some(*l) != current.github_account.as_deref()) {
         if !crate::config::valid_login(login) {
             return Err(bad(format!("'{login}' is not a GitHub login")));
         }
         crate::github::token_for(&state, login).await.map_err(bad)?;
     }
-    let mut workspace = None;
-    if let Some(agent) = &body.agent {
-        workspace = state.store.set_agent(&name, agent).map_err(bad)?;
+    let tracker = body.issue_tracker.as_deref().map(str::trim);
+    let new_tracker = tracker.map(|t| if t.is_empty() { crate::config::ISSUE_TRACKERS[0] } else { t });
+    if let Some(tracker) = new_tracker.filter(|t| *t != current.issue_tracker) {
+        let conflicts = state.tracker_conflicts(&current, tracker);
+        if !conflicts.is_empty() {
+            return Err(bad(format!("these boards do not suit {tracker}; change their issue_project and issue_state first: {}", conflicts.join("; "))));
+        }
     }
-    if let Some(tracker) = &body.issue_tracker {
-        workspace = state.store.set_issue_tracker(&name, tracker).map_err(bad)?;
-    }
-    if let Some(login) = &body.github_account {
-        workspace = state.store.set_github_account(&name, login).map_err(bad)?;
-    }
-    let workspace = workspace.or_else(|| state.store.workspace(&name)).ok_or(ApiError::not_found("workspace"))?;
+    let change = crate::config::SettingsChange { agent: body.agent.as_deref(), issue_tracker: tracker, github_account: login };
+    let workspace = state.store.update(&name, &change).map_err(bad)?.ok_or(ApiError::not_found("workspace"))?;
     // A fixed account starts the workspace again at once instead of on its next tick.
     let _ = crate::github::token(&state, &workspace).await;
     state.wake.notify_one();

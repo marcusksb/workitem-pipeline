@@ -51,6 +51,8 @@ pub struct AppState {
     pub ask_wait: std::time::Duration,
     /// Workspaces whose `github_account` could not be read the last time, with why (`github.rs`).
     pub account_errors: std::sync::Mutex<HashMap<String, String>>,
+    /// GitHub tokens by login, with when gh gave them (`github.rs`).
+    pub tokens: std::sync::Mutex<HashMap<String, (std::time::Instant, String)>>,
 }
 
 impl AppState {
@@ -71,6 +73,7 @@ impl AppState {
             paused: std::sync::Mutex::new(watch::load_paused(&store)),
             ask_wait: std::time::Duration::from_secs(240),
             account_errors: Default::default(),
+            tokens: Default::default(),
             store,
         }
     }

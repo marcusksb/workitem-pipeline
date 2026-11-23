@@ -58,6 +58,15 @@ def issue_key(issue):
     return "" if key.lower() == "none" else key
 
 
+def own_key(tracker, issue):
+    """The ref of an `issue:` value, refused when it belongs to the other tracker (62); "" for none."""
+    key = issue_key(issue)
+    pattern = JIRA_KEY if tracker == "jira" else GITHUB_REF
+    if key and not pattern.fullmatch(key):
+        raise Problem(f"issue '{key}' is not a {'Jira' if tracker == 'jira' else 'GitHub'} issue, and this workspace uses {tracker}")
+    return key
+
+
 # --- gh ----------------------------------------------------------------------------------------
 
 def gh_env(workspace):
@@ -235,8 +244,13 @@ class GitHub:
                 part = sorted(numbers)[start:start + PAGE]
                 fields = " ".join(f"i{n}: issue(number: {n}) {{ state assignees(first: 1) {{ totalCount }} }}" for n in part)
                 query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
-                out = gh(self.workspace, "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={name}", partial=True)
-                repository = (json.loads(out).get("data") or {}).get("repository") or {}
+                try:
+                    out = gh(self.workspace, "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}", "-f", f"name={name}", partial=True)
+                    repository = (json.loads(out).get("data") or {}).get("repository") or {}
+                except (RuntimeError, ValueError) as e:
+                    # One repo that cannot be read (no access, rate limit) must not hide the others.
+                    print(f"cannot read the issues of {repo}: {e}", file=sys.stderr)
+                    continue
                 for n in part:
                     issue = repository.get(f"i{n}")
                     if issue:
@@ -306,10 +320,10 @@ def parse(workspace, config, text):
             raise Problem(f"'{text}' is not a Jira key or Jira issue URL, and this workspace uses Jira")
         key = match.group(1)
         try:
-            url = f"{jira_config()[0]}/browse/{key}"
+            server = jira_config()[0]
         except OSError:
-            url = ""
-        return key, url, key
+            server = ""
+        return key, f"{server}/browse/{key}" if server else "", key
     match = GITHUB_URL.fullmatch(text) or GITHUB_REF.fullmatch(text)
     if match:
         repo, number = match.group(1), match.group(2)
@@ -318,4 +332,6 @@ def parse(workspace, config, text):
     else:
         raise Problem(f"'{text}' is not a GitHub issue (#123, owner/repo#123 or an issue URL), and this workspace uses GitHub")
     ref = f"{repo}#{number}"
-    return ref, GitHub(workspace).url(ref), f"{repo.split('/')[1]}-{number}"
+    # The prefix goes into the folder name and so the tmux session `wi-<dir>`, where tmux would
+    # turn a `.` (`next.js`) into `_` and the session would no longer be found.
+    return ref, GitHub(workspace).url(ref), f"{re.sub(r'[^A-Za-z0-9-]', '-', repo.split('/')[1])}-{number}"
