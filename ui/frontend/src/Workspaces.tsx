@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { api } from "./api";
 import { Dialog } from "./Dialog";
 import { boardLabel } from "./boardState";
+import { IconSettings } from "./icons";
 import { Pipelines, Workspace } from "./types";
 
 const trackerName = (tracker: string) => (tracker === "github" ? "GitHub Issues" : "Jira");
@@ -92,7 +93,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
       {current && (
         <button
           className={current.account_error ? "link error" : "link"}
-          title={current.account_error ?? "Agent, issue tracker and GitHub account of this workspace"}
+          title={current.account_error ? `Stopped: ${current.account_error}` : `Agent: ${current.agent || "default"} · Issues: ${trackerName(current.issue_tracker)}`}
           onClick={() => {
             setError(undefined);
             setAgent(current.agent ?? "");
@@ -101,7 +102,8 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
             setEditingSettings(true);
           }}
         >
-          {current.account_error ? "Stopped: GitHub account not logged in" : `Settings: ${current.agent || "default agent"} · ${trackerName(current.issue_tracker)}`}
+          <IconSettings />
+          Settings
         </button>
       )}
       {current && (
