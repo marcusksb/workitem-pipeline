@@ -1,5 +1,5 @@
 import { issueCategory } from "./boardState";
-import { ISSUE_BADGE } from "./LinkBadges";
+import { ISSUE_BADGE } from "./tone";
 import { Badge } from "@/components/ui/badge";
 
 /** The issue status of a workitem, coloured by its status category; nothing when unknown. */

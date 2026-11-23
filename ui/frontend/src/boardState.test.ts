@@ -312,6 +312,8 @@ describe("prState", () => {
     expect(prState({ ...open, ci: "failing" })).toEqual({ label: "CI failing", tone: "bad" });
     expect(prState({ ...open, ci: "pending" })).toEqual({ label: "CI running", tone: "wait" });
     expect(prState(open)).toEqual({ label: "CI passing", tone: "good" });
+    expect(prState({ ...open, approval: "approved" })).toEqual({ label: "approved", tone: "good" });
+    expect(prState({ ...open, approval: "approved", ci: "failing" })?.label).toBe("CI failing");
     expect(prState({ ...open, ci: "none" })?.label).toBe("open");
   });
 });
@@ -324,6 +326,7 @@ describe("agentLine", () => {
     expect(agentLine(item({ agent_status: "working" }))).toEqual({ label: "Working", tone: "wait" });
     expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "idle" });
     expect(agentLine(item({ gate }))).toEqual({ label: "Needs approval", tone: "gate" });
+    expect(agentLine(item({ gate, approved: true }))).toBeUndefined();
     expect(agentLine(item({}))).toBeUndefined();
   });
 });

@@ -4,7 +4,7 @@ import { Item } from "./types";
 import { cn } from "@/lib/utils";
 
 /** One line with a coloured dot: blocked (and why), working, waiting (for what), or needs approval at a gate. */
-export function AgentStatus({ item, className }: { item: Pick<Item, "agent_status" | "gate">; className?: string }) {
+export function AgentStatus({ item, className }: { item: Pick<Item, "agent_status" | "gate" | "approved">; className?: string }) {
   const line = agentLine(item);
   if (!line) return null;
   return (

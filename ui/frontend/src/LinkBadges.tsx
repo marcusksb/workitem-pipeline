@@ -1,14 +1,12 @@
 import { MouseEvent } from "react";
 import { issueCategory, prNumber, ticket } from "./boardState";
 import { IconArrowUp } from "./icons";
+import { ISSUE_BADGE } from "./tone";
 import { Item } from "./types";
 import { Badge } from "@/components/ui/badge";
 
 // Clicking a badge must not also select the card it sits in.
 const stop = (event: MouseEvent) => event.stopPropagation();
-
-/** Badge variant of an issue status category. */
-export const ISSUE_BADGE = { todo: "outline", progress: "info", done: "good" } as const;
 
 /** Clickable issue (key and status), parent and, unless `pr` is false, PR badges of an item. */
 export function LinkBadges({ item, pr = true }: { item: Pick<Item, "issue" | "issue_status" | "issue_status_category" | "pr" | "parent">; pr?: boolean }) {
@@ -22,11 +20,13 @@ export function LinkBadges({ item, pr = true }: { item: Pick<Item, "issue" | "is
         (issue.url ? (
           <Badge asChild variant={variant}>
             <a className="no-underline hover:underline" href={issue.url} target="_blank" rel="noreferrer" title={issue.url} onClick={stop}>
-              {label}
+              <span className="truncate">{label}</span>
             </a>
           </Badge>
         ) : (
-          <Badge variant={variant}>{label}</Badge>
+          <Badge variant={variant} title={label ?? undefined}>
+            <span className="truncate">{label}</span>
+          </Badge>
         ))}
       {item.parent && (
         <Badge className="max-w-full" title={`split from ${item.parent}`}>

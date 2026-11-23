@@ -262,7 +262,7 @@ export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
 
 /**
  * The one PR state a card shows, the most urgent first: merged or closed, a merge conflict,
- * changes requested, then CI. Undefined before `pr-status` read the PR.
+ * changes requested, failing or running CI, approval, then passing CI. Undefined before `pr-status` read the PR.
  */
 export function prState(review: Review | null): { label: string; tone: Tone } | undefined {
   if (!review) return undefined;
@@ -272,12 +272,16 @@ export function prState(review: Review | null): { label: string; tone: Tone } | 
   if (review.approval === "changes_requested") return { label: "changes requested", tone: "bad" };
   if (review.ci === "failing") return { label: "CI failing", tone: "bad" };
   if (review.ci === "pending") return { label: "CI running", tone: "wait" };
+  if (review.approval === "approved") return { label: "approved", tone: "good" };
   if (review.ci === "passing") return { label: "CI passing", tone: "good" };
   return { label: "open", tone: "idle" };
 }
 
+/** In a gate stage and not approved yet. */
+export const needsApproval = (item: Pick<Item, "gate" | "approved">) => !!item.gate && !item.approved;
+
 /** What the agent is doing, for the card's status line: blocked (with its reason), working, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
-export function agentLine(item: Pick<Item, "agent_status" | "gate">): { label: string; tone: Tone } | undefined {
+export function agentLine(item: Pick<Item, "agent_status" | "gate" | "approved">): { label: string; tone: Tone } | undefined {
   const status = item.agent_status;
   if (status.startsWith("blocked")) {
     const reason = status.replace(/^blocked:?\s*/, "");
@@ -288,7 +292,7 @@ export function agentLine(item: Pick<Item, "agent_status" | "gate">): { label: s
     const what = status.replace(/^waiting:?\s*/, "");
     return { label: what ? `Waiting · ${what}` : "Waiting", tone: "idle" };
   }
-  if (item.gate) return { label: "Needs approval", tone: "gate" };
+  if (needsApproval(item)) return { label: "Needs approval", tone: "gate" };
 }
 
 /**

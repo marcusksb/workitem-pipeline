@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -137,7 +137,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
   return (
     <div
       style={depth ? { marginLeft: depth * 16 } : undefined}
-      className={`card${selected ? " selected" : ""}${isBlocked(item) ? " blocked" : item.gate ? " gate" : ""}`}
+      className={`card${selected ? " selected" : ""}${isBlocked(item) ? " blocked" : needsApproval(item) ? " gate" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -157,8 +157,16 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
       <div className="title">{item.title}</div>
       <div className="card-chips">
         <Badge>{item.kind}</Badge>
-        {showWorkspace && <Badge>{item.workspace}</Badge>}
-        {where && <Badge>{where}</Badge>}
+        {showWorkspace && (
+          <Badge title={item.workspace}>
+            <span className="truncate">{item.workspace}</span>
+          </Badge>
+        )}
+        {where && (
+          <Badge title={where}>
+            <span className="truncate">{where}</span>
+          </Badge>
+        )}
         <LinkBadges item={item} pr={false} />
         {waitsOn.length > 0 && <DependencyBadge count={waitsOn.length} onOpen={onDependencies} />}
         <FollowUpsChip followUps={item.follow_ups} />
@@ -178,7 +186,10 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
 function Column({ name, label, final, items, board, pause, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
   const clear = useRun(onChanged);
   const pauser = useRun(onChanged);
-  const errors = [pauser.error, clear.error].filter(Boolean);
+  const errors = [
+    ["pause", pauser.error],
+    ["clear", clear.error],
+  ].filter(([, error]) => error);
   return (
     <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}${pause.paused ? " paused" : ""}`} data-stage={name}>
       <h2>
@@ -199,8 +210,8 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
         </span>
       </h2>
       <div className="cards">
-        {errors.map((error) => (
-          <p className="error column-error" key={error}>
+        {errors.map(([source, error]) => (
+          <p className="error column-error" key={source}>
             {error}
           </p>
         ))}
