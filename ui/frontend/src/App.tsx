@@ -163,7 +163,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
             void items.reload();
           }}
         />
-        <button className="search-open" onClick={() => setSearching(true)} title="Find a workitem by title, Jira key or PR number">
+        <button className="search-open" onClick={() => setSearching(true)} title="Find a workitem by title, issue key or PR number">
           Search <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"}K</kbd>
         </button>
         {error && <span className="error">{error}</span>}

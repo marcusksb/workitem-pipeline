@@ -1,7 +1,7 @@
 ---
 name: workitem-create
 version: 1.0.0
-description: Generate structured workitem files in a workspace from a Jira ticket or a plain task description — classifies it as bug/analysis/feature, decides whether a worktree and a PR (and which PR mode) are needed, links the Jira ticket if one exists, and splits a task that spans several repos into one linked item per board. Use when asked to "create a workitem", "generate a workitem for X", "make a workitem from this ticket/task".
+description: Generate structured workitem files in a workspace from an issue (Jira or GitHub, whichever the workspace tracks) or a plain task description — classifies it as bug/analysis/feature, decides whether a worktree and a PR (and which PR mode) are needed, links the issue if one exists, and splits a task that spans several repos into one linked item per board. Use when asked to "create a workitem", "generate a workitem for X", "make a workitem from this ticket/task".
 triggers:
   - "create a workitem"
   - "generate a workitem"
@@ -9,17 +9,16 @@ triggers:
 allowed-tools:
   - Bash
   - Write
-  - mcp__claude_ai_Atlassian_Rovo__getAccessibleAtlassianResources
-  - mcp__claude_ai_Atlassian_Rovo__getJiraIssue
   - mcp__claude_ai_Sentry__get_sentry_resource
 ---
 
 ## When to invoke this skill
 
-Use when the user wants a self-contained, structured workitem file that another agent can pick up and act on without further context — from either a Jira ticket ID or a plain-text task description.
+Use when the user wants a self-contained, structured workitem file that another agent can pick up and act on without further context — from either an issue (a Jira key, a GitHub issue) or a plain-text task description.
 
 Examples:
 - `/workitem-create SBD-123`
+- `/workitem-create acme/web#42` (in a workspace that tracks GitHub issues)
 - "Create a workitem for: the CDN cache header is missing on 404 responses"
 - "Make a workitem for SHAPE-456"
 
@@ -29,39 +28,41 @@ This skill only **generates** the files. It does not implement anything and does
 
 ### Step 1 — Get the input
 
-If the skill argument matches a Jira ticket key (`[A-Z]+-\d+`), treat it as **Case A**. If it is a Sentry issue URL (contains `sentry.io`), treat it as **Case C**. Otherwise treat the argument as free text — **Case B**.
+Every tracker operation goes through `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue` (below: `workitem-issue`); never call Jira or GitHub issue tools yourself. The workspace's `issue_tracker` decides which tracker it talks to.
+
+If the skill argument is an issue reference (a Jira key like `SBD-123`, a GitHub `#123`, `owner/repo#123`, or a Jira or GitHub issue URL) and `workitem-issue parse --workspace <workspace> --board <board> <argument>` accepts it, treat it as **Case A**. If it is a Sentry issue URL (contains `sentry.io`), treat it as **Case C**. Otherwise treat the argument as free text — **Case B**.
 
 Items live in a workspace folder, not in a repo. `--workspace <folder>` names it (else use `$WORKITEM_WORKSPACE`; with neither, end your turn asking for the workspace folder and write nothing). `--board <name>` is the board the task was filed on; it must be `<workspace>/boards/<name>.json`, stop and say so if it is not (without `--board`, a workspace with one board uses that one, otherwise ask). Each board file names its repo in `"repo"`: an item belongs to the repo of its board. Read every `<workspace>/boards/*.json` now and note each board's name and repo.
 
 A board without `"repo"` holds items that change no code (an intake board, say). On such a board: `worktree_needed: false` and `pr_mode: none` (Steps 4 and 5 are decided), and always exactly one item, never split (Step 6). Its handler skill does the rest, so keep the `## Description` close to the input.
 
-Other optional flags: `--issue <KEY>` links a ticket, `--parent <dir>` marks the new workitem as a child of the workitem with that directory name (use it when splitting a workitem into smaller ones). Callers pass these instead of answering questions.
+Other optional flags: `--issue <ref>` links an issue, `--parent <dir>` marks the new workitem as a child of the workitem with that directory name (use it when splitting a workitem into smaller ones). Callers pass these instead of answering questions.
 
-If no argument was given, end your turn with the question "Give me a Jira ticket ID, a Sentry issue URL, or describe the task." as the final message and write no file.
+If no argument was given, end your turn with the question "Give me an issue, a Sentry issue URL, or describe the task." as the final message and write no file.
 
 A new workitem always starts in the `entry` stage of its board (`entry` in `<workspace>/boards/<name>.json`). The UI's dispatcher triages it from there.
 
 ### Step 2 — Resolve title, summary, and description
 
-**Case A — Jira ticket given:**
+**Case A — issue given:**
 
-1. `mcp__claude_ai_Atlassian_Rovo__getAccessibleAtlassianResources` to get the cloudId.
-2. `mcp__claude_ai_Atlassian_Rovo__getJiraIssue` with that cloudId and the ticket key, `responseContentFormat: "markdown"`.
+1. `workitem-issue parse --workspace <workspace> --board <board> <ref>` prints `issue: <value>` (the exact `issue:` line for the frontmatter) and `prefix: <prefix>` (for the directory name, Step 7). It refuses an issue of the other tracker; show its message and stop.
+2. `workitem-issue read --workspace <workspace> --board <board> <ref>` prints the title, status, description and comments.
 
-Extract `fields.summary` and `fields.description`. If the call fails, show the error and stop — do not create a file.
+If either fails, show the error and stop — do not create a file.
 
-- `title` = the summary, trimmed to ~10 words if needed.
-- `summary` = summary, one line.
-- `description` = the ticket description, condensed to a short paragraph (3–6 sentences) if long.
-- `issue` = ticket key + issue URL.
+- `title` = the issue title, trimmed to ~10 words if needed.
+- `summary` = the title, one line.
+- `description` = the issue description, condensed to a short paragraph (3–6 sentences) if long.
+- `issue` = the `issue:` value `parse` printed.
 
 **Case B — Plain text task:**
 
 - `title` = a short (≤10 words) title derived from the text.
 - `summary` = one sentence stating what needs to happen.
 - `description` = the user's task text, condensed to a short paragraph if long.
-- Do not ask about a Jira ticket. Use `--issue <KEY>`, or a ticket key that appears in the text.
-  - If there is one, fetch it as in Case A and merge: keep the user's own framing for `description` unless it conflicts with the ticket, and set `issue` to the ticket key + URL.
+- Do not ask about an issue. Use `--issue <ref>`, or an issue reference that appears in the text and `parse` accepts.
+  - If there is one, fetch it as in Case A and merge: keep the user's own framing for `description` unless it conflicts with the issue, and set `issue` to the value `parse` printed.
   - If none, set `issue: none`.
 
 **Case C — Sentry issue URL given:**
@@ -69,11 +70,11 @@ Extract `fields.summary` and `fields.description`. If the call fails, show the e
 1. Fetch the issue with `mcp__claude_ai_Sentry__get_sentry_resource` (read only).
 2. `title` = the error type and message, trimmed to ~10 words. `summary` = one line with the error and where it happens.
 3. `description` = short paragraph: error, top stack frames in app code, first seen / last seen, event count.
-4. `system_error` = the issue URL. Resolve the Jira ticket as in Case B (flag, key in text, else none).
+4. `system_error` = the issue URL. Resolve the linked issue as in Case B (flag, reference in text, else none).
 
 Set `source` from the input: `issue` for Case A, `system_error` for Case C, `text` for Case B (even if a ticket is linked later).
 
-Never invent or guess a ticket key.
+Never invent or guess an issue reference.
 
 ### Step 3 — Classify the type
 
@@ -119,14 +120,14 @@ State the rationale.
 
 Most tasks touch one repo: one item, on the `--board` board. When the task clearly needs changes in the repos of several boards (an API change and the frontend that uses it), create one item per board that needs work, each describing only its repo's part. Look at the repos (read only) when the text alone does not say which parts exist where. Do not split on a guess: when it is unclear whether a second repo is involved, create one item and mention the possible second one in its `## Description`.
 
-When you split, decide the order: an item that another one needs first (the API before its consumer) is a dependency. Each dependent item gets `depends_on: <dir of the item it needs>` (comma-separated for several). Boards hold a dependent item back until its dependencies are merged when they ask for it. Only the last item of the chain (the one no other item depends on) moves the Jira ticket; say so in each other item's `## Jira` section.
+When you split, decide the order: an item that another one needs first (the API before its consumer) is a dependency. Each dependent item gets `depends_on: <dir of the item it needs>` (comma-separated for several). Boards hold a dependent item back until its dependencies are merged when they ask for it. Only the last item of the chain (the one no other item depends on) moves the shared issue (`workitem-issue` enforces this); say so in each other item's `## Issue` section.
 
 State the decision and its rationale in one sentence.
 
 ### Step 7 — Derive slug and path
 
 1. Take `title`, lowercase it, replace spaces with `-`, strip all characters that are not `a-z`, `0-9`, or `-`, truncate to 50 characters, strip trailing `-`.
-2. Directory name: `<TICKET-ID>-<slug>` if a Jira ticket is linked, otherwise just `<slug>`. When you split, add the board name: `<TICKET-ID>-<slug>-<board>`.
+2. Directory name: `<prefix>-<slug>` if an issue is linked (the `prefix:` that `parse` printed: `SBD-123` for Jira, `<repo>-<number>` for GitHub), otherwise just `<slug>`. When you split, add the board name: `<prefix>-<slug>-<board>`.
 3. Full path: `<workspace>/<dir>/`. Directory names are unique in the workspace: if one exists, stop and say so.
 4. `mkdir -p` that directory.
 
@@ -139,7 +140,7 @@ One file per item, dependencies first.
 title: <title>
 type: bug | feature | analysis | refactor | docs | style | perf | test | build | ci | chore | revert
 source: issue | system_error | text
-issue: <TICKET-ID> (<url>) | none
+issue: <the value parse printed> | none
 system_error: <error url> | none
 worktree_needed: true | false
 pr_mode: none | draft | ready
@@ -174,9 +175,9 @@ depends_on: <dir>, <dir>   # only for an item that needs others merged first; om
 
 <none/draft/ready — one sentence rationale from Step 5>
 
-## Jira
+## Issue
 
-<ticket key + URL, or "None — no ticket linked">
+<issue reference + URL, or "None — no issue linked">
 
 ## Sentry
 
@@ -187,4 +188,4 @@ If `--parent` was given, check that `<workspace>/<parent dir>/workitem.md` exist
 
 ### Step 9 — Report
 
-Tell the user each file path with its board, and one line each for type, worktree, PR mode, Jira link (or "none") and, when split, which item depends on which.
+Tell the user each file path with its board, and one line each for type, worktree, PR mode, issue link (or "none") and, when split, which item depends on which.

@@ -5,6 +5,7 @@ pub mod config;
 pub mod dispatch;
 pub mod files;
 pub mod git;
+pub mod github;
 pub mod launch;
 pub mod locate;
 pub mod pipeline;
@@ -48,6 +49,10 @@ pub struct AppState {
     pub paused: std::sync::Mutex<std::collections::HashSet<String>>,
     /// How long one `ask_parent` or `wait_for_answer` call waits for its answer (`questions.rs`).
     pub ask_wait: std::time::Duration,
+    /// Workspaces whose `github_account` could not be read the last time, with why (`github.rs`).
+    pub account_errors: std::sync::Mutex<HashMap<String, String>>,
+    /// GitHub tokens by login, with when gh gave them (`github.rs`).
+    pub tokens: std::sync::Mutex<HashMap<String, (std::time::Instant, String)>>,
 }
 
 impl AppState {
@@ -67,6 +72,8 @@ impl AppState {
             wake: Default::default(),
             paused: std::sync::Mutex::new(watch::load_paused(&store)),
             ask_wait: std::time::Duration::from_secs(240),
+            account_errors: Default::default(),
+            tokens: Default::default(),
             store,
         }
     }

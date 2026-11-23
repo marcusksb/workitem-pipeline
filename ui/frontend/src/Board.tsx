@@ -113,18 +113,23 @@ function PauseColumn({ workspaces, board, stage, label, paused, onDone }: { work
   );
 }
 
-/** Adds a board for a repo to the workspace: a copy of the bundled board with that repo. */
+/** Adds a board for a repo to the workspace: a copy of the bundled board with that repo, where its
+ * new issues go and the team that reviews its PRs. */
 function AddBoard({ workspace, onDone }: { workspace: string; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [repo, setRepo] = useState("");
+  const [issueProject, setIssueProject] = useState("");
+  const [reviewers, setReviewers] = useState("");
   const [error, setError] = useState<string>();
   const add = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await api.addBoard(workspace, name, repo);
+      await api.addBoard(workspace, { name, repo, issue_project: issueProject, reviewers });
       setName("");
       setRepo("");
+      setIssueProject("");
+      setReviewers("");
       setOpen(false);
       setError(undefined);
       onDone();
@@ -148,7 +153,19 @@ function AddBoard({ workspace, onDone }: { workspace: string; onDone: () => void
               Repository path
               <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="/absolute/path/to/repo" required />
             </label>
-            <span className="hint">Starts with the bundled stages. Edit boards/{name || "<name>"}.json in the workspace folder to change them.</span>
+            <label>
+              Issue project
+              <input value={issueProject} onChange={(e) => setIssueProject(e.target.value)} placeholder="GitHub owner/repo or Jira project key (optional)" />
+            </label>
+            <label>
+              Reviewers
+              <input value={reviewers} onChange={(e) => setReviewers(e.target.value)} placeholder="org/team (optional)" />
+            </label>
+            <span className="hint">
+              Starts with the bundled stages and the issue states of the workspace's tracker. On GitHub an empty issue project means the
+              repo's own issues; on Jira it is needed to create issues. Edit boards/{name || "<name>"}.json in the workspace folder to change
+              any of it.
+            </span>
             <button type="submit">Add</button>
             {error && <span className="error">{error}</span>}
           </form>

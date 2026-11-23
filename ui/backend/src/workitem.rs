@@ -20,9 +20,9 @@ pub struct Workitem {
     pub approved: bool,
     pub agent_status: String,
     pub issue: String,
-    /// Jira status name, as the workspace's watcher last saw it, or empty.
+    /// Issue status name, as the workspace's issue-status watcher last saw it, or empty.
     pub issue_status: String,
-    /// Jira status category key (`new`, `indeterminate`, `done`), or empty.
+    /// Issue status category, in Jira's keys (`new`, `indeterminate`, `done`), or empty.
     pub issue_status_category: String,
     pub pr: String,
     /// Directory name of the workitem this one was split from, or empty.
@@ -196,7 +196,7 @@ mod tests {
     use super::*;
 
     fn workspace(dir: &std::path::Path) -> Workspace {
-        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None, watch: vec![], error: None }
+        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None, issue_tracker: "jira".into(), github_account: None, watch: vec![], error: None }
     }
 
     #[test]

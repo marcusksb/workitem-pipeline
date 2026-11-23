@@ -5,7 +5,7 @@ description: "Review and approve (or reject) a workitem in `ready_for_developmen
 
 # Workitem Approve
 
-Manual gate before any code is written. Input: workitem directory name or Jira key, in the workspace folder (`$WORKITEM_WORKSPACE`, else ask; items are `<workspace>/<dir>/workitem.md`). If none is given, list items whose stage has a `gate` (title, size from the brief) and ask which one.
+Manual gate before any code is written. Input: workitem directory name or issue key, in the workspace folder (`$WORKITEM_WORKSPACE`, else ask; items are `<workspace>/<dir>/workitem.md`). If none is given, list items whose stage has a `gate` (title, size from the brief) and ask which one.
 
 ## Steps
 

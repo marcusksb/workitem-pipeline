@@ -33,14 +33,14 @@ function play(notes: number[], step = 0.4) {
 const beep = () => play([880]);
 /** Rising fourth: a PR waits only for the merge button. */
 const chime = () => play([659, 880], 0.12);
-/** Major arpeggio: the Jira issue is done. */
+/** Major arpeggio: the issue is done. */
 const fanfare = () => play([523, 659, 784, 1047], 0.1);
 
 const matching = (items: Item[], matches: (item: Item) => boolean) => new Set(items.filter(matches).map(itemKey));
 
 /**
  * Beep, plus a notification while the page is not focused, when an item becomes blocked; a chime when its PR becomes ready to merge, a fanfare
- * when its Jira issue becomes done. Items already in that state on first load stay quiet. Clicking a notification
+ * when its issue becomes done. Items already in that state on first load stay quiet. Clicking a notification
  * calls `onOpen` with the item.
  */
 export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => void) {

@@ -218,7 +218,7 @@ export function ticket(issue: string): { key: string; url?: string } | null {
   return key ? { key, url } : { key: issue };
 }
 
-/** Colour group of a Jira status category key, or undefined for an unknown or missing one. */
+/** Colour group of an issue status category key (Jira's keys), or undefined for an unknown or missing one. */
 export function issueCategory(category: string): "todo" | "progress" | "done" | undefined {
   if (category === "new") return "todo";
   if (category === "indeterminate") return "progress";
@@ -229,7 +229,7 @@ export function issueCategory(category: string): "todo" | "progress" | "done" | 
 export const prNumber = (pr: string) => pr.match(/\/pull\/(\d+)/)?.[1];
 
 /**
- * Items matching every word of `query` in their title, Jira key or PR number (`#123` or `123`).
+ * Items matching every word of `query` in their title, issue key or PR number (`#123` or `123`).
  * Items whose key or PR number equals the whole query come first, then by title.
  */
 export function searchItems(items: Item[], query: string): Item[] {

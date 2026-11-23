@@ -15,10 +15,6 @@ allowed-tools:
   - ListAgents
   - SendMessage
   - PushNotification
-  - mcp__claude_ai_Atlassian_Rovo__getAccessibleAtlassianResources
-  - mcp__claude_ai_Atlassian_Rovo__getJiraIssue
-  - mcp__claude_ai_Atlassian_Rovo__getTransitionsForJiraIssue
-  - mcp__claude_ai_Atlassian_Rovo__transitionJiraIssue
 ---
 
 ## When to invoke this skill
@@ -53,11 +49,7 @@ If your prompt says the item is already in the development stage (approving at t
 
 Also record who's doing the work, regardless of inline vs. background: call `ListAgents` — its result always states "This session is `<name>` [ref]", even for a plain inline run with no spawned agent. Write that name into the frontmatter as `session:`. This makes every workitem joinable via `SendMessage` to that name, not just the ones launched through Step 4b. (Step 4b overwrites this with the spawned agent's own name once it exists — that agent, not this launching session, is now the one doing the work.)
 
-Then move the linked Jira issue into development, using the Atlassian Rovo MCP tools (not the `jira` CLI). Skip this if `issue:` is `none`, and skip it when another item of the workspace depends on this one (`grep -l '^depends_on:.*\b<this dir>\b' <workspace>/*/workitem.md` finds one): only the last item of a chain moves the shared ticket.
-
-1. Get the `cloudId` with `getAccessibleAtlassianResources`, then read the issue's current status with `getJiraIssue`. If it is already `In development` or `In Progress`, do nothing.
-2. Call `getTransitionsForJiraIssue` and pick the transition whose target status is `In development`; if there is none, use `In Progress`. Run it with `transitionJiraIssue`.
-3. If neither transition exists or the call fails, do not stop the workitem: note it, list the available transitions in the Step 8 report, and continue.
+Do not touch the issue tracker: `workitem-move` moves the linked issue as the board's `issue_state` says when the item enters a stage (into development here, into review when it reaches the PR stage), and prints what it did or why it did not. Note that line for the Step 8 report.
 
 ### Step 4 — Decide inline vs. background
 
@@ -84,8 +76,8 @@ Read `worktree_needed` from the frontmatter.
 
 **If `true`:**
 
-1. If `issue:` is `none`, stop and ask for a ticket key per this repo's Git Workflow rule — never invent one. If running inline, ask directly. If running as a background agent (Step 4b), instead set `agent_status: blocked: no Jira ticket linked, needs a ticket key`, call `PushNotification` with that reason, and stop — there's no one to ask inline.
-2. Reuse the workitem's own directory name (already `<TICKET-ID>-<slug>`) instead of re-deriving a slug. Type prefix: `bug` → `fix`, `feature` → `feature`, any other commitizen type (`refactor`, `docs`, `chore`, …) → the type itself, matching the repo's own `fix/SHAPE-15490-description` example — adjust to match an existing branch pattern in the repo if this guess conflicts.
+1. If `issue:` is `none`, stop and ask for an issue per this repo's Git Workflow rule — never invent one. If running inline, ask directly. If running as a background agent (Step 4b), instead set `agent_status: blocked: no issue linked, needs an issue`, call `PushNotification` with that reason, and stop — there's no one to ask inline. Link a given issue with `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue parse <workitem file> <ref>` and put the `issue:` line it prints into the frontmatter.
+2. Reuse the workitem's own directory name (already `<issue prefix>-<slug>`) instead of re-deriving a slug. Type prefix: `bug` → `fix`, `feature` → `feature`, any other commitizen type (`refactor`, `docs`, `chore`, …) → the type itself, matching the repo's own `fix/SHAPE-15490-description` example — adjust to match an existing branch pattern in the repo if this guess conflicts.
 3. If `../<repo-name>-<workitem-dir-name>` already exists (`git worktree list`), or you are already in it, reuse it: work there and skip to step 4. Otherwise follow this repo's own documented worktree flow (AGENTS.md → Worktrees), not a generic one — it runs `bin/setup_worktree` for isolated test databases. Branch from the freshly fetched remote master, never the local `master`, which may be stale:
    ```
    git fetch origin master
@@ -122,6 +114,7 @@ Read `pr_mode` from the frontmatter.
 
 - `none` → no PR. If `<next>` is not `in_review`, run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` once rubocop and the specs pass (it also sets `agent_status: ok`). Otherwise skip this step.
 - `draft` or `ready` → this repo's own rule is to **always** create PRs as drafts regardless of `pr_mode`; if `pr_mode: ready`, tell the user about the conflict and default to draft unless they explicitly override.
+- The PR body must carry the line `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue pr-line <workitem file>` prints (`Closes owner/repo#123` for a GitHub issue, so the merge closes it; the key for Jira; nothing without an issue).
 - As soon as the PR is opened, write its URL into the workitem frontmatter as a new `pr:` field — the board's PR watchers need it to find this PR later.
 - Start `/monitor-pr {pr}` per AGENTS.md. While it idles until CI finishes, keep `agent_status: waiting: CI on PR #{pr}`; set `agent_status: working` whenever it acts. Once it reports CI green and comments addressed: if `<next>` is `in_review`, do **Mark ready for review** below. Then run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem-dir> <next>` (it also sets `agent_status: ok`) — from here, the next stage's handler or the board's PR watchers take over.
 
@@ -129,12 +122,12 @@ Read `pr_mode` from the frontmatter.
 
 Other handlers (self-review, QA) point here, so this is written once.
 
-1. `gh pr ready {pr} && gh pr edit {pr} --add-reviewer "$(gh repo view --json owner -q .owner.login)/backend"`. If adding the team fails, say so in your report but still move on.
-2. Move the linked Jira issue to `In Review` the same way as in Step 3 (Rovo MCP tools; skip if `issue:` is `none` or another item depends on this one; do nothing if it is already `In Review`). If there is no `In Review` transition or the call fails, do not stop: list the available transitions in the report.
+1. `gh pr ready {pr}`. Then, if the board file (`<workspace>/boards/<board>.json`) has `"reviewers"` (an `org/team`), `gh pr edit {pr} --add-reviewer <reviewers>`; without it, add no reviewer. If adding the team fails, say so in your report but still move on.
+2. Do not touch the issue: entering the PR stage moves it (see Step 3).
 
 ### Step 8 — Report
 
-Tell the user: which workitem was picked up, the branch/worktree it's running in, that stage is now `in_development`, the Jira status it moved to (or why it did not move), and the next concrete action (e.g. "failing test written, confirm before I fix it" / "draft PR #1234 open, monitor-pr running"). If launched in the background (Step 4b), also give the `session:` name and remind them how to join: ask a Claude Code session to `SendMessage` that name.
+Tell the user: which workitem was picked up, the branch/worktree it's running in, that stage is now `in_development`, what `workitem-move` said about the issue (moved, skipped, or why not), and the next concrete action (e.g. "failing test written, confirm before I fix it" / "draft PR #1234 open, monitor-pr running"). If launched in the background (Step 4b), also give the `session:` name and remind them how to join: ask a Claude Code session to `SendMessage` that name.
 
 ## Splitting
 

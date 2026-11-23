@@ -127,10 +127,15 @@ pub async fn pass(state: &AppState) {
     let mut started = false;
     let paused = state.paused.lock().unwrap().clone();
     for workspace in state.store.workspaces() {
+        // A workspace whose GitHub account cannot be read runs nothing (decision 68).
+        let Ok(token) = crate::github::token(state, &workspace).await else {
+            continue;
+        };
+        let token = token.as_deref();
         let items = workitem::list(&workspace);
         for (index, watch) in workspace_watchers(state, &workspace).iter().enumerate() {
             let key = format!("{}/{WORKSPACE}/{index}", workspace.name);
-            let job = |script| Job::new(state, &workspace, None, None, None, watch, script, &items.iter().collect::<Vec<_>>(), &sessions);
+            let job = |script| Job::new(state, &workspace, None, None, None, watch, script, &items.iter().collect::<Vec<_>>(), &sessions).with_token(token);
             started |= start(state, &mut runs, key, watch, &workspace, "", job);
         }
         for board in state.board_names(&workspace) {
@@ -144,7 +149,7 @@ pub async fn pass(state: &AppState) {
                 let key = format!("{}/{board}/{}/{index}", workspace.name, stage.map_or(BOARD, |s| s.name.as_str()));
                 let job = |script| {
                     let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
-                    Job::new(state, &workspace, Some(&board), pipeline.repo.as_deref(), stage, watch, script, &here, &sessions)
+                    Job::new(state, &workspace, Some(&board), pipeline.repo.as_deref(), stage, watch, script, &here, &sessions).with_token(token)
                 };
                 started |= start(state, &mut runs, key, watch, &workspace, &board, job);
             }
@@ -222,6 +227,14 @@ impl Job {
         }
         let cwd = repo.map_or_else(|| workspace.dir.clone(), Path::to_path_buf);
         Job { script, args: watch.args.clone(), cwd, env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
+    }
+
+    /// The workspace's GitHub token as `GH_TOKEN` (decision 67); the environment does not show in argv.
+    fn with_token(mut self, token: Option<&str>) -> Job {
+        if let Some(token) = token {
+            self.env.push(("GH_TOKEN", token.to_string()));
+        }
+        self
     }
 
     /// Runs the script in `cwd` with the context in env vars and the items of the column as a

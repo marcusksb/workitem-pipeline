@@ -24,6 +24,12 @@ pub struct Workspace {
     /// from `workspace.toml`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// `jira` or `github` (decision 62), from `workspace.toml`; `jira` when it names none.
+    pub issue_tracker: String,
+    /// The gh login whose token every process of the workspace gets (decision 67); gh's active
+    /// account when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_account: Option<String>,
     /// Scripts that run once for the whole workspace on a timer (`watch.rs`), from `workspace.toml`.
     #[serde(skip)]
     pub watch: Vec<Watch>,
@@ -44,6 +50,10 @@ struct Config {
 struct Settings {
     #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
+    issue_tracker: Option<String>,
+    #[serde(default)]
+    github_account: Option<String>,
     /// `[[watch]]` tables (or one `[watch]`), each with `every`, `command` and optional `args`.
     #[serde(default, deserialize_with = "crate::pipeline::watchers")]
     watch: Vec<Watch>,
@@ -55,8 +65,22 @@ impl Settings {
         if let Some(watch) = settings.watch.iter().find(|w| !crate::watch::valid_name(&w.command)) {
             return Err(format!("watch command '{}' is not a script name (lowercase letters, digits, . _ - only)", watch.command));
         }
+        if let Some(tracker) = settings.issue_tracker.as_deref().filter(|t| !ISSUE_TRACKERS.contains(t)) {
+            return Err(format!("issue_tracker '{tracker}' is not one of {}", ISSUE_TRACKERS.join(", ")));
+        }
+        if let Some(login) = settings.github_account.as_deref().filter(|l| !valid_login(l)) {
+            return Err(format!("github_account '{login}' is not a GitHub login"));
+        }
         Ok(settings)
     }
+}
+
+/// What `issue_tracker` can name; the first is the default.
+pub const ISSUE_TRACKERS: &[&str] = &["jira", "github"];
+
+/// A GitHub login: letters, digits and single hyphens, as GitHub allows them.
+pub fn valid_login(login: &str) -> bool {
+    !login.is_empty() && login.len() <= 39 && !login.starts_with('-') && login.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn default_port() -> u16 {
@@ -157,7 +181,15 @@ impl Store {
                 (known.get(name).cloned().unwrap_or_default(), Some(error))
             }
         };
-        Workspace { name: name.to_string(), dir, agent: settings.agent, watch: settings.watch, error }
+        Workspace {
+            name: name.to_string(),
+            dir,
+            agent: settings.agent,
+            issue_tracker: settings.issue_tracker.unwrap_or_else(|| ISSUE_TRACKERS[0].into()),
+            github_account: settings.github_account,
+            watch: settings.watch,
+            error,
+        }
     }
 
     /// Every folder in `workspaces/` with a plain name, by name.
@@ -201,9 +233,23 @@ impl Store {
 
     /// Sets or, with an empty `agent`, clears the workspace's agent. `None` when there is no such workspace.
     pub fn set_agent(&self, name: &str, agent: &str) -> Result<Option<Workspace>, String> {
-        let agent = agent.trim();
-        if !agent.is_empty() && resolve_executable(agent).is_none() {
+        self.update(name, &SettingsChange { agent: Some(agent), ..Default::default() })
+    }
+
+    /// Applies the given settings to `workspace.toml` in one write, after checking all of them, so
+    /// a bad one changes nothing. An empty value removes its key. Only these keys change; the rest
+    /// of the file (its watchers) stays, though not its comments. `None` when there is no such
+    /// workspace. Whether gh knows a GitHub account is the caller's check (`github.rs`).
+    pub fn update(&self, name: &str, change: &SettingsChange) -> Result<Option<Workspace>, String> {
+        let (agent, tracker, login) = (change.agent.map(str::trim), change.issue_tracker.map(str::trim), change.github_account.map(str::trim));
+        if let Some(agent) = agent.filter(|a| !a.is_empty() && resolve_executable(a).is_none()) {
             return Err(format!("'{agent}' is not one executable on PATH or an absolute path to one"));
+        }
+        if let Some(tracker) = tracker.filter(|t| !t.is_empty() && !ISSUE_TRACKERS.contains(t)) {
+            return Err(format!("issue tracker '{tracker}' is not one of {}", ISSUE_TRACKERS.join(", ")));
+        }
+        if let Some(login) = login.filter(|l| !l.is_empty() && !valid_login(l)) {
+            return Err(format!("'{login}' is not a GitHub login"));
         }
         let Some(workspace) = self.workspace(name) else {
             return Ok(None);
@@ -211,17 +257,26 @@ impl Store {
         if let Some(error) = workspace.error {
             return Err(format!("fix workspace.toml first: {error}"));
         }
-        // Only `agent` changes; the rest of the file (its watchers) stays, though not its comments.
         let path = workspace.dir.join("workspace.toml");
         let mut table: toml::Table = fs::read_to_string(&path).ok().map(|t| t.parse()).transpose().map_err(|e: toml::de::Error| e.to_string())?.unwrap_or_default();
-        if agent.is_empty() {
-            table.remove("agent");
-        } else {
-            table.insert("agent".into(), agent.into());
+        for (key, value) in [("agent", agent), ("issue_tracker", tracker), ("github_account", login)] {
+            match value {
+                Some("") => drop(table.remove(key)),
+                Some(value) => drop(table.insert(key.into(), value.into())),
+                None => {}
+            }
         }
         fs::write(&path, toml::to_string_pretty(&table).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         Ok(Some(self.load(name)))
     }
+}
+
+/// What `Store::update` changes; a `None` key stays as it is.
+#[derive(Default)]
+pub struct SettingsChange<'a> {
+    pub agent: Option<&'a str>,
+    pub issue_tracker: Option<&'a str>,
+    pub github_account: Option<&'a str>,
 }
 
 /// Absolute path of executable `name`: an absolute path as is, a bare name looked up on `PATH`.
@@ -330,6 +385,27 @@ mod tests {
         }
         let fresh = Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap();
         assert!(fresh.error.is_some() && fresh.watch.is_empty(), "nothing valid was ever read");
+    }
+
+    #[test]
+    fn issue_tracker_and_github_account_default_persist_and_are_checked_before_anything_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        store.add_workspace("app").unwrap();
+        let app = store.workspace("app").unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None));
+        store.set_agent("app", "/bin/sh").unwrap();
+        let change = |tracker, login| SettingsChange { issue_tracker: Some(tracker), github_account: Some(login), ..Default::default() };
+        let app = store.update("app", &change("github", " work-bot ")).unwrap().unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account.as_deref(), app.agent.as_deref()), ("github", Some("work-bot"), Some("/bin/sh")), "other keys stay");
+        assert!(store.update("app", &change("jira", "a b")).is_err());
+        assert_eq!(store.workspace("app").unwrap().issue_tracker, "github", "a bad key changes nothing");
+        assert!(store.update("app", &change("gitlab", "")).is_err());
+        let app = store.update("app", &change("", "")).unwrap().unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None), "empty goes back to the defaults");
+        let file = dir.path().join("workspaces/app/workspace.toml");
+        fs::write(&file, "issue_tracker = \"linear\"\n").unwrap();
+        assert!(store.workspace("app").unwrap().error.unwrap().contains("issue_tracker 'linear'"));
     }
 
     #[test]
