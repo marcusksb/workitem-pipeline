@@ -233,8 +233,7 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .board.list { display: flex; flex-direction: column; gap: 10px; }
 .board.list .column { min-height: 0; }
 .board.list .card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 12px; }
-.board.list .card-top { display: contents; }
-.board.list .card-key { order: 0; flex: 0 1 200px; }
+.board.list .card-foot { display: contents; }
 .board.list .card .title { order: 1; flex: 1 1 240px; min-width: 0; }
 .board.list .card-chips { order: 2; }
 .board.list .card-pr { order: 3; margin-left: 0; }
@@ -247,8 +246,8 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .card.blocked { border-color: color-mix(in srgb, var(--blocked) 40%, var(--border)); background: color-mix(in srgb, var(--blocked) 3%, var(--card)); }
 .card.gate { border-color: color-mix(in srgb, var(--gate) 35%, var(--border)); }
 .card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
-.card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.card-key { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); }
+.card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card-foot:empty { display: none; }
 .card-pr { margin-left: auto; flex: none; }
 .card .title { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
 .card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }

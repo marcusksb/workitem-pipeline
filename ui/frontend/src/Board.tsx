@@ -148,12 +148,6 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         }
       }}
     >
-      <div className="card-top">
-        <span className="card-key" title={item.dir}>
-          {item.dir}
-        </span>
-        <PrStatus item={item} className="card-pr" />
-      </div>
       <div className="title">{item.title}</div>
       <div className="card-chips">
         <Badge>{item.kind}</Badge>
@@ -174,7 +168,10 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
           <Badge title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</Badge>
         )}
       </div>
-      <AgentStatus item={item} className="card-status" />
+      <div className="card-foot">
+        <AgentStatus item={item} className="card-status" />
+        <PrStatus item={item} className="card-pr" />
+      </div>
     </div>
   );
 }
