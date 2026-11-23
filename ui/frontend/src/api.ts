@@ -1,4 +1,4 @@
-import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, StageSource } from "./types";
+import { AgentSession, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, WorkspaceChange, StageSource } from "./types";
 
 type Launched = { session: string };
 
@@ -29,9 +29,9 @@ export const api = {
   me: () => request<void>("GET", "/api/me"),
   workspaces: () => request<Workspace[]>("GET", "/api/workspaces"),
   addWorkspace: (name: string) => request<Workspace>("POST", "/api/workspaces", { name }),
-  setAgent: (name: string, agent: string) => request<Workspace>("PUT", `/api/workspaces/${segment(name)}`, { agent }),
-  addBoard: (workspace: string, name: string, repo: string) =>
-    request<void>("POST", `/api/workspaces/${segment(workspace)}/boards`, { name, repo }),
+  updateWorkspace: (name: string, change: WorkspaceChange) => request<Workspace>("PUT", `/api/workspaces/${segment(name)}`, change),
+  addBoard: (workspace: string, board: { name: string; repo: string; issue_project: string; reviewers: string }) =>
+    request<void>("POST", `/api/workspaces/${segment(workspace)}/boards`, board),
   pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
   stageSource: (workspace: string, board: string, stage: string) =>
     request<StageSource>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/stages/${segment(stage)}/source`),

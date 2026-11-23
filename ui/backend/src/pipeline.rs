@@ -130,6 +130,10 @@ pub struct Stage {
     /// Scripts that run for this column on a timer (see `watch.rs`): one object or a list.
     #[serde(default, skip_serializing, deserialize_with = "watchers")]
     pub watch: Vec<Watch>,
+    /// What `workitem-move` moves the item's issue to on entry (decision 72): the first of these
+    /// states the issue can reach.
+    #[serde(default, skip_serializing)]
+    pub issue_state: Vec<String>,
 }
 
 impl Stage {
@@ -171,6 +175,13 @@ pub struct Pipeline {
     /// Tab title; the board's name (its file name) when absent.
     #[serde(default)]
     pub label: Option<String>,
+    /// Where new issues go and what a bare `#123` means (decision 64): `owner/repo` on GitHub, a
+    /// project key on Jira.
+    #[serde(default, skip_serializing)]
+    pub issue_project: Option<String>,
+    /// The team (`org/team`) a ready PR asks for review (decision 70).
+    #[serde(default, skip_serializing)]
+    pub reviewers: Option<String>,
     pub entry: String,
     pub stages: Vec<Stage>,
     /// Scripts that run for the whole board on a timer, with every item of the board on stdin.
@@ -271,6 +282,12 @@ impl Pipeline {
                 return Err(format!("'{}': on_merge goes with the handler {PR_REVIEW}, and only with it", stage.name));
             }
         }
+        if let Some(team) = pipeline.reviewers.as_deref().filter(|t| !valid_team(t)) {
+            return Err(format!("reviewers '{team}' is not a GitHub team (org/team)"));
+        }
+        if let Some(stage) = pipeline.stages.iter().find(|s| s.issue_state.iter().any(|state| state.trim().is_empty())) {
+            return Err(format!("'{}' has an empty issue_state", stage.name));
+        }
         if pipeline.stages.iter().filter(|s| s.watches_prs()).count() > 1 {
             return Err(format!("at most one stage can have the handler {PR_REVIEW}"));
         }
@@ -298,13 +315,56 @@ pub fn valid_board_name(name: &str) -> bool {
     crate::config::valid_name(name)
 }
 
+/// `org/team`, as `gh pr edit --add-reviewer` takes a team.
+fn valid_team(team: &str) -> bool {
+    let plain = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    matches!(team.split('/').collect::<Vec<_>>()[..], [org, name] if plain(org) && plain(name))
+}
+
+/// What a GitHub board's `issue_state` can name (decision 65).
+pub const GITHUB_ISSUE_STATES: &[&str] = &["assigned", "closed"];
+
+/// The keys whose meaning depends on the workspace's tracker: `issue_project` is `owner/repo` on
+/// GitHub and a project key on Jira, and a GitHub issue can only be assigned or closed.
+fn check_tracker(pipeline: &Pipeline, tracker: &str) -> Result<(), String> {
+    let plain = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if let Some(project) = &pipeline.issue_project {
+        let valid = match tracker {
+            "github" => matches!(project.split('/').collect::<Vec<_>>()[..], [owner, repo] if plain(owner) && plain(repo)),
+            _ => project.starts_with(|c: char| c.is_ascii_uppercase()) && project.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+        };
+        if !valid {
+            let wanted = if tracker == "github" { "owner/repo" } else { "a Jira project key like MNT" };
+            return Err(format!("issue_project '{project}' is not {wanted}, as the workspace's {tracker} tracker needs"));
+        }
+    }
+    if tracker == "github" {
+        for stage in &pipeline.stages {
+            if let Some(state) = stage.issue_state.iter().find(|s| !GITHUB_ISSUE_STATES.contains(&s.as_str())) {
+                return Err(format!("'{}' has issue_state '{state}'; a GitHub issue can only be {}", stage.name, GITHUB_ISSUE_STATES.join(" or ")));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read(workspace: &Workspace, board: &str) -> Result<Pipeline, String> {
     if !valid_board_name(board) {
         return Err(format!("'{board}' is not a board name"));
     }
     let path = workspace.dir.join("boards").join(format!("{board}.json"));
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Pipeline::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+    let pipeline = Pipeline::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    check_tracker(&pipeline, &workspace.issue_tracker).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(pipeline)
+}
+
+/// What *Add board* asks for (decisions 45, 64, 70). Empty `issue_project` and `reviewers` are left out.
+pub struct NewBoard<'a> {
+    pub name: &'a str,
+    pub repo: &'a str,
+    pub issue_project: &'a str,
+    pub reviewers: &'a str,
 }
 
 impl AppState {
@@ -349,12 +409,15 @@ impl AppState {
         repos
     }
 
-    /// Writes `boards/<name>.json` as a copy of the bundled board with `repo` set.
-    pub fn add_board(&self, workspace: &Workspace, name: &str, repo: &str) -> Result<(), String> {
+    /// Writes `boards/<name>.json` as a copy of the bundled board with `repo`, `issue_project` and
+    /// `reviewers` set, and the issue states of the workspace's tracker on its development and PR
+    /// stages (decision 72).
+    pub fn add_board(&self, workspace: &Workspace, board: &NewBoard) -> Result<(), String> {
+        let name = board.name;
         if !valid_board_name(name) {
             return Err("a board name uses letters, digits, - and _ only".into());
         }
-        let repo = Path::new(repo.trim());
+        let repo = Path::new(board.repo.trim());
         if !repo.is_absolute() || !repo.is_dir() {
             return Err(format!("{} is not an existing absolute directory", repo.display()));
         }
@@ -364,15 +427,48 @@ impl AppState {
             return Err(format!("board '{name}' already exists"));
         }
         let template = fs::read_to_string(self.skills_dir.join("workitem-pipeline/pipeline.json")).map_err(|e| e.to_string())?;
-        let text = with_repo(&template, &repo)?;
-        Pipeline::parse(&text)?;
+        let text = board_text(&template, &repo, board.issue_project, board.reviewers, &workspace.issue_tracker)?;
+        check_tracker(&Pipeline::parse(&text)?, &workspace.issue_tracker)?;
         fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
         fs::write(&path, text).map_err(|e| e.to_string())
     }
 }
 
-/// The board file `template` with `"repo"` as its first key, keeping the rest of the text as it is.
-fn with_repo(template: &str, repo: &Path) -> Result<String, String> {
+/// The board file `template` with `repo` first, then `issue_project` and `reviewers` when given,
+/// and the tracker's default `issue_state` on the development and PR stages.
+fn board_text(template: &str, repo: &Path, issue_project: &str, reviewers: &str, tracker: &str) -> Result<String, String> {
+    use serde_json::{json, Map, Value};
+    let parsed = Pipeline::parse(&board_text_with_repo(template, repo)?)?;
+    let Value::Object(fields) = serde_json::from_str::<Value>(template).map_err(|e| e.to_string())? else {
+        return Err("the bundled board is not a JSON object".into());
+    };
+    let mut board = Map::new();
+    board.insert("repo".into(), json!(repo.display().to_string()));
+    for (key, value) in [("issue_project", issue_project), ("reviewers", reviewers)] {
+        if !value.is_empty() {
+            board.insert(key.into(), json!(value));
+        }
+    }
+    board.extend(fields);
+    let defaults = |stage: &Stage| match (tracker, stage.develops(), stage.watches_prs()) {
+        ("github", true, _) => Some(json!(["assigned"])),
+        ("github", _, _) => None,
+        (_, true, _) => Some(json!(["In development", "In Progress"])),
+        (_, _, true) => Some(json!(["In Review"])),
+        _ => None,
+    };
+    if let Some(Value::Array(stages)) = board.get_mut("stages") {
+        for (value, stage) in stages.iter_mut().zip(&parsed.stages) {
+            if let (Value::Object(object), Some(states)) = (value, defaults(stage)) {
+                object.entry("issue_state").or_insert(states);
+            }
+        }
+    }
+    serde_json::to_string_pretty(&board).map(|text| text + "\n").map_err(|e| e.to_string())
+}
+
+/// The template with `repo` set, only to read its stages before the real file is built.
+fn board_text_with_repo(template: &str, repo: &Path) -> Result<String, String> {
     let rest = template.trim_start().strip_prefix('{').ok_or("the bundled board is not a JSON object")?;
     let repo = serde_json::to_string(&repo.display().to_string()).map_err(|e| e.to_string())?;
     Ok(format!("{{\n  \"repo\": {repo},{rest}"))
@@ -531,7 +627,7 @@ mod tests {
     #[test]
     fn the_bundled_file_is_a_valid_template() {
         let text = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/workitem-pipeline/pipeline.json")).unwrap();
-        let pipeline = Pipeline::parse(&with_repo(&text, Path::new("/")).unwrap()).unwrap();
+        let pipeline = Pipeline::parse(&board_text(&text, Path::new("/"), "", "", "jira").unwrap()).unwrap();
         assert_eq!(pipeline.entry, "backlog");
         assert_eq!(pipeline.stages.len(), 6);
         assert!(pipeline.stage("ready_for_development").unwrap().gate.is_some());
@@ -563,10 +659,26 @@ mod tests {
     }
 
     #[test]
-    fn a_new_board_is_the_template_with_its_repo_first() {
-        let template = "{\n  \"entry\": \"a\",\n  \"brief_sections\": [],\n  \"stages\": [{ \"name\": \"a\" }]\n}\n";
-        let text = with_repo(template, Path::new("/")).unwrap();
-        assert!(text.starts_with("{\n  \"repo\": \"/\",\n  \"entry\""), "{text}");
-        assert_eq!(Pipeline::parse(&text).unwrap().repo.as_deref(), Some(Path::new("/")));
+    fn a_new_board_is_the_template_with_its_repo_first_and_the_trackers_issue_states() {
+        let template = r#"{"entry": "a", "brief_sections": [], "stages": [{"name": "a", "next": ["b"], "handler": "workitem-start"}, {"name": "b", "next": ["c"], "handler": "builtin:pr-review", "on_merge": "c"}, {"name": "c"}]}"#;
+        let text = board_text(template, Path::new("/"), "MNT", "acme/backend", "jira").unwrap();
+        assert!(text.starts_with("{\n  \"repo\": \"/\",\n  \"issue_project\": \"MNT\",\n  \"reviewers\": \"acme/backend\",\n  \"entry\""), "{text}");
+        let jira = Pipeline::parse(&text).unwrap();
+        assert_eq!((jira.issue_project.as_deref(), jira.reviewers.as_deref()), (Some("MNT"), Some("acme/backend")));
+        let states = |p: &Pipeline| p.stages.iter().map(|s| s.issue_state.join("|")).collect::<Vec<_>>();
+        assert_eq!(states(&jira), ["In development|In Progress", "In Review", ""]);
+        let github = Pipeline::parse(&board_text(template, Path::new("/"), "", "", "github").unwrap()).unwrap();
+        assert_eq!((states(&github), github.issue_project), (vec!["assigned".to_string(), "".into(), "".into()], None));
+    }
+
+    #[test]
+    fn issue_keys_are_checked_against_the_workspaces_tracker() {
+        let board = |extra: &str| Pipeline::parse(&format!(r#"{{ {BRIEF}, {extra} "entry": "a", "stages": [{{"name": "a", "issue_state": ["In Review"]}}] }}"#)).unwrap();
+        assert!(check_tracker(&board(r#""issue_project": "MNT","#), "jira").is_ok());
+        assert!(check_tracker(&board(r#""issue_project": "acme/web","#), "jira").unwrap_err().contains("Jira project key"));
+        assert!(check_tracker(&board(""), "github").unwrap_err().contains("can only be assigned or closed"));
+        let github = Pipeline::parse(&format!(r#"{{ {BRIEF}, "issue_project": "acme/web", "entry": "a", "stages": [{{"name": "a", "issue_state": ["assigned"]}}] }}"#)).unwrap();
+        assert!(check_tracker(&github, "github").is_ok());
+        assert!(Pipeline::parse(&format!(r#"{{ {BRIEF}, "reviewers": "backend", "entry": "a", "stages": [{{"name": "a"}}] }}"#)).unwrap_err().contains("org/team"));
     }
 }

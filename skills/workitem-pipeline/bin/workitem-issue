@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""The workspace's issue tracker, for skills and workitem-move (decision 66). Skills never talk to
+Jira or GitHub Issues themselves.
+
+  workitem-issue parse <workitem> <input>                   # or: parse --workspace <dir> --board <name> <input>
+  workitem-issue read <workitem>                            # or: read --workspace <dir> --board <name> <input>
+  workitem-issue create <workitem> --title <title> --body-file <file>
+  workitem-issue set-state <workitem> <state>...
+  workitem-issue pr-line <workitem>
+
+<workitem> is the item's folder or its workitem.md. `parse` turns a key, `#123`, `owner/repo#123`
+or an issue URL into the `issue:` value (`<ref> (<url>)`) and the folder prefix. `create` files a
+new issue in the board's `issue_project` and sets `issue:`. `set-state` moves the issue to the first
+of the states it can reach; it skips an item without an issue, an item another one depends on
+(only the last of a chain moves the shared issue), and an issue already there. `pr-line` prints
+the line the PR body needs: `Closes owner/repo#123`, the Jira key, or nothing.
+
+Exit 2 is a bad input or setup (unknown ref, missing key). An API error in `set-state` only warns
+(exit 0): a missing transition must not stop the work.
+"""
+import os, sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import workitem_tracker as tracker  # noqa: E402
+from workitem_fields import read_fields, set_fields  # noqa: E402
+
+
+def die(message, code=2):
+    print(f"workitem-issue: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def item(target):
+    """(workitem.md, workspace folder, fields, board config) of the item."""
+    path = Path(target)
+    path = path / "workitem.md" if path.is_dir() else path
+    if not path.is_file():
+        die(f"{target} is not a workitem")
+    path = path.resolve()
+    fields = read_fields(path)
+    if not fields.get("board"):
+        die(f"{path} has no board:")
+    return path, path.parent.parent, fields, tracker.board(path.parent.parent, fields["board"])
+
+
+def depended_on(path):
+    """Whether another item of the workspace lists this one in `depends_on`."""
+    name = path.parent.name
+    for other in path.parent.parent.glob("*/workitem.md"):
+        if other != path and name in [d.strip() for d in read_fields(other).get("depends_on", "").split(",")]:
+            return True
+    return False
+
+
+def flag(args, name):
+    if name not in args or args.index(name) + 1 >= len(args):
+        die(f"{name} is missing")
+    i = args.index(name)
+    value = args[i + 1]
+    del args[i:i + 2]
+    return value
+
+
+def parse(args):
+    if args and args[0] == "--workspace":
+        workspace, board = flag(args, "--workspace"), flag(args, "--board")
+        config = tracker.board(workspace, board)
+    elif len(args) == 2:
+        _, workspace, _, config = item(args.pop(0))
+    else:
+        die("parse takes <workitem> <input>, or --workspace <dir> --board <name> <input>")
+    if len(args) != 1:
+        die("parse takes one input")
+    ref, url, prefix = tracker.parse(workspace, config, args[0])
+    print(f"issue: {ref} ({url})" if url else f"issue: {ref}")
+    print(f"prefix: {prefix}")
+
+
+def read(args):
+    if args and args[0] == "--workspace":
+        workspace, board = flag(args, "--workspace"), flag(args, "--board")
+        if len(args) != 1:
+            die("read --workspace <dir> --board <name> takes one input")
+        key = tracker.parse(workspace, tracker.board(workspace, board), args[0])[0]
+    else:
+        path, workspace, fields, _ = item(args[0])
+        key = tracker.issue_key(fields.get("issue"))
+        if not key:
+            die(f"{path.parent.name} has no issue linked")
+    title, status, body, comments = tracker.client(tracker.tracker_of(workspace), workspace).read(key)
+    print(f"# {key}: {title}\n\nStatus: {status}\n\n{body.strip() or '(no description)'}")
+    for author, text in comments:
+        print(f"\n## Comment by {author}\n\n{text.strip()}")
+
+
+def project_of(workspace, name, config):
+    if name == "github":
+        return tracker.github_project(workspace, config)
+    if not config.get("issue_project"):
+        raise tracker.Problem("set issue_project (the Jira project key) on the board to create issues")
+    return config["issue_project"]
+
+
+def create(args):
+    title, body_file = flag(args, "--title"), flag(args, "--body-file")
+    path, workspace, fields, config = item(args[0])
+    if tracker.issue_key(fields.get("issue")):
+        die(f"{path.parent.name} already has issue {fields['issue']}")
+    name = tracker.tracker_of(workspace)
+    body = Path(body_file).read_text()
+    client = tracker.client(name, workspace)
+    ref = client.create(project_of(workspace, name, config), title, body)
+    value = f"{ref} ({client.url(ref)})"
+    set_fields(path, {"issue": value})
+    print(f"issue: {value}")
+
+
+def set_state(args):
+    if len(args) < 2:
+        die("set-state takes <workitem> <state>...")
+    path, workspace, fields, _ = item(args[0])
+    key = tracker.issue_key(fields.get("issue"))
+    if not key:
+        print(f"{path.parent.name}: no issue linked, skipped")
+        return
+    if depended_on(path):
+        print(f"{path.parent.name}: another item depends on it, so the last of the chain moves {key}; skipped")
+        return
+    name = tracker.tracker_of(workspace)
+    states = args[1:]
+    if name == "github" and (bad := [s for s in states if s not in tracker.GITHUB_STATES]):
+        die(f"a GitHub issue can only be {' or '.join(tracker.GITHUB_STATES)}, not {', '.join(bad)}")
+    try:
+        print(tracker.client(name, workspace).set_state(key, states))
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as e:
+        print(f"warning: {key} not moved to {' or '.join(states)}: {e}", file=sys.stderr)
+
+
+def pr_line(args):
+    path, workspace, fields, _ = item(args[0])
+    key = tracker.issue_key(fields.get("issue"))
+    if key:
+        print(f"Closes {key}" if tracker.tracker_of(workspace) == "github" else key)
+
+
+COMMANDS = {"parse": parse, "read": read, "create": create, "set-state": set_state, "pr-line": pr_line}
+
+if __name__ == "__main__":
+    command, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 2 else (None, [])
+    if command not in COMMANDS:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+    try:
+        COMMANDS[command](rest)
+    except tracker.Problem as e:
+        die(str(e))
+    except (RuntimeError, OSError, ValueError) as e:
+        die(str(e), 1)

@@ -171,12 +171,15 @@ fn shell_quote(text: &str) -> String {
 /// Runs the workspace's agent (decisions 39, 52), resolved here because tmux's `PATH` may differ from ours,
 /// or `state.claude` when it has none, with `args` and then `prompt` as the last argument.
 /// tmux sends a command to its server as one message and refuses one over about 16 KB, so the
-/// prompt goes through a private file that `READ_PROMPT` reads, deletes and appends unchanged.
+/// prompt goes through a private file that `LAUNCH` reads, deletes and appends unchanged. The
+/// workspace's GitHub token (decision 67) goes the same way into `GH_TOKEN`, so it is never in
+/// an argv; a workspace whose account cannot be read starts nothing.
 async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Path, env: &[String], args: &[OsString], prompt: Option<&str>) -> Result<(), String> {
     let agent: OsString = match &workspace.agent {
         Some(name) => config::resolve_executable(name).ok_or_else(|| format!("agent '{name}' of workspace {} not found", workspace.name))?.into(),
         None => state.claude.clone().into(),
     };
+    let token = crate::github::token(state, workspace).await?;
     let existing = tmux::sessions(state.tmux_socket.as_deref()).await;
     if let Some(other) = existing.iter().find(|s| s.name == session) {
         let owner = if other.workspace.as_os_str().is_empty() { "started outside the UI".into() } else { format!("workspace {}", other.workspace.display()) };
@@ -188,14 +191,16 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
         command.arg("-e").arg(var);
     }
     command.arg("--");
-    let file = match prompt {
-        Some(text) => {
-            let file = write_prompt(session, text)?;
-            command.args(["/bin/sh", "-c", READ_PROMPT, "sh"]).arg(&file);
-            Some(file)
+    let token_file = token.map(|t| write_private(session, "token", &t)).transpose()?;
+    let file = match prompt.map(|text| write_private(session, "prompt", text)).transpose() {
+        Ok(file) => file,
+        Err(e) => {
+            token_file.iter().for_each(|f| drop(fs::remove_file(f)));
+            return Err(e);
         }
-        None => None,
     };
+    let empty = PathBuf::new();
+    command.args(["/bin/sh", "-c", LAUNCH, "sh"]).arg(token_file.as_ref().unwrap_or(&empty)).arg(file.as_ref().unwrap_or(&empty));
     command.arg(agent).args(args);
     command.args([";", "set-option", tmux::WORKSPACE_OPTION]).arg(&workspace.dir);
     let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"));
@@ -205,7 +210,7 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
         Err(e) => Some(e.clone()),
     };
     if let Some(e) = failed {
-        if let Some(file) = file {
+        for file in token_file.iter().chain(&file) {
             let _ = fs::remove_file(file);
         }
         return Err(e);
@@ -217,17 +222,19 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
     Ok(())
 }
 
-/// `sh -c READ_PROMPT sh <file> <agent> <args>...`: runs the agent with the file's content as its
-/// last argument. The trailing `x` keeps trailing newlines, which `$(...)` would strip.
-const READ_PROMPT: &str = r#"f=$1; shift; p=$(cat -- "$f" && echo x) || exit 1; rm -f -- "$f"; exec "$@" "${p%x}""#;
+/// `sh -c LAUNCH sh <token file> <prompt file> <agent> <args>...`, either file possibly empty:
+/// exports the token file's content as `GH_TOKEN`, then runs the agent with the prompt file's
+/// content as its last argument; each file is deleted once read. The trailing `x` keeps trailing
+/// newlines, which `$(...)` would strip.
+const LAUNCH: &str = r#"t=$1; f=$2; shift 2; if [ -n "$t" ]; then GH_TOKEN=$(cat -- "$t") || exit 1; rm -f -- "$t"; export GH_TOKEN; fi; [ -z "$f" ] && exec "$@"; p=$(cat -- "$f" && echo x) || exit 1; rm -f -- "$f"; exec "$@" "${p%x}""#;
 
 static PROMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Writes `text` to a new file only we can read, in the temp folder.
-fn write_prompt(session: &str, text: &str) -> Result<std::path::PathBuf, String> {
+fn write_private(session: &str, kind: &str, text: &str) -> Result<std::path::PathBuf, String> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let n = PROMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("workitem-prompt-{session}-{}-{n}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("workitem-{kind}-{session}-{}-{n}", std::process::id()));
     let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     file.write_all(text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)

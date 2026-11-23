@@ -7,7 +7,7 @@ const LIMIT = 20;
 
 type Props = { items: Item[]; showWorkspace: boolean; onOpen: (item: Item) => void; onClose: () => void };
 
-/** Finds a workitem by title, Jira key or PR number. Arrows pick a result, Enter opens it. */
+/** Finds a workitem by title, issue key or PR number. Arrows pick a result, Enter opens it. */
 export function QuickSearch({ items, showWorkspace, onOpen, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -35,7 +35,7 @@ export function QuickSearch({ items, showWorkspace, onOpen, onClose }: Props) {
       <input
         className="quick-search-input"
         autoFocus
-        placeholder="Title, Jira key or PR number"
+        placeholder="Title, issue key or PR number"
         aria-label="Search workitems"
         role="combobox"
         aria-expanded={found.length > 0}

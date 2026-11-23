@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; done; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
 [ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
@@ -116,7 +116,7 @@ fn world() -> World {
     let d = dir.path().display();
     fs::write(dir.path().join("gh_graphql.py"), GH_GRAPHQL).unwrap();
     let script = format!(
-        "#!/bin/bash\nif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
+        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
     );
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
@@ -136,7 +136,8 @@ fn world() -> World {
     state.claude = stub.display().to_string();
     state.gh = gh.display().to_string();
     state.ask_wait = std::time::Duration::from_millis(1500);
-    state.add_board(&state.store.workspace("app").unwrap(), "default", repo.to_str().unwrap()).unwrap();
+    let board = workitem_ui::pipeline::NewBoard { name: "default", repo: repo.to_str().unwrap(), issue_project: "", reviewers: "" };
+    state.add_board(&state.store.workspace("app").unwrap(), &board).unwrap();
     let state = Arc::new(state);
     tokio::spawn(axum::serve(tokio::net::TcpListener::from_std(listener).unwrap(), router(state.clone())).into_future());
     World { dir, repo, ws, tmux, state, token }
@@ -1717,6 +1718,43 @@ async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
         let (status, _) = post(&w, "/api/workitems/app/T-1-files/reveal", &serde_json::json!({ "path": path }).to_string()).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
+}
+
+#[tokio::test]
+async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_one_stops_it() {
+    let w = world();
+    let probe = w.dir.path().join("probe");
+    fs::create_dir_all(w.ws.join("watch")).unwrap();
+    fs::write(w.ws.join("watch/token-probe"), format!("#!/bin/sh\necho \"token=$GH_TOKEN\" >> {}\n", probe.display())).unwrap();
+    fs::set_permissions(w.ws.join("watch/token-probe"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"1m\"\ncommand = \"token-probe\"\n").unwrap();
+    write_item(&w.ws, "T-40-gh", "ready_for_development", "");
+
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"github_account":"nobody"}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "gh must know the account: {body}");
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"github_account":"work-bot"}"#).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""issue_tracker":"jira""#) && body.contains(r#""github_account":"work-bot""#), "{body}");
+    settle(&w).await;
+    assert_eq!(fs::read_to_string(&probe).unwrap(), "token=tok-123\n", "a watcher gets the account's token");
+    let (status, body) = post(&w, "/api/workitems/app/T-40-gh/session", "").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    eventually("the session's token", || stub_logs(&w).iter().any(|log| log.contains("gh_token=tok-123"))).await;
+    w.tmux.run(&["kill-session", "-t", "=wi-T-40-gh"]);
+    settle(&w).await;
+
+    // An account gh no longer knows stops the workspace until it is fixed.
+    let runs = fs::read_to_string(&probe).unwrap().lines().count();
+    fs::write(w.ws.join("workspace.toml"), "github_account = \"gone\"\n\n[[watch]]\nevery = \"1m\"\ncommand = \"token-probe\"\n").unwrap();
+    settle(&w).await;
+    assert_eq!(fs::read_to_string(&probe).unwrap().lines().count(), runs, "no watcher runs");
+    let (status, body) = post(&w, "/api/workitems/app/T-40-gh/session", "").await;
+    assert!(!status.is_success() && body.contains("GitHub account gone is not logged in"), "{status} {body}");
+    assert!(get(&w, "/api/workspaces").await.contains("GitHub account gone is not logged in"), "the header says why");
+    fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"1m\"\ncommand = \"token-probe\"\n").unwrap();
+    settle(&w).await;
+    assert!(!get(&w, "/api/workspaces").await.contains("account_error"));
+    assert_eq!(fs::read_to_string(&probe).unwrap().lines().last(), Some("token="), "without an account gh's own applies");
 }
 
 fn stub_logs(w: &World) -> Vec<String> {

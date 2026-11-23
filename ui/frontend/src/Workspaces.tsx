@@ -4,6 +4,8 @@ import { Dialog } from "./Dialog";
 import { boardLabel } from "./boardState";
 import { Pipelines, Workspace } from "./types";
 
+const trackerName = (tracker: string) => (tracker === "github" ? "GitHub Issues" : "Jira");
+
 type Props = {
   workspaces: Workspace[];
   pipelines: Pipelines | undefined;
@@ -21,8 +23,10 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
   const [creating, setCreating] = useState(false);
-  const [editingAgent, setEditingAgent] = useState(false);
+  const [editingSettings, setEditingSettings] = useState(false);
   const [agent, setAgent] = useState("");
+  const [tracker, setTracker] = useState("jira");
+  const [account, setAccount] = useState("");
   const [showingWatchers, setShowingWatchers] = useState(false);
   const [input, setInput] = useState("");
   const boards = (selected ? (pipelines?.[selected] ?? []) : []).map((b) => b.name);
@@ -59,12 +63,12 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
     }
   };
 
-  const saveAgent = async (event: FormEvent) => {
+  const saveSettings = async (event: FormEvent) => {
     event.preventDefault();
     if (!selected) return;
     try {
-      await api.setAgent(selected, agent);
-      setEditingAgent(false);
+      await api.updateWorkspace(selected, { agent, issue_tracker: tracker, github_account: account });
+      setEditingSettings(false);
       setError(undefined);
       onChanged();
     } catch (e) {
@@ -73,7 +77,6 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
   };
 
   const current = workspaces.find((w) => w.name === selected);
-  const selectedAgent = current?.agent;
 
   return (
     <div className="workspaces">
@@ -86,17 +89,19 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
           ))}
         </select>
       )}
-      {selected && (
+      {current && (
         <button
-          className="link"
-          title="Executable that runs this workspace's agent sessions"
+          className={current.account_error ? "link error" : "link"}
+          title={current.account_error ?? "Agent, issue tracker and GitHub account of this workspace"}
           onClick={() => {
             setError(undefined);
-            setAgent(selectedAgent ?? "");
-            setEditingAgent(true);
+            setAgent(current.agent ?? "");
+            setTracker(current.issue_tracker);
+            setAccount(current.github_account ?? "");
+            setEditingSettings(true);
           }}
         >
-          Agent: {selectedAgent || "default"}
+          {current.account_error ? "Stopped: GitHub account not logged in" : `Settings: ${current.agent || "default agent"} · ${trackerName(current.issue_tracker)}`}
         </button>
       )}
       {current && (
@@ -137,7 +142,7 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Jira key, Sentry URL or task description"
+                placeholder={`${current?.issue_tracker === "github" ? "GitHub issue" : "Jira key"}, Sentry URL or task description`}
                 rows={4}
                 required
                 autoFocus
@@ -161,16 +166,35 @@ export function Workspaces({ workspaces, pipelines, board: shown, selected, onSe
           </form>
         </Dialog>
       )}
-      {editingAgent && selected && (
-        <Dialog title={`Agent for ${selected}`} onClose={() => setEditingAgent(false)}>
-          <form className="dialog-form" onSubmit={saveAgent}>
+      {editingSettings && current && (
+        <Dialog title={`Settings of ${current.name}`} onClose={() => setEditingSettings(false)}>
+          <form className="dialog-form" onSubmit={saveSettings}>
+            {current.account_error && <span className="error">{current.account_error}. No sessions or watchers run until it is fixed.</span>}
             <label>
-              Executable
+              Agent
               <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="default (claude)" autoFocus />
             </label>
             <span className="hint">
               One executable on PATH or an absolute path, taking the same arguments as claude. Put flags in a wrapper script. Empty uses
               the default. Applies to sessions started from now on.
+            </span>
+            <label>
+              Issue tracker
+              <select value={tracker} onChange={(e) => setTracker(e.target.value)}>
+                <option value="jira">Jira</option>
+                <option value="github">GitHub Issues</option>
+              </select>
+            </label>
+            <span className="hint">
+              Where items link their issue. Boards hold tracker-specific issue states, so pick it before adding boards.
+            </span>
+            <label>
+              GitHub account
+              <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="gh's active account" />
+            </label>
+            <span className="hint">
+              A login gh is signed in to (gh auth login). Its token goes to this workspace's sessions, watchers and PR actions. Empty uses
+              gh's active account.
             </span>
             <button type="submit">Save</button>
             {error && <span className="error">{error}</span>}

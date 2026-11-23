@@ -81,7 +81,7 @@ The stage list above is the bundled default. A project can replace it, and can h
 
 ## Workspaces
 
-Items no longer live in a repo. A workspace (`~/.workitems-pipeline/workspaces/<name>/`) holds the items and the boards of several repos; each board names its repo, and every item names its board. `depends_on: <dir>, ...` links items across boards, and `"require": {"depends_on": "merged"}` holds an item back until those are merged. Decisions 44 to 53 in `workitem-pipeline-ui.md`; they supersede the file locations above.
+Items no longer live in a repo. A workspace (`~/.workitems-pipeline/workspaces/<name>/`) holds the items and the boards of several repos; each board names its repo, and every item names its board. `depends_on: <dir>, ...` links items across boards, and `"require": {"depends_on": "merged"}` holds an item back until those are merged. Decisions 44 to 53 in `workitem-pipeline-ui.md`; they supersede the file locations above. A workspace picks its issue tracker (`issue_tracker`: Jira or GitHub Issues) and its GitHub account; skills reach the tracker only through `bin/workitem-issue` (decisions 62 to 72).
 
 ## Components
 

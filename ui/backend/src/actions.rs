@@ -374,7 +374,7 @@ async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
     }
     let repo = pr_repo_of(state, workspace, item)?;
-    let mut command = tokio::process::Command::new(&state.gh);
+    let mut command = crate::github::command(state, workspace).await.map_err(conflict)?;
     command.arg("pr").arg(args[0]).arg(&item.pr).args(&args[1..]).current_dir(&repo).kill_on_drop(true);
     let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
         .await
@@ -478,7 +478,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Launched>)> {
     let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     if body.input.trim().is_empty() {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "describe the task or paste a Jira key or Sentry URL".into()));
+        return Err(ApiError(StatusCode::BAD_REQUEST, "describe the task or paste an issue or Sentry URL".into()));
     }
     let boards = state.board_names(&workspace);
     let board = match body.board {

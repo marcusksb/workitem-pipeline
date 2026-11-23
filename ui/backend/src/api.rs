@@ -60,10 +60,17 @@ pub struct WorkspaceInfo {
     workspace: Workspace,
     /// What runs once for the whole workspace, the implicit `pr-status` included.
     watch: Vec<crate::pipeline::Watch>,
+    /// Why the workspace is stopped: its `github_account` could not be read (decision 68).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_error: Option<String>,
 }
 
 pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
-    let info = |workspace: Workspace| WorkspaceInfo { watch: crate::watch::workspace_watchers(&state, &workspace), workspace };
+    let info = |workspace: Workspace| WorkspaceInfo {
+        watch: crate::watch::workspace_watchers(&state, &workspace),
+        account_error: crate::github::account_error(&state, &workspace),
+        workspace,
+    };
     Json(state.store.workspaces().into_iter().map(info).collect())
 }
 
@@ -85,6 +92,12 @@ pub async fn add_workspace(
 pub struct NewBoard {
     name: String,
     repo: String,
+    /// Where new issues go (decision 64); optional.
+    #[serde(default)]
+    issue_project: String,
+    /// The team a ready PR asks for review (decision 70); optional.
+    #[serde(default)]
+    reviewers: String,
 }
 
 /// Adds a board for a repo: a copy of the bundled board with `repo` set (decision 45).
@@ -94,27 +107,51 @@ pub async fn add_board(
     Json(body): Json<NewBoard>,
 ) -> Result<StatusCode, ApiError> {
     let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
-    state.add_board(&workspace, body.name.trim(), &body.repo).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    let board = crate::pipeline::NewBoard { name: body.name.trim(), repo: &body.repo, issue_project: body.issue_project.trim(), reviewers: body.reviewers.trim() };
+    state.add_board(&workspace, &board).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
     state.wake.notify_one();
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
 pub struct WorkspaceChange {
-    agent: String,
+    agent: Option<String>,
+    issue_tracker: Option<String>,
+    github_account: Option<String>,
 }
 
-/// Sets the workspace's agent (decision 39); an empty one clears it.
+/// Sets the workspace's agent (decision 39), issue tracker (62) and GitHub account (67), each
+/// only when given; an empty one clears it. A GitHub account must be one gh is logged in to.
 pub async fn update_workspace(
     State(state): State<Shared>,
     Path(name): Path<String>,
     Json(body): Json<WorkspaceChange>,
 ) -> Result<Json<Workspace>, ApiError> {
-    match state.store.set_agent(&name, &body.agent) {
-        Ok(Some(workspace)) => Ok(Json(workspace)),
-        Ok(None) => Err(ApiError::not_found("workspace")),
-        Err(e) => Err(ApiError(StatusCode::BAD_REQUEST, e)),
+    let bad = |e: String| ApiError(StatusCode::BAD_REQUEST, e);
+    if state.store.workspace(&name).is_none() {
+        return Err(ApiError::not_found("workspace"));
     }
+    if let Some(login) = body.github_account.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        if !crate::config::valid_login(login) {
+            return Err(bad(format!("'{login}' is not a GitHub login")));
+        }
+        crate::github::token_for(&state, login).await.map_err(bad)?;
+    }
+    let mut workspace = None;
+    if let Some(agent) = &body.agent {
+        workspace = state.store.set_agent(&name, agent).map_err(bad)?;
+    }
+    if let Some(tracker) = &body.issue_tracker {
+        workspace = state.store.set_issue_tracker(&name, tracker).map_err(bad)?;
+    }
+    if let Some(login) = &body.github_account {
+        workspace = state.store.set_github_account(&name, login).map_err(bad)?;
+    }
+    let workspace = workspace.or_else(|| state.store.workspace(&name)).ok_or(ApiError::not_found("workspace"))?;
+    // A fixed account starts the workspace again at once instead of on its next tick.
+    let _ = crate::github::token(&state, &workspace).await;
+    state.wake.notify_one();
+    Ok(Json(workspace))
 }
 
 #[derive(Serialize)]
@@ -252,7 +289,7 @@ pub async fn pr_conversation(
         .repo_of(&workspace, &item.board)
         .and_then(|repo| repo.ok_or_else(|| format!("board {} has no repo, so no PRs", item.board)))
         .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
-    let conversation = review::conversation(&state, &repo, &item.pr)
+    let conversation = review::conversation(&state, &workspace, &repo, &item.pr)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
     Ok(Json(conversation))

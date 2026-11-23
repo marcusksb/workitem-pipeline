@@ -41,6 +41,9 @@ def problems(config):
         for target in stage.get("next", []):
             if target not in names:
                 found.append(f"'{stage.get('name')}' has next '{target}', which is not a stage")
+        states = stage.get("issue_state")
+        if states is not None and not (isinstance(states, list) and states and all(isinstance(x, str) and x for x in states)):
+            found.append(f"'{stage.get('name')}' has issue_state {states!r}, which must be a list of state names")
     if not isinstance(config.get("brief_sections"), list):
         found.append("'brief_sections' must be a list")
     # A board without a repo (an intake board that writes no code) is valid; a given one must exist.
@@ -223,6 +226,23 @@ def enter(path, text, match, fields, board, stage, extra=None):
     for key, value in {**stages[stage].get("on_enter", {}), **(extra or {})}.items():
         frontmatter = set_field(frontmatter, key, value)
     path.write_text(f"---\n{frontmatter}\n---\n{text[match.end():]}")
+    if stages[stage].get("issue_state"):
+        move_issue(path, stages[stage]["issue_state"])
+
+
+def move_issue(path, states):
+    """Moves the item's issue to the stage's `issue_state` (decision 72). Best effort: the stage
+    move stands whatever the tracker says, and `workitem-issue` explains what it skipped or why it failed."""
+    script = Path(os.path.realpath(__file__)).with_name("workitem-issue")
+    try:
+        result = subprocess.run([sys.executable, str(script), "set-state", str(path), *states], capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        print(f"warning: the issue of {path.parent.name} was not moved: workitem-issue timed out", file=sys.stderr)
+        return
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.stderr.strip():
+        print(f"warning: {result.stderr.strip()}" if result.returncode else result.stderr.strip(), file=sys.stderr)
 
 
 def has_session(name):

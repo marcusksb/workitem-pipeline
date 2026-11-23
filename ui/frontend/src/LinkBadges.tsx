@@ -5,7 +5,7 @@ import { Item } from "./types";
 // Clicking a badge must not also select the card it sits in.
 const stop = (event: MouseEvent) => event.stopPropagation();
 
-/** Clickable Jira (key and status) and PR badges of an item. */
+/** Clickable issue (key and status) and PR badges of an item. */
 export function LinkBadges({ item }: { item: Pick<Item, "issue" | "issue_status" | "issue_status_category" | "pr" | "parent"> }) {
   const issue = ticket(item.issue);
   const group = issueCategory(item.issue_status_category);

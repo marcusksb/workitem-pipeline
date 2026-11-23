@@ -5,13 +5,13 @@ description: Delete a workitem from a workspace. Shows what will be removed (wor
 
 # Workitem Remove
 
-Deletes ONE workitem. Input: workitem directory name or Jira key, in the workspace folder (`$WORKITEM_WORKSPACE`, else ask; items are `<workspace>/<dir>/workitem.md`). If none is given, list the workspace's items (title, board, stage) and ask which one.
+Deletes ONE workitem. Input: workitem directory name or issue key, in the workspace folder (`$WORKITEM_WORKSPACE`, else ask; items are `<workspace>/<dir>/workitem.md`). If none is given, list the workspace's items (title, board, stage) and ask which one.
 
 This is destructive. The workitem file is not in git, so it cannot be recovered. Always ask before deleting, unless the caller states the user already confirmed (the web UI does, and says which parts to remove).
 
 ## Steps
 
-1. Find the workitem: `<workspace>/<dir>/`. Match a Jira key by directory prefix, a name by substring. No match or more than one → say so and stop. Never delete a path outside the workspace folder. Its repo is the `repo` of its board (`<workspace>/boards/<board>.json`); run git commands there.
+1. Find the workitem: `<workspace>/<dir>/`. Match an issue key by directory prefix, a name by substring. No match or more than one → say so and stop. Never delete a path outside the workspace folder. Its repo is the `repo` of its board (`<workspace>/boards/<board>.json`); run git commands there.
 2. Read the frontmatter and collect what exists:
    - **Folder:** the workitem directory (list its files).
    - **Session:** `tmux has-session -t =wi-<dir>` succeeds: an agent is working on it. Say so and stop unless the user insists.
@@ -30,5 +30,5 @@ This is destructive. The workitem file is not in git, so it cannot be recovered.
 ## Rules
 
 - No confirmation, no deletion. A general "remove workitems" request is not a yes for a specific item.
-- Do not close PRs, delete remote branches, or touch Jira.
+- Do not close PRs, delete remote branches, or touch the issue tracker.
 - Remove one workitem per run.

@@ -46,9 +46,9 @@ export type Item = {
   approved: boolean;
   agent_status: string;
   issue: string;
-  /** Jira status name, or empty. */
+  /** Issue status name, or empty. */
   issue_status: string;
-  /** Jira status category key: `new`, `indeterminate` or `done`; or empty. */
+  /** Issue status category key (Jira's): `new`, `indeterminate` or `done`; or empty. */
   issue_status_category: string;
   pr: string;
   parent: string;
@@ -84,8 +84,22 @@ export type PrConversation = { body: string; notes: PrNote[] };
 export type WorkspaceWatch = { every: string; command: string; args: string[]; implicit: boolean };
 
 /** A folder in `~/.workitems-pipeline/workspaces`. `agent`: executable that runs its sessions instead of the default `claude`.
- * `watch`: its watchers (only in the list). `error`: why `workspace.toml` is not in use; its last valid version is. */
-export type Workspace = { name: string; dir: string; agent?: string; watch?: WorkspaceWatch[]; error?: string };
+ * `issue_tracker`: `jira` or `github`. `github_account`: the gh login its processes use, else gh's active one.
+ * `watch`: its watchers (only in the list). `error`: why `workspace.toml` is not in use; its last valid version is.
+ * `account_error`: why the workspace is stopped, its GitHub account not being readable (only in the list). */
+export type Workspace = {
+  name: string;
+  dir: string;
+  agent?: string;
+  issue_tracker: string;
+  github_account?: string;
+  watch?: WorkspaceWatch[];
+  error?: string;
+  account_error?: string;
+};
+
+/** What the workspace settings dialog changes; an empty value clears it. */
+export type WorkspaceChange = { agent?: string; issue_tracker?: string; github_account?: string };
 
 export type AgentSession = { workspace: string; name: string };
 

@@ -7,7 +7,7 @@ description: Handler for the `analyze` stage of the workitem pipeline. Reads one
 
 Handles ONE workitem in stage `analyze`. Input: the workitem file your prompt names ("Workitem file:"), else `$WORKITEM_FILE`, else the path given. Its code is in the repo your prompt names (`$WORKITEM_REPO`).
 
-Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only). Do not change code, do not query production data, do not create branches or PRs.
+Read-only: read the codebase, ADRs, the linked issue (`python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue read <workitem file>`) and Sentry (read tools only). Do not change code, do not query production data, do not create branches or PRs.
 
 ## Steps
 
@@ -15,7 +15,7 @@ Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only)
 2. Work by mode:
    - **`validate`** — the item already has a plan. Check every file, class and method it names against the current code. Fix small errors in the plan. Find risks the plan missed.
    - **`root_cause`** — find why it fails. For `source: system_error`, fetch the issue with the Sentry tools (stack trace, first/last seen, count). Follow the code path. Name the exact file and line. State how you know (code evidence), not how it might be.
-   - **`clarify`** — list every open question about the feature. Answer each one you can from the code, the Jira ticket or the ADRs. For the rest, see step 4.
+   - **`clarify`** — list every open question about the feature. Answer each one you can from the code, the linked issue or the ADRs. For the rest, see step 4.
 3. Write `## Review brief` at the end of the workitem, before `## Follow-ups` if that exists. If the brief exists, replace only that section, up to the next `##` heading. It MUST have these `###` sections, all non-empty, because `workitem-move` checks them:
    - `### Findings` — root cause (bug/Sentry), or the decisions and resolved questions (feature/validate).
    - `### Plan` — numbered steps, with files and layers touched. Follow the layer rules in the repo's `AGENTS.md`.
@@ -26,8 +26,8 @@ Read-only: read the codebase, ADRs, the Jira ticket and Sentry (read tools only)
    - `### Links` — the issue and the system error URL (from the frontmatter `issue:` and the source). Write `None` for a missing one.
 4. If a `clarify` question needs a human, do not move the item. Write the questions under `## Open questions` (numbered) and set `agent_status: blocked: <N> open questions`. When a human is attached to your tmux session (the runner's prompt says so), ask the questions directly and wait. Write each answer under its question, set `agent_status: working`, and go on to step 3. Without an attached human, just stop; the user can also answer in the file and set `agent_status: ok`, and the next run continues from there.
 5. If the frontmatter `issue:` is `none`, the item cannot be ready for development. Do not move it yet.
-   - When a human is attached to your tmux session, ask: "No Jira ticket is linked. Create one from this workitem, or give me an existing key?" Only create a ticket after an explicit yes: use `mcp__claude_ai_Atlassian_Rovo__createJiraIssue` (title and description from the workitem; ask for the project if unknown). Then set `jira: <KEY> (<url>)` in the frontmatter, update `### Links` in the brief, and go on to step 6.
-   - Without an attached human, set `agent_status: blocked: no Jira ticket linked, needs a ticket key`, call `PushNotification` with that reason, and stop. The user links or creates a ticket, sets `issue: <KEY> (<url>)` and `agent_status: ok`.
+   - When a human is attached to your tmux session, ask: "No issue is linked. Create one from this workitem, or give me an existing one?" Only create an issue after an explicit yes: write the description to a file and run `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue create <workitem file> --title <title> --body-file <file>`; it files the issue in the board's `issue_project` and sets `issue:` itself (if it says the board needs `issue_project`, ask for it and tell the user to add it to the board file). For an existing one, run `workitem-issue parse <workitem file> <ref>` and put the `issue:` line it prints into the frontmatter. Then update `### Links` in the brief and go on to step 6.
+   - Without an attached human, set `agent_status: blocked: no issue linked, needs an issue`, call `PushNotification` with that reason, and stop. The user links or creates an issue, sets `issue:` and `agent_status: ok`.
 6. Otherwise move it: `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-move <workitem file> <next>`, where `<next>` is the default next stage: the one marked `(default)` under "Allowed next stages" in your prompt (`ready_for_development` on the bundled board when run by hand). If it refuses, fix what it names and try once more. Do not edit `stage:` by hand.
 7. Report one line: `<dir>: analyze -> ready_for_development (<size>)` or `<dir>: blocked (<reason>)`.
 

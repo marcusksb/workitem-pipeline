@@ -5,7 +5,7 @@ use std::{collections::HashMap, path::Path, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
+use crate::{config::Workspace, AppState};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -125,8 +125,8 @@ struct PrReview {
     submitted_at: Option<String>,
 }
 
-async fn gh_json<T: serde::de::DeserializeOwned>(state: &AppState, repo: &Path, args: &[&str]) -> Result<T, String> {
-    let mut command = tokio::process::Command::new(&state.gh);
+async fn gh_json<T: serde::de::DeserializeOwned>(state: &AppState, workspace: &Workspace, repo: &Path, args: &[&str]) -> Result<T, String> {
+    let mut command = crate::github::command(state, workspace).await?;
     command.args(args).current_dir(repo).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(30), command.output())
         .await
@@ -138,10 +138,10 @@ async fn gh_json<T: serde::de::DeserializeOwned>(state: &AppState, repo: &Path, 
     serde_json::from_slice(&output.stdout).map_err(|e| format!("unreadable gh output: {e}"))
 }
 
-async fn inline_comments(state: &AppState, repo: &Path, pr: &str) -> Result<Vec<InlineComment>, String> {
+async fn inline_comments(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<Vec<InlineComment>, String> {
     let number = pr.rsplit('/').next().unwrap_or_default();
     let path = format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments");
-    let pages: Vec<Vec<InlineComment>> = gh_json(state, repo, &["api", &path, "--paginate", "--slurp"]).await?;
+    let pages: Vec<Vec<InlineComment>> = gh_json(state, workspace, repo, &["api", &path, "--paginate", "--slurp"]).await?;
     Ok(pages.into_iter().flatten().collect())
 }
 
@@ -174,8 +174,8 @@ struct RawConversation {
 }
 
 /// The PR description plus its comments, review summaries and inline comments, newest first.
-pub async fn conversation(state: &AppState, repo: &Path, pr: &str) -> Result<Conversation, String> {
-    let raw: RawConversation = gh_json(state, repo, &["pr", "view", pr, "--json", "body,comments,reviews"]).await?;
+pub async fn conversation(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<Conversation, String> {
+    let raw: RawConversation = gh_json(state, workspace, repo, &["pr", "view", pr, "--json", "body,comments,reviews"]).await?;
     let author = |a: Option<Author>| a.map_or_else(|| "ghost".to_string(), |a| a.login);
     let mut notes: Vec<Note> = raw
         .comments
@@ -194,7 +194,7 @@ pub async fn conversation(state: &AppState, repo: &Path, pr: &str) -> Result<Con
             path: None,
         })
     }));
-    notes.extend(inline_comments(state, repo, pr).await?.into_iter().map(|c| Note {
+    notes.extend(inline_comments(state, workspace, repo, pr).await?.into_iter().map(|c| Note {
         kind: "inline",
         author: author(c.user),
         body: c.body,
