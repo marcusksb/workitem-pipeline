@@ -572,7 +572,7 @@ async fn a_session_starts_in_the_worktree_and_still_belongs_to_the_workspace() {
 }
 
 #[tokio::test]
-async fn items_report_unpushed_commits_of_their_worktree() {
+async fn items_report_branch_and_unpushed_commits_of_their_worktree() {
     let w = world();
     write_item(&w.ws, "T-12-wt", "in_development", "");
     write_item(&w.ws, "T-13-none", "in_development", "");
@@ -586,12 +586,17 @@ async fn items_report_unpushed_commits_of_their_worktree() {
     git(&["worktree", "add", "-q", "-b", "wt", worktree.to_str().unwrap()], &w.repo);
     git(&["commit", "-q", "--allow-empty", "-m", "a"], &worktree);
 
-    async fn unpushed(w: &World, dir: &str) -> serde_json::Value {
+    async fn field_of(w: &World, dir: &str, name: &str) -> serde_json::Value {
         let items: serde_json::Value = serde_json::from_str(&get(w, "/api/workitems").await).unwrap();
-        items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["unpushed"].clone()
+        items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()[name].clone()
+    }
+    async fn unpushed(w: &World, dir: &str) -> serde_json::Value {
+        field_of(w, dir, "unpushed").await
     }
     assert_eq!(unpushed(&w, "T-12-wt").await, 2, "never pushed: every commit counts");
     assert!(unpushed(&w, "T-13-none").await.is_null(), "no worktree, nothing to report");
+    assert_eq!(field_of(&w, "T-12-wt", "branch").await, "wt");
+    assert!(field_of(&w, "T-13-none", "branch").await.is_null(), "no worktree, no branch");
 
     // A remote that has the commits clears the count.
     let remote = w.repo.parent().unwrap().join("remote.git");

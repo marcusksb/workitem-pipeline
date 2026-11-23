@@ -6,7 +6,11 @@ import { api } from "./api";
 import { Dialog } from "./Dialog";
 import { IconCheck, IconX } from "./icons";
 import { markdownLinks } from "./markdownLinks";
+import { ActionBar, ErrorText, Muted, prose } from "./parts";
 import { Learnings as Data } from "./types";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 /** `label`: the board's title. */
 type Props = { workspace: string; board: string; label: string; onClose: () => void };
@@ -48,36 +52,39 @@ export function Learnings({ workspace, board, label, onClose }: Props) {
 
   const title = `Learnings in ${workspace} · ${label}`;
   return (
-    <Dialog title={title} onClose={close}>
-      <div className="source learnings">
+    <Dialog title={title} onClose={close} className="max-w-[760px]">
+      <div className="grid gap-2">
         {data && (
           <p className="source-path">
-            <code title={data.path}>{data.path}</code>
+            <code className="font-mono text-[12px] [overflow-wrap:anywhere] text-muted-foreground" title={data.path}>
+              {data.path}
+            </code>
           </p>
         )}
         {data && (
-          <div className="action-bar">
+          <ActionBar className="bg-popover pb-1">
             {editing ? (
               <>
-                <button className="primary" disabled={busy || !changed} onClick={() => void save()}>
+                <Button variant="primary" disabled={busy || !changed} onClick={() => void save()}>
                   <IconCheck />
                   Save
-                </button>
-                <button disabled={busy} onClick={() => (!changed || confirm("Discard your changes?")) && setText(undefined)}>
+                </Button>
+                <Button disabled={busy} onClick={() => (!changed || confirm("Discard your changes?")) && setText(undefined)}>
                   <IconX />
                   Cancel
-                </button>
+                </Button>
               </>
             ) : (
-              <button onClick={() => setText(data.content || NEW_FILE)}>Edit</button>
+              <Button onClick={() => setText(data.content || NEW_FILE)}>Edit</Button>
             )}
-            {error && <span className="error">{error}</span>}
-          </div>
+            {error && <span className="text-destructive">{error}</span>}
+          </ActionBar>
         )}
-        {!data && !error && <p className="empty">Loading…</p>}
-        {!data && error && <p className="error">{error}</p>}
+        {!data && !error && <Muted>Loading…</Muted>}
+        {!data && error && <ErrorText>{error}</ErrorText>}
         {editing ? (
-          <textarea
+          <Textarea
+            className="h-[55vh] resize-y font-mono leading-normal"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -91,10 +98,10 @@ export function Learnings({ workspace, board, label, onClose }: Props) {
             autoFocus
           />
         ) : data && !data.content.trim() ? (
-          <p className="empty">No learnings yet. Review fixers add them, or add your own with Edit.</p>
+          <Muted>No learnings yet. Review fixers add them, or add your own with Edit.</Muted>
         ) : (
           data && (
-            <div className="file-markdown learnings-body">
+            <div className={cn(prose, "max-h-[60vh] overflow-auto border-t border-border pt-2")}>
               <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{data.content}</Markdown>
             </div>
           )

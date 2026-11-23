@@ -1,10 +1,12 @@
 import { FormEvent, useState } from "react";
 import { agentTerminal, api } from "./api";
 import { Button } from "@/components/ui/button";
+import { NativeSelect, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Dialog } from "./Dialog";
-import { IconChevronDown, IconExternal, IconPlus } from "./icons";
-import { navExtra, navHeading, navItem, navLabel } from "./Sidebar";
+import { Dialog, DialogForm, Field } from "./Dialog";
+import { IconChevronDown, IconPlus } from "./icons";
+import { ErrorText, Muted } from "./parts";
+import { navHeading, navItem } from "./Sidebar";
 import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
 import { AgentSession, Plan } from "./types";
 
@@ -64,9 +66,9 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
         aria-current={isSelected || undefined}
         onClick={() => onSelect(plan)}
       >
-        <span className={`plan-dot ${status} mt-[5px] group-data-[collapsed=true]/sidebar:mt-0`} aria-hidden="true" />
-        <span className={cn("line-clamp-2 flex-1 text-left leading-snug", navLabel)}>{plan.topic || plan.id}</span>
-        {showWorkspace && <span className={cn("text-[11.5px] text-muted-foreground", navExtra)}>{plan.workspace}</span>}
+        <span className={cn("size-2 shrink-0 rounded-full", status === "working" ? "bg-good" : status === "waiting" ? "bg-working" : "bg-muted-foreground")} aria-hidden="true" />
+        <span className="flex-1 truncate text-left">{plan.topic || plan.id}</span>
+        {showWorkspace && <span className="text-[11.5px] text-muted-foreground">{plan.workspace}</span>}
       </Button>
     );
   };
@@ -98,7 +100,7 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       {shownSessions.map((session) => (
         <a
           key={`${session.workspace}/${session.name}`}
-          className="plans-session flex items-center truncate px-2 py-1 text-xs group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0"
+          className="truncate px-2 py-1 text-xs text-primary no-underline hover:underline"
           href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
           target="_blank"
           rel="noreferrer"
@@ -144,29 +146,27 @@ function NewPlan({ workspaces, onClose, onStarted }: { workspaces: string[]; onC
 
   return (
     <Dialog title="New planning session" onClose={onClose}>
-      <form className="dialog-form" onSubmit={submit}>
+      <DialogForm onSubmit={submit}>
         {workspaces.length > 1 && (
-          <label>
-            Workspace
-            <select value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
+          <Field label="Workspace">
+            <NativeSelect value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
               {workspaces.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </Field>
         )}
-        <label>
-          What do you want to plan?
-          <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="The first line becomes the topic" rows={5} required autoFocus />
-        </label>
-        <p className="hint">Runs Claude in the repo root. It can read everything and create workitems, but cannot change code.</p>
-        <button type="submit" disabled={busy}>
+        <Field label="What do you want to plan?">
+          <Textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="The first line becomes the topic" rows={5} required autoFocus />
+        </Field>
+        <Muted>Runs Claude in the repo root. It can read everything and create workitems, but cannot change code.</Muted>
+        <Button type="submit" variant="primary" disabled={busy}>
           Start
-        </button>
-        {error && <span className="error">{error}</span>}
-      </form>
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
     </Dialog>
   );
 }

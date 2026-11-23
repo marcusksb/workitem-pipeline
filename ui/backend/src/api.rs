@@ -206,6 +206,8 @@ pub struct Item {
     session: bool,
     #[serde(flatten)]
     roles: Roles,
+    /// Branch checked out in the item's worktree; `None` without a worktree.
+    branch: Option<String>,
     /// Commits in the item's worktree that no remote has; `None` when it has no worktree.
     unpushed: Option<u32>,
 }
@@ -213,9 +215,16 @@ pub struct Item {
 /// The worktrees git knows for each repo, keyed by repo.
 type Worktrees = HashMap<std::path::PathBuf, Vec<std::path::PathBuf>>;
 
-async fn unpushed_of(repo: Option<&std::path::Path>, item: &Workitem, worktrees: &Worktrees) -> Option<u32> {
-    let repo = repo?;
-    git::unpushed(git::worktree_for(worktrees.get(repo)?, repo, &item.dir)?).await
+/// Branch and unpushed commits of the item's worktree; both `None` without one.
+async fn branch_of(repo: Option<&std::path::Path>, item: &Workitem, worktrees: &Worktrees) -> (Option<String>, Option<u32>) {
+    let found = async {
+        let repo = repo?;
+        git::branch(git::worktree_for(worktrees.get(repo)?, repo, &item.dir)?).await
+    };
+    match found.await {
+        Some((branch, unpushed)) => (Some(branch), unpushed),
+        None => (None, None),
+    }
 }
 
 async fn worktrees_of(repos: impl IntoIterator<Item = std::path::PathBuf>) -> Worktrees {
@@ -244,8 +253,8 @@ pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
             let worktrees = worktrees_of(boards.values().flatten().filter_map(|b| b.repo.clone())).await;
             let worktrees = &worktrees;
             futures_util::future::join_all(items.into_iter().map(|(item, session, roles, repo)| async move {
-                let unpushed = unpushed_of(repo.as_deref(), &item, worktrees).await;
-                Item { item, session, roles, unpushed }
+                let (branch, unpushed) = branch_of(repo.as_deref(), &item, worktrees).await;
+                Item { item, session, roles, branch, unpushed }
             }))
             .await
         }
@@ -271,8 +280,8 @@ pub async fn item(
     let board = state.pipeline(&workspace, &item.board).pipeline;
     let roles = roles_of(board.as_ref(), &item);
     let repo = board.and_then(|b| b.repo);
-    let unpushed = unpushed_of(repo.as_deref(), &item, &worktrees_of(repo.clone()).await).await;
-    Ok(Json(Detail { item: Item { item, session, roles, unpushed }, content }))
+    let (branch, unpushed) = branch_of(repo.as_deref(), &item, &worktrees_of(repo.clone()).await).await;
+    Ok(Json(Detail { item: Item { item, session, roles, branch, unpushed }, content }))
 }
 
 /// The PR description and comments of a workitem, read live with `gh`.

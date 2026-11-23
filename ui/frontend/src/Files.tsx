@@ -6,6 +6,11 @@ import { markdownLinks } from "./markdownLinks";
 import { FileEntry, Item } from "./types";
 import { usePolling } from "./usePolling";
 import { IconExternal, IconFolder } from "./icons";
+import { ErrorText, Muted, prose, scroll } from "./parts";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+
+const linkClass = "inline-flex cursor-pointer items-center gap-1 text-[13px] text-primary no-underline hover:underline";
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|avif|ico)$/i;
 const VIDEO = /\.(mp4|webm|mov|m4v|ogv)$/i;
@@ -62,40 +67,40 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
       (e: unknown) => (e instanceof Unauthorized ? onUnauthorized() : setRevealError(e instanceof Error ? e.message : String(e))),
     );
   return (
-    <div className="file-preview">
-      <p className="source-path">
-        <code>{file.path}</code>
-        <span className="badge">{sizeLabel(file.size)}</span>
-        <span className="file-open">
-          <button className="link" onClick={() => void reveal()}>
+    <div className="file-preview grid gap-2">
+      <p className="flex flex-wrap items-center gap-2">
+        <code className="font-mono text-[12px] [overflow-wrap:anywhere] text-muted-foreground">{file.path}</code>
+        <Badge>{sizeLabel(file.size)}</Badge>
+        <span className="ml-auto inline-flex gap-3">
+          <button className={linkClass} onClick={() => void reveal()}>
             <IconFolder />
             Show in Finder
           </button>
-          <a className="link" href={url} target="_blank" rel="noreferrer">
+          <a className={linkClass} href={url} target="_blank" rel="noreferrer">
             <IconExternal />
             Open
           </a>
         </span>
       </p>
-      {revealError && <p className="error">{revealError}</p>}
+      {revealError && <ErrorText>{revealError}</ErrorText>}
       {image ? (
-        <img src={url} alt={file.path} />
+        <img className="max-w-full rounded border border-border" src={url} alt={file.path} />
       ) : video ? (
-        <video src={url} controls />
+        <video className="max-w-full rounded border border-border" src={url} controls />
       ) : tooBig ? (
-        <p className="empty">Too large to preview; open it instead.</p>
+        <Muted>Too large to preview; open it instead.</Muted>
       ) : !text ? (
-        <p className="empty">Loading…</p>
+        <Muted>Loading…</Muted>
       ) : "error" in text ? (
-        <p className="error">{text.error}</p>
+        <ErrorText>{text.error}</ErrorText>
       ) : "binary" in text ? (
-        <p className="empty">Binary file; open it instead.</p>
+        <Muted>Binary file; open it instead.</Muted>
       ) : MARKDOWN.test(file.path) ? (
-        <div className="file-markdown">
+        <div className={cn(prose, "border-t border-border pt-2")}>
           <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{text.text}</Markdown>
         </div>
       ) : (
-        <pre>{text.text}</pre>
+        <pre className="overflow-auto rounded-md border border-border bg-muted px-3 py-2.5 font-mono text-[12px] whitespace-pre">{text.text}</pre>
       )}
     </div>
   );
@@ -110,17 +115,23 @@ export function Files({ item, onUnauthorized }: { item: Item; onUnauthorized: ()
   const file = files?.find((f) => f.path === picked);
 
   return (
-    <div className="brief files">
-      {error && <p className="error">{error}</p>}
-      {!files && !error && <p className="empty">Loading…</p>}
-      {files && files.length === 0 && <p className="empty">No files.</p>}
+    <div className={cn("grid content-start gap-3", scroll)}>
+      {error && <ErrorText>{error}</ErrorText>}
+      {!files && !error && <Muted>Loading…</Muted>}
+      {files && files.length === 0 && <Muted>No files.</Muted>}
       {files && files.length > 0 && (
-        <ul className="file-list">
+        <ul className="file-list overflow-hidden rounded-lg border border-border">
           {files.map((f) => (
-            <li key={f.path}>
-              <button className={f.path === picked ? "active" : ""} onClick={() => setPicked(f.path)}>
-                <span>{f.path}</span>
-                <small>{sizeLabel(f.size)}</small>
+            <li key={f.path} className="border-border not-first:border-t">
+              <button
+                className={cn(
+                  "flex w-full cursor-pointer justify-between gap-3 px-2.5 py-1 text-left font-mono text-[12px] hover:bg-primary/8",
+                  f.path === picked && "bg-primary/16 hover:bg-primary/16",
+                )}
+                onClick={() => setPicked(f.path)}
+              >
+                <span className="[overflow-wrap:anywhere]">{f.path}</span>
+                <small className="whitespace-nowrap text-muted-foreground">{sizeLabel(f.size)}</small>
               </button>
             </li>
           ))}

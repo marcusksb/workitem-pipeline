@@ -2,6 +2,9 @@ import { useState } from "react";
 import { api } from "./api";
 import { Item } from "./types";
 import { IconCheck, IconX } from "./icons";
+import { ActionBar } from "./parts";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
 
 type Props = { item: Item; base: string; onClose: (saved: boolean) => void };
 
@@ -28,20 +31,21 @@ export function BriefEditor({ item, base, onClose }: Props) {
   };
 
   return (
-    <div className="brief-editor">
-      <div className="action-bar">
-        <button className="primary" disabled={busy || text === base} onClick={() => void save()}>
+    <div className="flex min-h-0 flex-1 flex-col pb-4">
+      <ActionBar>
+        <Button variant="primary" disabled={busy || text === base} onClick={() => void save()}>
           <IconCheck />
           Save
-        </button>
-        <button disabled={busy} onClick={cancel}>
+        </Button>
+        <Button disabled={busy} onClick={cancel}>
           <IconX />
           Cancel
-        </button>
-        {item.session && <span className="muted">An agent session is running; it may edit the brief too.</span>}
-        {error && <span className="error">{error}</span>}
-      </div>
-      <textarea
+        </Button>
+        {item.session && <span className="text-muted-foreground">An agent session is running; it may edit the brief too.</span>}
+        {error && <span className="text-destructive">{error}</span>}
+      </ActionBar>
+      <Textarea
+        className="flex-1 resize-none p-2 font-mono leading-normal"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {

@@ -115,25 +115,8 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
   };
 
   return (
-    <>
-    {/* Keeps the rail's place under the floating sidebar. */}
-    {floating && <div className="w-[52px] shrink-0" aria-hidden="true" />}
-    {phoneOpen && <div className="fixed inset-0 z-30 bg-black/20" aria-hidden="true" onClick={() => collapse(true)} />}
-    <nav
-      className={cn(
-        "sidebar group/sidebar flex w-[260px] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
-        collapsed && "w-[52px]",
-        floating && "fixed inset-y-0 left-0 z-40",
-        floating && !collapsed && "shadow-lg",
-      )}
-      data-collapsed={collapsed}
-      aria-label="Workspace"
-      onMouseEnter={hover ? enter : undefined}
-      onMouseLeave={hover ? leave : undefined}
-      onFocus={hover ? enter : undefined}
-      onBlur={hover ? (event) => !event.currentTarget.contains(event.relatedTarget) && leave() : undefined}
-    >
-      <DropdownMenu onOpenChange={setMenuOpen}>
+    <nav className="flex bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] w-[232px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
+      <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className={cn(navItem, "h-8 gap-2 text-[13.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
             <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[11px] font-semibold text-primary-foreground uppercase" aria-hidden="true">

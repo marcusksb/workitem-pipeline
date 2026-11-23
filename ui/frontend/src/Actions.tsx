@@ -1,42 +1,23 @@
-import { useState } from "react";
 import { api } from "./api";
 import { Item } from "./types";
 import { useRun } from "./useRun";
-import { stageLabel } from "./boardState";
-import { IconCheck, IconTrash, IconUndo } from "./icons";
+import { IconTrash } from "./icons";
+import { ErrorText } from "./parts";
+import { Button } from "@/components/ui/button";
 
 type Props = { item: Item; onDone: () => void };
 
-/** Only the actions the workitem's current state allows; the backend enforces the same rules. */
+/** Only the actions the workitem's current state allows; the backend enforces the same rules.
+ * Approve and send back sit in the gate bar above the tabs. */
 export function Actions({ item, onDone }: Props) {
   const { busy, message, error, run } = useRun(onDone);
-  const [comment, setComment] = useState("");
-
-  const gate = item.gate;
 
   return (
-    <div className="actions">
-      {gate && (
-        <section>
-          <h3>Review</h3>
-          <button className="primary" disabled={busy} onClick={() => run(gate.label, () => api.approve(item))}>
-            <IconCheck />
-            {gate.label}
-          </button>
-          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Why is this rejected?" rows={3} />
-          <button disabled={busy || !comment.trim()} onClick={() => run("Reject", async () => {
-            await api.reject(item, comment);
-            setComment("");
-          })}>
-            <IconUndo />
-            Reject → {stageLabel(gate.reject_to)}
-          </button>
-        </section>
-      )}
-      <section>
-        <h3>Danger</h3>
-        <button
-          className="danger"
+    <div className="grid content-start gap-4">
+      <section className="grid justify-items-start gap-2">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">Danger</h3>
+        <Button
+          variant="danger"
           disabled={busy}
           onClick={() =>
             run(
@@ -51,10 +32,10 @@ export function Actions({ item, onDone }: Props) {
         >
           <IconTrash />
           Remove workitem
-        </button>
+        </Button>
       </section>
-      {message && <p>{message}</p>}
-      {error && <p className="error">{error}</p>}
+      {message && <p className="text-[13px]">{message}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
     </div>
   );
 }

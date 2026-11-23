@@ -38,12 +38,7 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
           </span>
         )}
       </div>
-      {error && <span className="error text-[13px]">{error}</span>}
-      <Button variant="secondary" className="h-[30px] gap-2 px-2 font-normal text-muted-foreground" onClick={onSearch} title="Find a workitem by title, issue key or PR number">
-        <IconSearch />
-        Search
-        <kbd className="rounded border border-border px-1 font-sans text-[11px]">{isMac ? "⌘" : "Ctrl+"}K</kbd>
-      </Button>
+      {error && <span className="text-[13px] text-destructive">{error}</span>}
       {board && (
         <div role="group" aria-label="View" className="flex rounded-[7px] bg-muted p-0.5">
           {(["board", "list"] as const).map((v) => (

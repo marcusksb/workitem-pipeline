@@ -52,7 +52,7 @@ export function useSession() {
 /** A click on the board that hits no card, control or dialog, and selects no text; it closes the open item. */
 function isBackground(target: EventTarget): boolean {
   if (!(target instanceof Element)) return false;
-  if (target.closest(".card, button, a, input, select, textarea, label, .dialog-overlay")) return false;
+  if (target.closest(".card, button, a, input, select, textarea, label, [role=dialog], [data-slot=dialog-overlay]")) return false;
   return window.getSelection()?.isCollapsed ?? true;
 }
 
@@ -71,7 +71,7 @@ function useLeaving<T>(value: T | null) {
 /** Wraps a `.detail` panel so it slides out before it unmounts. */
 function Leaving({ leaving, onDone, children }: { leaving: boolean; onDone: () => void; children: ReactNode }) {
   return (
-    <div className={leaving ? "panel-slot leaving" : "panel-slot"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
+    <div className={leaving ? "contents leaving" : "contents"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
       {children}
     </div>
   );
@@ -169,7 +169,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
   return (
-    <div className="app">
+    <div className="flex h-screen max-md:h-auto max-md:flex-col">
       <Sidebar
         workspaces={workspaces.data ?? []}
         workspace={workspace}
@@ -197,7 +197,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           }}
         />
       </Sidebar>
-      <div className="content">
+      <div className="flex min-w-0 flex-1 flex-col max-md:h-dvh max-md:flex-none">
         <TopBar
           workspace={workspaces.data?.find((w) => w.name === workspace)}
           pipelines={pipelines.data}
@@ -208,12 +208,12 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           error={error}
           onCreated={() => void sessions.reload()}
         />
-        {workspaces.data?.length === 0 && <p className="empty">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+        {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[13px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
         {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
-          <p className="empty">No boards in {workspace} yet. Add one for a repository with New board.</p>
+          <p className="px-6 pt-4 text-[13px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
-        <main>
-          <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
+        <main className="relative flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
             <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
               void items.reload();
               void pipelines.reload();
@@ -268,8 +268,8 @@ export function TerminalPage({ path }: { path: string }) {
   if (session.state === "checking") return null;
   if (session.state === "out") return <Login onSubmit={session.login} error={session.error} />;
   return (
-    <div className="popout">
-      <div className="popout-title">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
+    <div className="flex h-screen flex-col bg-black">
+      <div className="px-2 py-1 font-mono text-[12px] text-[#ccc]">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
       <Terminal path={path} />
     </div>
   );
