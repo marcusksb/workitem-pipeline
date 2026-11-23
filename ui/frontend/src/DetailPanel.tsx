@@ -197,24 +197,21 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
 
   return (
     <SidePanel aria-label="Workitem">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-4 pl-5">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground" title={live.dir}>
-          {live.dir}
-        </span>
-        <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
-          <IconX />
-        </Button>
-      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
         <div className="grid gap-2.5">
-          <h2 className="text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
-            {kindIcon && (
-              <span className="mr-2" aria-hidden="true">
-                {kindIcon}
-              </span>
-            )}
-            {live.title}
-          </h2>
+          <div className="flex items-start gap-2">
+            <h2 className="min-w-0 flex-1 text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+              {kindIcon && (
+                <span className="mr-2" aria-hidden="true">
+                  {kindIcon}
+                </span>
+              )}
+              {live.title}
+            </h2>
+            <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
+              <IconX />
+            </Button>
+          </div>
           <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
             {!isBlocked(live) && <AgentStatus item={{ agent_status: live.agent_status, gate: null, approved: live.approved }} className="basis-full" />}
             <FollowUpsChip
