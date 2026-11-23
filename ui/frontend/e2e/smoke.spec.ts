@@ -133,8 +133,9 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   expect(JSON.parse(readFileSync(join(ws, "boards/default.json"), "utf8")).repo).toBe(realpathSync(repo));
   const blocked = board.locator(".card.blocked", { hasText: "Demo blocked item" });
   await expect(blocked).toBeVisible();
-  // The card's PR line shows the most urgent PR state, its status line why the agent stopped.
-  await expect(blocked.getByRole("link", { name: "#42 · CI failing" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
+  // The card's PR pill is coloured by its merge state, then approval and CI icons; its status line says why the agent stopped.
+  await expect(blocked.getByRole("link", { name: "#42 merge unknown" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
+  await expect(blocked.getByRole("img", { name: /^CI failing/ })).toBeVisible();
   await expect(blocked.locator(".agent-status")).toHaveText("Blocked · need your answer");
   await board.getByText("Demo blocked item").click();
 

@@ -1,28 +1,36 @@
 import { MouseEvent } from "react";
-import { prNumber, prState } from "./boardState";
-import { IconGitMerge, IconGitPullRequest } from "./icons";
-import { TONE_TEXT } from "./tone";
+import { prNumber } from "./boardState";
+import { IconGitPullRequest } from "./icons";
+import { APPROVAL, ci, DONE, MERGE } from "./ReviewStrip";
+import { TONE_BADGE, TONE_TEXT } from "./tone";
 import { Item } from "./types";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 const stop = (event: MouseEvent) => event.stopPropagation();
 
-/** `#n · <state>` of the item's PR, linking to it; nothing without a PR. */
+/**
+ * The item's PR: a `#n` pill linking to it, coloured by whether it can merge (or merged/closed),
+ * then for an open PR an approval icon and a CI icon (none without CI). Nothing without a PR.
+ */
 export function PrStatus({ item, className }: { item: Pick<Item, "pr" | "review">; className?: string }) {
   if (!item.pr) return null;
-  const state = prState(item.review);
-  const label = `#${prNumber(item.pr) ?? "?"}${state ? ` · ${state.label}` : ""}`;
+  const review = item.review;
+  const pill = review && (review.state === "open" ? MERGE[review.merge] : DONE[review.state]);
+  const icons = review?.state === "open" ? [APPROVAL[review.approval], ...(review.ci === "none" ? [] : [ci(review.failed.length)[review.ci]])] : [];
   return (
-    <a
-      className={cn("inline-flex min-w-0 items-center gap-1 whitespace-nowrap text-[11.5px] no-underline hover:underline", TONE_TEXT[state?.tone ?? "idle"], className)}
-      href={item.pr}
-      target="_blank"
-      rel="noreferrer"
-      title={item.pr}
-      onClick={stop}
-    >
-      {item.review?.state === "merged" ? <IconGitMerge /> : <IconGitPullRequest />}
-      {label}
-    </a>
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
+      <Badge asChild variant={pill ? TONE_BADGE[pill.tone] : "outline"} className="relative no-underline hover:underline">
+        <a href={item.pr} target="_blank" rel="noreferrer" title={pill ? `${item.pr} · ${pill.label}` : item.pr} onClick={stop}>
+          <IconGitPullRequest />#{prNumber(item.pr) ?? "?"}
+          {pill && <span className="sr-only">{pill.label}</span>}
+        </a>
+      </Badge>
+      {icons.map(({ glyph, tone, label }) => (
+        <span key={label} role="img" aria-label={label} title={label} className={cn("inline-flex [&>svg]:size-3.5", TONE_TEXT[tone])}>
+          {glyph}
+        </span>
+      ))}
+    </span>
   );
 }

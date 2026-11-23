@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, prState, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -298,23 +298,6 @@ describe("waiting", () => {
     expect(isBlocked(waiting)).toBe(false);
     expect(waitingFor(waiting)).toBe("CI on PR #12");
     expect(isWaiting(item({ agent_status: "working" }))).toBe(false);
-  });
-});
-
-describe("prState", () => {
-  const open: Review = { state: "open", approval: "review_required", approved_by_me: false, merge: "mergeable", ci: "passing", failed: [] };
-  it("shows the most urgent state: merged or closed, conflict, changes requested, then CI", () => {
-    expect(prState(null)).toBeUndefined();
-    expect(prState({ ...open, state: "merged", ci: "failing" })).toEqual({ label: "merged", tone: "merged" });
-    expect(prState({ ...open, state: "closed" })?.label).toBe("closed");
-    expect(prState({ ...open, merge: "conflicting", approval: "changes_requested", ci: "failing" })).toEqual({ label: "merge conflict", tone: "bad" });
-    expect(prState({ ...open, approval: "changes_requested", ci: "failing" })?.label).toBe("changes requested");
-    expect(prState({ ...open, ci: "failing" })).toEqual({ label: "CI failing", tone: "bad" });
-    expect(prState({ ...open, ci: "pending" })).toEqual({ label: "CI running", tone: "wait" });
-    expect(prState(open)).toEqual({ label: "CI passing", tone: "good" });
-    expect(prState({ ...open, approval: "approved" })).toEqual({ label: "approved", tone: "good" });
-    expect(prState({ ...open, approval: "approved", ci: "failing" })?.label).toBe("CI failing");
-    expect(prState({ ...open, ci: "none" })?.label).toBe("open");
   });
 });
 

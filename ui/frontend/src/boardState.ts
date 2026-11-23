@@ -1,4 +1,4 @@
-import { Item, Pipelines, Review } from "./types";
+import { Item, Pipelines } from "./types";
 
 export const isBlocked = (item: Item) => item.agent_status.startsWith("blocked");
 
@@ -259,23 +259,6 @@ export const prNumber = (pr: string) => pr.match(/\/pull\/(\d+)/)?.[1];
 
 /** How a status reads: `good` green, `bad` red, `wait` amber, `merged` purple, `gate` blue, `idle` grey. */
 export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
-
-/**
- * The one PR state a card shows, the most urgent first: merged or closed, a merge conflict,
- * changes requested, failing or running CI, approval, then passing CI. Undefined before `pr-status` read the PR.
- */
-export function prState(review: Review | null): { label: string; tone: Tone } | undefined {
-  if (!review) return undefined;
-  if (review.state === "merged") return { label: "merged", tone: "merged" };
-  if (review.state === "closed") return { label: "closed", tone: "idle" };
-  if (review.merge === "conflicting") return { label: "merge conflict", tone: "bad" };
-  if (review.approval === "changes_requested") return { label: "changes requested", tone: "bad" };
-  if (review.ci === "failing") return { label: "CI failing", tone: "bad" };
-  if (review.ci === "pending") return { label: "CI running", tone: "wait" };
-  if (review.approval === "approved") return { label: "approved", tone: "good" };
-  if (review.ci === "passing") return { label: "CI passing", tone: "good" };
-  return { label: "open", tone: "idle" };
-}
 
 /** In a gate stage and not approved yet. */
 export const needsApproval = (item: Pick<Item, "gate" | "approved">) => !!item.gate && !item.approved;
