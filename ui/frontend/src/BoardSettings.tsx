@@ -62,7 +62,7 @@ export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }
             ))}
           </NativeSelect>
         </Field>
-        <Field label="Order">
+        <Field label="Workitem Sort Order">
           <Textarea {...field("order")} rows={3} placeholder={"issue_status desc\ntitle"} spellCheck={false} />
         </Field>
         <Field label="Issue project">
@@ -72,7 +72,7 @@ export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }
           <Input {...field("reviewers")} placeholder="org/team (optional)" />
         </Field>
         <Muted>
-          Order: one item field per line, optionally followed by asc or desc; title breaks ties. Stages and watchers are edited in boards/{board}.json in
+          Workitem Sort Order: one item field per line, optionally followed by asc or desc; title breaks ties. Stages and watchers are edited in boards/{board}.json in
           the workspace folder.
         </Muted>
         <Button type="submit" variant="primary" disabled={busy}>

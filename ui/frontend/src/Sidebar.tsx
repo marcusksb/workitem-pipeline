@@ -5,7 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioG
 import { cn } from "@/lib/utils";
 import { blockedByBoard, boardColors, boardLabel, boardNames, itemsByBoard } from "./boardState";
 import { BoardSettings } from "./BoardSettings";
-import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSliders } from "./icons";
+import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSettings, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
@@ -229,6 +229,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           )}
           {boardPipeline && (
             <Button variant="ghost" className={cn(navItem, "gap-2")} title="Label, entry stage, sort order, issue project and reviewers of this board" onClick={() => setOpen("boardSettings")}>
+              <IconSettings />
               <span className={navLabel}>Board settings</span>
             </Button>
           )}
