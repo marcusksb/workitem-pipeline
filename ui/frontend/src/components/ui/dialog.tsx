@@ -52,7 +52,7 @@ function DialogContent({
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close
-            data-slot="dialog-close"
+            data-slot="dialog-close-icon"
             className="absolute top-3 right-3 grid cursor-pointer place-items-center rounded-md p-1 text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30"
           >
             <IconX />
