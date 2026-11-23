@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -134,6 +134,7 @@ function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void 
 
 /** `where`: board and stage of a child shown under its parent outside its own column. */
 function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, where, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; where?: string; depth?: number }) {
+  const icon = KIND_ICONS[item.kind.trim().toLowerCase()];
   return (
     <div
       style={depth ? { marginLeft: depth * 16 } : undefined}
@@ -148,7 +149,10 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         }
       }}
     >
-      <div className="title">{item.title}</div>
+      <div className="title">
+        {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}
+        {item.title}
+      </div>
       <div className="card-chips">
         <Badge>{item.kind}</Badge>
         {showWorkspace && (

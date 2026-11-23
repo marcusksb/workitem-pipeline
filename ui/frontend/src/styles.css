@@ -250,6 +250,7 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .card-foot:empty { display: none; }
 .card-pr { margin-left: auto; flex: none; }
 .card .title { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.card .kind-icon { margin-right: 6px; font-size: 14px; line-height: 1; }
 .card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .card-chips > * { max-width: 100%; }
 .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
