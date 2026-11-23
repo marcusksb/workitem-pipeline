@@ -2,7 +2,7 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, planTerminal } from "./api";
-import { IconExternal, IconFileText, IconTerminalSquare, IconTrash, IconX } from "./icons";
+import { IconFileText, IconTerminalSquare, IconTrash, IconX } from "./icons";
 import { ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
 import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
@@ -62,19 +62,19 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
 
   return (
     <SidePanel aria-label="Plan">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-4 pl-5">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">{live.workspace}</span>
-        <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void remove()} disabled={busy}>
-          <IconTrash />
-          Delete
-        </Button>
-        <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
-          <IconX />
-        </Button>
-      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
         <div className="grid gap-2.5">
-          <h2 className="text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">{live.topic || live.id}</h2>
+          <div className="flex items-start gap-2">
+            <h2 className="min-w-0 flex-1 text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+              <span className="mr-2 inline-flex align-[-0.1em] text-muted-foreground [&>svg]:size-[18px]">
+                <IconFileText />
+              </span>
+              {live.topic || live.id}
+            </h2>
+            <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
+              <IconX />
+            </Button>
+          </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge variant={status === "working" ? "good" : status === "waiting" ? "wait" : "outline"}>{planLabel(status)}</Badge>
             {live.workitems.map((dir) => (
@@ -100,12 +100,10 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
                 </TabsTrigger>
               )}
             </TabsList>
-            {live.live && (
-              <a className="mb-2 inline-flex shrink-0 items-center gap-1.5 text-[13px] text-primary no-underline hover:underline" href={`/?terminal=${encodeURIComponent(path)}`} target="_blank" rel="noreferrer">
-                <IconExternal />
-                Pop out
-              </a>
-            )}
+            <Button variant="ghost" className="mb-1.5 shrink-0 text-destructive hover:text-destructive" onClick={() => void remove()} disabled={busy}>
+              <IconTrash />
+              Delete
+            </Button>
           </div>
           <TabsContent value="terminal" className="flex min-h-0 flex-col pb-4">
             {live.live ? (

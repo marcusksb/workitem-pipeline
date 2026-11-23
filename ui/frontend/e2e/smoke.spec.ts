@@ -512,7 +512,7 @@ test("planning sessions show in the sidebar and open in the side panel", async (
   await expect(bar.locator(".plan-card.ended")).toContainText("Old idea");
 
   await live.click();
-  await expect(page.locator(".detail h2")).toHaveText("Split the auth module");
+  await expect(page.locator(".detail").getByRole("heading", { level: 2, name: "Split the auth module", exact: true })).toBeVisible();
   await expect(page.locator(".detail .xterm-rows")).toContainText("planning-agent-ready");
   await page.getByRole("tab", { name: "Plan", exact: true }).click();
   await expect(page.locator(".detail .brief")).toContainText("Extract the token store");
