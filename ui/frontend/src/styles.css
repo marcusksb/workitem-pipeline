@@ -229,15 +229,9 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .cards { display: flex; flex-direction: column; gap: 6px; }
 .column-error { margin: 0; font-size: 12px; white-space: pre-line; }
 
-/* List: the header is a rail left of the cards, the name rotated to read bottom to top. The name
-   is positioned absolutely, so it never makes the lane taller: a long one is cut instead. */
+/* List: the header stays horizontal above the cards, which are rows, so an empty stage is one line. */
 .board.list { display: flex; flex-direction: column; gap: 10px; }
-.board.list .column { flex-direction: row; gap: 8px; min-height: 0; }
-.board.list .column h2 { position: static; flex: none; flex-direction: column; gap: 6px; width: 28px; min-height: 0; padding: 6px 0; }
-.board.list .column-label { position: relative; flex: 1 0 100px; width: 100%; }
-.board.list .column-label > span { position: absolute; inset: 0; writing-mode: vertical-rl; transform: rotate(180deg); text-align: end; line-height: 28px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board.list .column-actions { margin-left: 0; flex-direction: column; }
-.board.list .cards { flex: 1; min-width: 0; }
+.board.list .column { min-height: 0; }
 .board.list .card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 12px; }
 .board.list .card-top { display: contents; }
 .board.list .card-key { order: 0; flex: 0 1 200px; }
@@ -569,8 +563,3 @@ button.toast-body { cursor: pointer; }
 }
 }
 
-/* The rail's Paused badge reads like the stage name. In the utilities layer, because the Badge's
-   own size utilities would beat a rule in the components layer. */
-@layer utilities {
-  .board.list .column h2 .paused { writing-mode: vertical-rl; transform: rotate(180deg); width: 20px; height: auto; padding: 6px 0; }
-}

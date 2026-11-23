@@ -180,8 +180,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
 }
 
 /**
- * A stage: header (dot, name, count, info, pause, clear) and its cards. The list view turns the
- * header into a rail left of the cards (CSS only), so errors show above the cards, not in it.
+ * A stage: header (dot, name, count, info, pause, clear) and its cards.
  */
 function Column({ name, label, final, items, board, pause, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
   const clear = useRun(onChanged);
@@ -195,7 +194,7 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
       <h2>
         <span className="column-dot" aria-hidden="true" />
         <span className="column-label" title={label}>
-          <span>{label}</span>
+          {label}
         </span>
         {pause.paused && <Badge className="paused">Paused</Badge>}
         <span className="count">{items.length}</span>
