@@ -1,9 +1,7 @@
 import { ReactNode } from "react";
 import type { Tone } from "./boardState";
-import { IconCircleCheck, IconGitMerge, IconGitPullRequest, IconThumbsUp, IconUserCheck } from "./icons";
-import { TONE_BADGE } from "./tone";
+import { IconCircleCheck, IconGitMerge, IconGitPullRequest, IconUserCheck } from "./icons";
 import { Review } from "./types";
-import { Badge } from "@/components/ui/badge";
 
 type Slot = { glyph: ReactNode; tone: Tone; label: string };
 
@@ -34,24 +32,3 @@ export const DONE: Record<Exclude<Review["state"], "open">, Slot> = {
   merged: { glyph: <IconGitMerge />, tone: "merged", label: "PR merged" },
   closed: { glyph: <IconGitPullRequest />, tone: "idle", label: "PR closed without merge" },
 };
-
-/** Approval, merge and CI status of an open PR, one badge each; a fourth leads when I approved the PR. A merged or closed PR gets one badge. */
-export function ReviewStrip({ review }: { review: Review | null }) {
-  if (!review) return null;
-  const slots = review.state !== "open" ? [DONE[review.state]] : [
-    ...(review.approved_by_me ? [{ glyph: <IconThumbsUp />, tone: "good" as Tone, label: "approved by you" }] : []),
-    APPROVAL[review.approval],
-    MERGE[review.merge],
-    ci(review.failed.length)[review.ci],
-  ];
-  return (
-    <>
-      {slots.map(({ glyph, tone, label }) => (
-        <Badge key={label} variant={TONE_BADGE[tone]}>
-          {glyph}
-          {label}
-        </Badge>
-      ))}
-    </>
-  );
-}

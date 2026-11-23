@@ -1,7 +1,7 @@
-import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, itemTerminal } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, repoName, stageLabel, stageTitle, stripFrontmatter, ticket } from "./boardState";
+import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, shownBoard, stageLabel, stageTitle, stripFrontmatter } from "./boardState";
 import { Gate, Item, Pipelines } from "./types";
 import { Actions } from "./Actions";
 import { AgentActions } from "./AgentActions";
@@ -16,20 +16,19 @@ import { PrStatus } from "./PrStatus";
 import { Files } from "./Files";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Info } from "./Info";
-import { IssueStatusChip } from "./IssueStatusChip";
+import { IssueBadge } from "./LinkBadges";
 import { ActionBar, ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
-import { ReviewStrip } from "./ReviewStrip";
 import { STAGE_DOT } from "./tone";
 import { Tab } from "./url";
 import { Terminal } from "./Terminal";
 import { usePolling } from "./usePolling";
 import { useRun } from "./useRun";
 import {
+  IconBoard,
   IconCheck,
   IconExternal,
   IconFileText,
   IconFolder,
-  IconGitBranch,
   IconGitPullRequest,
   IconInfo,
   IconLink,
@@ -56,6 +55,8 @@ type Props = {
   /** Tab from the URL hash; unset falls back to the state-dependent default. */
   tab?: Tab;
   onTab: (tab: Tab) => void;
+  /** Shows a board of the item's workspace, keeping the item open. */
+  onBoard: (board: string) => void;
   onClose: () => void;
   onUnauthorized: () => void;
 };
@@ -104,76 +105,27 @@ function GateBar({ item, gate, runner: { busy, run } }: { item: Item; gate: Gate
   );
 }
 
-function Property({ label, children }: { label: string; children: ReactNode }) {
+/** Stage, board (click to show it), issue and PR of the item, as the pills the card uses. */
+function Properties({ item, pipelines, onBoard }: { item: Item; pipelines: Pipelines | undefined; onBoard: (board: string) => void }) {
   return (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="flex min-w-0 items-center gap-1.5 [overflow-wrap:anywhere]">{children}</dd>
-    </>
-  );
-}
-
-const linkButton = "cursor-pointer truncate text-left text-primary hover:underline";
-
-/** Stage, parent, board and repo, branch, PR and issue of the item. */
-function Properties({ item, parent, pipelines, onSelect }: { item: Item; parent: Item | undefined; pipelines: Pipelines | undefined; onSelect: (item: Item) => void }) {
-  const repo = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.repo;
-  const issue = ticket(item.issue);
-  return (
-    <dl className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-[13px]">
-      <Property label="Stage">
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 *:max-w-full">
+      <Badge>
         <span className={cn("size-2 shrink-0 rounded-full", STAGE_DOT[item.stage] ?? "bg-muted-foreground")} aria-hidden="true" />
-        <span className="font-medium capitalize">{stageTitle(item, pipelines)}</span>
-      </Property>
-      {item.parent && (
-        <Property label="Parent">
-          {parent ? (
-            <button className={linkButton} onClick={() => onSelect(parent)}>
-              {parent.title}
-            </button>
-          ) : (
-            <span className="font-mono text-[12px]">{item.parent}</span>
-          )}
-        </Property>
-      )}
-      <Property label="Board">
-        <span>{boardLabel(pipelines, item.workspace, item.board)}</span>
-        {repo && (
-          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={repo}>
-            {repoName(repo)}
-          </span>
-        )}
-      </Property>
-      {item.branch && (
-        <Property label="Branch">
-          <span className="text-muted-foreground">
-            <IconGitBranch />
-          </span>
-          <span className="font-mono text-[12px]">{item.branch}</span>
-        </Property>
-      )}
-      {item.pr && (
-        <Property label="PR">
-          <PrStatus item={item} className="text-[13px]" />
-        </Property>
-      )}
-      {issue && (
-        <Property label="Issue">
-          {issue.url ? (
-            <a className="text-primary no-underline hover:underline" href={issue.url} target="_blank" rel="noreferrer">
-              {issue.key} ↗
-            </a>
-          ) : (
-            <span>{issue.key}</span>
-          )}
-          <IssueStatusChip status={item.issue_status} category={item.issue_status_category} />
-        </Property>
-      )}
-    </dl>
+        <span className="truncate capitalize">{stageTitle(item, pipelines)}</span>
+      </Badge>
+      <Badge asChild>
+        <button type="button" className="cursor-pointer hover:underline" title={boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.repo ?? undefined} onClick={() => onBoard(shownBoard(item, pipelines))}>
+          <IconBoard />
+          <span className="truncate">{boardLabel(pipelines, item.workspace, item.board)}</span>
+        </button>
+      </Badge>
+      <IssueBadge item={item} />
+      <PrStatus item={item} />
+    </div>
   );
 }
 
-export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, onTab, onClose, onUnauthorized }: Props) {
+export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, onTab, onBoard, onClose, onUnauthorized }: Props) {
   const key = `${item.workspace}/${item.dir}`;
   const {
     data: detail,
@@ -195,7 +147,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   /** Set by the follow-ups chip; the brief scrolls to its `## Follow-ups` once it is shown. */
   const [jump, setJump] = useState(false);
   const family = items.filter((i) => i.workspace === item.workspace);
-  const parent = family.find((i) => i.dir === live.parent);
   const children = family.filter((i) => i.parent === item.dir);
   const blockedChildren = children.filter(isBlocked).length;
   const waitsOn = openDependencies(live, items, pipelines).length;
@@ -252,14 +203,12 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
                 onTab("brief");
               }}
             />
-            {!!live.unpushed && <Badge title="Commits in the worktree that are not on any remote">{live.unpushed} unpushed</Badge>}
-            <ReviewStrip review={live.review} />
           </div>
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
         </div>
-        <Properties item={live} parent={parent} pipelines={pipelines} onSelect={onSelect} />
+        <Properties item={live} pipelines={pipelines} onBoard={onBoard} />
         <Tabs value={tab} activationMode="manual" onValueChange={(value) => onTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
           <div className="flex items-end gap-2 border-b border-border">
             <TabsList className="min-w-0 flex-1 flex-wrap border-b-0">

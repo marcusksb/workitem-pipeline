@@ -229,6 +229,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
                 onSelect={open}
                 tab={route.tab}
                 onTab={onTab}
+                onBoard={(board) => navigate({ ...route, board })}
                 onClose={() => navigate({})}
                 onUnauthorized={onUnauthorized}
               />
