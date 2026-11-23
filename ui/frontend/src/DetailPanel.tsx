@@ -17,7 +17,7 @@ import { Files } from "./Files";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Info } from "./Info";
 import { IssueStatusChip } from "./IssueStatusChip";
-import { ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
+import { ActionBar, ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
 import { ReviewStrip } from "./ReviewStrip";
 import { STAGE_DOT } from "./tone";
 import { Tab } from "./url";
@@ -220,7 +220,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
   const edit = () => {
     if (!detail) return;
     setEditing(stripFrontmatter(detail.content));
-    onTab("brief");
   };
   const discuss = () =>
     runner.run("Discuss brief", async () => {
@@ -234,16 +233,6 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground" title={live.dir}>
           {live.dir}
         </span>
-        {!live.session && (
-          <Button disabled={runner.busy} onClick={discuss}>
-            <IconMessage />
-            Discuss brief
-          </Button>
-        )}
-        <Button disabled={runner.busy || !detail || editing !== undefined} onClick={edit}>
-          <IconPencil />
-          Edit
-        </Button>
         <Button variant="ghost" size="icon" aria-label="Close" onClick={onClose}>
           <IconX />
         </Button>
@@ -329,6 +318,18 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               />
             ) : (
               <div className={cn("brief", scroll, prose)}>
+                <ActionBar>
+                  {!live.session && (
+                    <Button disabled={runner.busy} onClick={discuss}>
+                      <IconMessage />
+                      Discuss brief
+                    </Button>
+                  )}
+                  <Button disabled={runner.busy || !detail} onClick={edit}>
+                    <IconPencil />
+                    Edit
+                  </Button>
+                </ActionBar>
                 {detail ? <BriefView item={live} body={stripFrontmatter(detail.content)} onSaved={() => void reload()} /> : <Muted>Loading…</Muted>}
               </div>
             )}
