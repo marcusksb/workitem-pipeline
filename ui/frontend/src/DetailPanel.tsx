@@ -115,9 +115,8 @@ function Property({ label, children }: { label: string; children: ReactNode }) {
 
 const linkButton = "cursor-pointer truncate text-left text-primary hover:underline";
 
-/** Stage, type, parent, board and repo, branch, PR and issue of the item. */
+/** Stage, parent, board and repo, branch, PR and issue of the item. */
 function Properties({ item, parent, pipelines, onSelect }: { item: Item; parent: Item | undefined; pipelines: Pipelines | undefined; onSelect: (item: Item) => void }) {
-  const kindIcon = KIND_ICONS[item.kind.trim().toLowerCase()];
   const repo = boardOfWorkspace(pipelines, item.workspace, item.board)?.pipeline?.repo;
   const issue = ticket(item.issue);
   return (
@@ -125,10 +124,6 @@ function Properties({ item, parent, pipelines, onSelect }: { item: Item; parent:
       <Property label="Stage">
         <span className={cn("size-2 shrink-0 rounded-full", STAGE_DOT[item.stage] ?? "bg-muted-foreground")} aria-hidden="true" />
         <span className="font-medium capitalize">{stageTitle(item, pipelines)}</span>
-      </Property>
-      <Property label="Type">
-        {kindIcon && <span aria-hidden="true">{kindIcon}</span>}
-        {item.kind}
       </Property>
       {item.parent && (
         <Property label="Parent">
@@ -215,6 +210,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
     });
     return () => cancelAnimationFrame(frame);
   }, [jump, tab, editing, detail]);
+  const kindIcon = KIND_ICONS[live.kind.trim().toLowerCase()];
   const path = itemTerminal(item.workspace, item.dir);
   const popOut = `/?terminal=${encodeURIComponent(path)}`;
   const edit = () => {
@@ -239,7 +235,14 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
         <div className="grid gap-2.5">
-          <h2 className="text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">{live.title}</h2>
+          <h2 className="text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+            {kindIcon && (
+              <span className="mr-2" aria-hidden="true">
+                {kindIcon}
+              </span>
+            )}
+            {live.title}
+          </h2>
           <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
             <AgentStatus item={{ agent_status: live.agent_status, gate: null }} className="basis-full" />
             <FollowUpsChip
