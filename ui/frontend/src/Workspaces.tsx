@@ -195,6 +195,12 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input
           <textarea
             value={input}
             onChange={(e) => onInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }
+            }}
             placeholder={`${workspace.issue_tracker === "github" ? "GitHub issue" : "Jira key"}, Sentry URL or task description`}
             rows={4}
             required
@@ -213,7 +219,9 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input
             </select>
           </label>
         )}
-        <span className="hint">A task that needs changes in the repos of several boards becomes one linked item per board.</span>
+        <span className="hint">
+          Enter creates, Shift+Enter adds a line. A task that needs changes in the repos of several boards becomes one linked item per board.
+        </span>
         <button type="submit">Create</button>
         {error && <span className="error">{error}</span>}
       </form>

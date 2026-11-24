@@ -110,7 +110,8 @@ def activity_of(pull):
 
 
 def parse_time(text):
-    return datetime.fromisoformat(text) if text else datetime.min.replace(tzinfo=timezone.utc)
+    # Python before 3.11 (macOS /usr/bin/python3 is 3.9) does not accept GitHub's trailing "Z".
+    return datetime.fromisoformat(text.replace("Z", "+00:00")) if text else datetime.min.replace(tzinfo=timezone.utc)
 
 
 def login_of(entry):
