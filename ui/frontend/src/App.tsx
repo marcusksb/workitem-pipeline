@@ -209,6 +209,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           onSearch={() => setSearching(true)}
           error={error}
           onCreated={() => void sessions.reload()}
+          onBoardChanged={() => void pipelines.reload()}
         />
         {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
         {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (

@@ -4,8 +4,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { blockedByBoard, boardColors, boardLabel, boardNames, itemsByBoard } from "./boardState";
-import { BoardSettings } from "./BoardSettings";
-import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSettings, IconSliders } from "./icons";
+import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
@@ -72,7 +71,7 @@ type Props = {
   children: ReactNode;
 };
 
-type Open = "workspace" | "board" | "settings" | "boardSettings" | "watchers" | "learnings";
+type Open = "workspace" | "board" | "settings" | "watchers" | "learnings";
 
 /** The app's left column: workspace, boards, plans and the workspace's settings. */
 export function Sidebar({ workspaces, workspace, pipelines, items, board, onWorkspace, onBoard, onChanged, children }: Props) {
@@ -83,7 +82,6 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
   const counts = itemsByBoard(items, pipelines);
   const blocked = blockedByBoard(items, pipelines);
   const colors = boardColors(names);
-  const boardPipeline = current && pipelines?.[current.name]?.find((b) => b.name === board)?.pipeline;
   // The width decides until the toggle is used; the choice holds until the width crosses AUTO_COLLAPSE again.
   const narrow = useMedia(AUTO_COLLAPSE);
   const overlay = useMedia(OVERLAY);
@@ -227,12 +225,6 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
               <span className={navLabel}>Learnings</span>
             </Button>
           )}
-          {boardPipeline && (
-            <Button variant="ghost" className={cn(navItem, "gap-2")} title="Label, entry stage, sort order, issue project and reviewers of this board" onClick={() => setOpen("boardSettings")}>
-              <IconSettings />
-              <span className={navLabel}>Board settings</span>
-            </Button>
-          )}
           <Button
             variant="ghost"
             className={cn(navItem, "gap-2", current.error && "text-destructive")}
@@ -301,9 +293,6 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
             onChanged();
           }}
         />
-      )}
-      {open === "boardSettings" && current && board && boardPipeline && (
-        <BoardSettings workspace={current.name} board={board} pipeline={boardPipeline} onClose={close} onChanged={onChanged} />
       )}
       {open === "watchers" && current && <WatchersDialog workspace={current} onClose={close} />}
       {open === "learnings" && current && board && (

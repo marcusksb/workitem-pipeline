@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { boardLabel, boardOfWorkspace, repoName } from "./boardState";
-import { IconPlus, IconSearch } from "./icons";
+import { BoardSettings } from "./BoardSettings";
+import { IconPlus, IconSearch, IconSettings } from "./icons";
 import { Pipelines, Workspace } from "./types";
 import { NewWorkitemDialog } from "./Workspaces";
 
@@ -21,13 +22,17 @@ type Props = {
   error: string | undefined;
   /** Called once a workitem session was started. */
   onCreated: () => void;
+  /** Called once the board's settings were saved. */
+  onBoardChanged: () => void;
 };
 
-/** The bar above the board: which board and repo, Search, Board or List, and New workitem. */
-export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, onCreated }: Props) {
+/** The bar above the board: which board and repo, Search, Board or List, New workitem, and Board settings. */
+export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, onCreated, onBoardChanged }: Props) {
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const repo = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline?.repo : undefined;
+  const pipeline = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline : undefined;
+  const repo = pipeline?.repo;
   return (
     <header className="top-bar flex min-h-12 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-5 py-2">
       <div className="flex min-w-0 flex-[1_1_160px] items-baseline gap-2">
@@ -64,6 +69,20 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
           <IconPlus />
           New workitem
         </Button>
+      )}
+      {pipeline && (
+        <Button
+          variant="secondary"
+          className="size-[30px] p-0 text-muted-foreground"
+          aria-label="Board settings"
+          title="Board settings: label, entry stage, sort order, issue project and reviewers"
+          onClick={() => setEditing(true)}
+        >
+          <IconSettings />
+        </Button>
+      )}
+      {editing && workspace && board && pipeline && (
+        <BoardSettings workspace={workspace.name} board={board} pipeline={pipeline} onClose={() => setEditing(false)} onChanged={onBoardChanged} />
       )}
       {creating && workspace && board && (
         <NewWorkitemDialog
