@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, itemTerminal } from "./api";
 import { AgentStatus } from "./AgentStatus";
 import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, shownBoard, stageLabel, stageTitle, stripFrontmatter } from "./boardState";
@@ -8,7 +8,6 @@ import { BriefEditor } from "./BriefEditor";
 import { BriefView } from "./BriefView";
 import { Children } from "./Children";
 import { Dependencies } from "./Dependencies";
-import { Dialog, DialogForm, Field } from "./Dialog";
 import { PrActions } from "./PrActions";
 import { PrConversation } from "./PrConversation";
 import { PrStatus } from "./PrStatus";
@@ -35,13 +34,11 @@ import {
   IconPencil,
   IconTerminalSquare,
   IconTrash,
-  IconUndo,
   IconUnlock,
   IconX,
 } from "./icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
@@ -62,44 +59,24 @@ type Props = {
 
 type Runner = ReturnType<typeof useRun>;
 
-/** Shown while the item waits at a gate: approve it, or send it back with a comment. */
-function GateBar({ item, gate, runner: { busy, run } }: { item: Item; gate: Gate; runner: Runner }) {
-  const [sending, setSending] = useState(false);
-  const [comment, setComment] = useState("");
-  const sendBack = (event: FormEvent) => {
-    event.preventDefault();
-    setSending(false);
-    run("Send back", async () => {
-      await api.reject(item, comment);
-      setComment("");
-    });
-  };
+/** Shown while the item waits at a gate: discuss the brief, or approve it. */
+function GateBar({ item, gate, runner: { busy, run }, onDiscuss }: { item: Item; gate: Gate; runner: Runner; onDiscuss?: () => void }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-[13px]">
       <span className="text-primary">
         <IconInfo />
       </span>
       <span className="min-w-0 flex-1">Waiting for your decision. Approve moves it to {stageLabel(gate.approve_to)}.</span>
-      <Button disabled={busy} onClick={() => setSending(true)}>
-        <IconUndo />
-        Send back
-      </Button>
+      {onDiscuss && (
+        <Button disabled={busy} onClick={onDiscuss}>
+          <IconMessage />
+          Discuss brief
+        </Button>
+      )}
       <Button variant="primary" disabled={busy} onClick={() => run(gate.label, () => api.approve(item))}>
         <IconCheck />
         {gate.label}
       </Button>
-      {sending && (
-        <Dialog title={`Send back to ${stageLabel(gate.reject_to)}`} onClose={() => setSending(false)}>
-          <DialogForm onSubmit={sendBack}>
-            <Field label="Comment">
-              <Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Why is this rejected?" rows={4} required autoFocus />
-            </Field>
-            <Button type="submit" variant="primary" disabled={!comment.trim()}>
-              Send back
-            </Button>
-          </DialogForm>
-        </Dialog>
-      )}
     </div>
   );
 }
@@ -230,7 +207,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           </div>
           <Properties item={live} pipelines={pipelines} onBoard={onBoard} />
           {isBlocked(live) && <BlockedBar item={live} runner={runner} />}
-          {live.gate && <GateBar item={live} gate={live.gate} runner={runner} />}
+          {live.gate && <GateBar item={live} gate={live.gate} runner={runner} onDiscuss={live.session ? undefined : discuss} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
         </div>

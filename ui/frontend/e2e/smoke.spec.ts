@@ -156,25 +156,16 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   execFileSync("tmux", ["-L", socket, "has-session", "-t", "wi-T-1-demo"]);
 });
 
-test("approve and send back at the gate from the gate bar", async ({ page }) => {
+test("approve at the gate from the gate bar", async ({ page }) => {
   await page.goto(base);
   const gateColumn = page.locator(".column", { hasText: "ready for development" });
 
   // Approving moves the item on, to the stage the gate names.
   await gateColumn.getByText("Approve me").click();
+  await expect(page.locator(".detail").getByRole("button", { name: "Discuss brief" })).toHaveCount(2);
   await page.locator(".detail").getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.locator(".column", { hasText: "in development" })).toContainText("Approve me");
   await expect(gateColumn).not.toContainText("Approve me");
-
-  // Sending back needs a comment and sends the item to the stage the gate names.
-  await gateColumn.getByText("Brief waiting").click();
-  await page.locator(".detail").getByRole("button", { name: "Send back" }).click();
-  const dialog = page.getByRole("dialog", { name: "Send back to analyze" });
-  await expect(dialog.getByRole("button", { name: "Send back" })).toBeDisabled();
-  await dialog.getByPlaceholder("Why is this rejected?").fill("needs a rollback plan");
-  await dialog.getByRole("button", { name: "Send back" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".column", { hasText: "analyze" }).first()).toContainText("Brief waiting");
 });
 
 test("deep links and history navigate items and tabs", async ({ page }) => {

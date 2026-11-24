@@ -43,12 +43,6 @@ export const IconCircleCheck = make(
   </>,
 );
 export const IconX = make(<path d="M6 6l12 12M18 6L6 18" />);
-export const IconUndo = make(
-  <>
-    <path d="M9 14L4 9l5-5" />
-    <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
-  </>,
-);
 export const IconMessage = make(
   <path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12z" />,
 );
