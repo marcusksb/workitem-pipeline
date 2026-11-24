@@ -121,7 +121,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
     {phoneOpen && <div className="fixed inset-0 z-30 bg-black/20" aria-hidden="true" onClick={() => collapse(true)} />}
     <nav
       className={cn(
-        "sidebar group/sidebar flex w-[232px] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
+        "sidebar group/sidebar flex w-[260px] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
         collapsed && "w-[52px]",
         floating && "fixed inset-y-0 left-0 z-40",
         floating && !collapsed && "shadow-lg",
@@ -146,7 +146,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </Button>
         </DropdownMenuTrigger>
         {/* A dialog opened from the menu keeps its focus. */}
-        <DropdownMenuContent align="start" className="w-[212px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
+        <DropdownMenuContent align="start" className="w-[240px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
           {workspaces.length > 0 && (
             <>
               <DropdownMenuRadioGroup value={workspace} onValueChange={(name) => name !== workspace && onWorkspace(name)}>

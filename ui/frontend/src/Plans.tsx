@@ -59,13 +59,13 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       <Button
         key={`${plan.workspace}/${plan.id}`}
         variant="ghost"
-        className={cn(navItem, "plan-card gap-2", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
+        className={cn(navItem, "plan-card h-auto min-h-[30px] items-start gap-2 py-1.5 whitespace-normal group-data-[collapsed=true]/sidebar:items-center", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
         title={`${plan.topic || plan.id}\n${planLabel(status)}: ${summary}`}
         aria-current={isSelected || undefined}
         onClick={() => onSelect(plan)}
       >
-        <span className={`plan-dot ${status}`} aria-hidden="true" />
-        <span className={cn("flex-1 truncate text-left", navLabel)}>{plan.topic || plan.id}</span>
+        <span className={`plan-dot ${status} mt-[5px] group-data-[collapsed=true]/sidebar:mt-0`} aria-hidden="true" />
+        <span className={cn("line-clamp-2 flex-1 text-left leading-snug", navLabel)}>{plan.topic || plan.id}</span>
         {showWorkspace && <span className={cn("text-[11.5px] text-muted-foreground", navExtra)}>{plan.workspace}</span>}
       </Button>
     );
