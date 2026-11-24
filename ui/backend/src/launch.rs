@@ -202,7 +202,9 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
     let empty = PathBuf::new();
     command.args(["/bin/sh", "-c", LAUNCH, "sh"]).arg(token_file.as_ref().unwrap_or(&empty)).arg(file.as_ref().unwrap_or(&empty));
     command.arg(agent).args(args);
-    command.args([";", "set-option", tmux::WORKSPACE_OPTION]).arg(&workspace.dir);
+    // Without a target, tmux tags the session of `$TMUX_PANE` when the backend runs inside tmux.
+    // Not `={session}`: in the same command list that is resolved before the session exists.
+    command.args([";", "set-option", "-t", session, tmux::WORKSPACE_OPTION]).arg(&workspace.dir);
     let output = command.output().await.map_err(|e| format!("cannot run tmux: {e}"));
     let failed = match &output {
         Ok(output) if output.status.success() => None,
