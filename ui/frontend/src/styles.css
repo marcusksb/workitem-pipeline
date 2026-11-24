@@ -138,6 +138,28 @@
   body { background: var(--background); color: var(--foreground); font: 16px/1.4 var(--font-sans); }
 }
 
+/* A rainbow border runs around the card of an item whose agent is working. */
+@property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes card-spin { to { --card-angle: 360deg; } }
+.card.working { position: relative; }
+.card.working::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(from var(--card-angle), #f43f5e, #f97316, #facc15, #34d399, #38bdf8, #818cf8, #e879f9, #f43f5e);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+  pointer-events: none;
+  animation: card-spin 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.working::before { animation: none; }
+}
+
 /* The detail panel slides in, and out while App's Leaving keeps it mounted (SidePanel). */
 @keyframes detail-in { from { transform: translateX(100%); } }
 @keyframes detail-out { to { transform: translateX(100%); } }

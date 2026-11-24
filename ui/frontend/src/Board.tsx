@@ -145,7 +145,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         "card flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(16_24_40/0.04)] outline-none hover:border-primary/35 focus-visible:ring-[3px] focus-visible:ring-ring/30",
         "group-data-[view=list]/board:flex-row group-data-[view=list]/board:flex-wrap group-data-[view=list]/board:items-center group-data-[view=list]/board:gap-x-3 group-data-[view=list]/board:gap-y-1 group-data-[view=list]/board:py-2",
         depth > 0 && "w-auto border-l-[3px]",
-        isBlocked(item) ? "blocked border-blocked/75 bg-[color-mix(in_srgb,var(--blocked)_3%,var(--card))]" : isWaiting(item) ? "waiting border-waiting/75" : needsApproval(item) && "border-gate/35",
+        isBlocked(item) ? "blocked border-blocked/75 inset-ring inset-ring-blocked/75 bg-[color-mix(in_srgb,var(--blocked)_3%,var(--card))]" : isWaiting(item) ? "waiting border-waiting/75 inset-ring inset-ring-waiting/75" : needsApproval(item) && "border-gate/35 inset-ring inset-ring-gate/35",
         isWorking(item) && "working",
         selected && "selected bg-[color-mix(in_srgb,var(--primary)_12%,var(--card))]",
       )}
