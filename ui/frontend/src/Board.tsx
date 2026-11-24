@@ -163,8 +163,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         {icon && <span className="mr-1.5 text-sm leading-none" title={item.kind}>{icon}</span>}
         {item.title}
       </div>
-      <div className="text-[13.5px] leading-[1.4] font-medium [overflow-wrap:anywhere] group-data-[view=list]/board:order-1 group-data-[view=list]/board:min-w-0 group-data-[view=list]/board:flex-[1_1_240px]">{item.title}</div>
-      <div className="flex min-w-0 flex-wrap gap-1 group-data-[view=list]/board:order-2">
+      <div className="flex min-w-0 flex-wrap gap-1 *:max-w-full group-data-[view=list]/board:order-2">
         <Badge>{item.kind}</Badge>
         {showWorkspace && (
           <Badge title={item.workspace}>
@@ -183,14 +182,16 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
           <Badge title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</Badge>
         )}
       </div>
-      <AgentStatus item={item} className="group-data-[view=list]/board:order-4 group-data-[view=list]/board:max-w-[320px]" />
+      <div className="flex min-w-0 items-center gap-2 empty:hidden group-data-[view=list]/board:contents">
+        <AgentStatus item={item} className="group-data-[view=list]/board:order-4 group-data-[view=list]/board:max-w-[320px]" />
+        <PrStatus item={item} className="ml-auto flex-none group-data-[view=list]/board:order-3 group-data-[view=list]/board:ml-0" />
+      </div>
     </div>
   );
 }
 
 /**
- * A stage: header (dot, name, count, info, pause, clear) and its cards. The list view turns the
- * header into a rail left of the cards (classes only), so errors show above the cards, not in it.
+ * A stage: header (dot, name, count, info, pause, clear) and its cards.
  */
 function Column({ name, label, final, items, board, pause, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
   const clear = useRun(onChanged);
@@ -201,17 +202,17 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
   ].filter(([, error]) => error);
   return (
     <section
-      className="column flex min-h-[120px] flex-col gap-1.5 rounded-[10px] bg-[color-mix(in_srgb,var(--foreground)_4%,var(--background))] p-1.5 group-data-[view=list]/board:min-h-0 group-data-[view=list]/board:flex-row group-data-[view=list]/board:gap-2"
+      className="column flex min-h-[120px] flex-col gap-1.5 rounded-[10px] bg-[color-mix(in_srgb,var(--foreground)_4%,var(--background))] p-1.5 group-data-[view=list]/board:min-h-0"
       data-stage={name}
     >
       <h2 className="sticky -top-4 z-[1] flex min-h-8 items-center gap-2 bg-inherit pl-1.5 text-[15px] font-semibold capitalize">
         <span className={cn("size-2 flex-none rounded-full", name === UNKNOWN_STAGE ? "bg-blocked" : (STAGE_DOT[name] ?? "bg-muted-foreground"))} aria-hidden="true" />
-        <span className="min-w-0 truncate group-data-[view=list]/board:relative group-data-[view=list]/board:w-full group-data-[view=list]/board:flex-[1_0_100px]" title={label}>
-          <span className="group-data-[view=list]/board:absolute group-data-[view=list]/board:inset-0 group-data-[view=list]/board:rotate-180 group-data-[view=list]/board:truncate group-data-[view=list]/board:text-end group-data-[view=list]/board:leading-7 group-data-[view=list]/board:[writing-mode:vertical-rl]">{label}</span>
+        <span className="min-w-0 truncate" title={label}>
+          {label}
         </span>
-        {pause.paused && <Badge className="group-data-[view=list]/board:h-auto group-data-[view=list]/board:w-5 group-data-[view=list]/board:rotate-180 group-data-[view=list]/board:py-1.5 group-data-[view=list]/board:[writing-mode:vertical-rl]">Paused</Badge>}
+        {pause.paused && <Badge>Paused</Badge>}
         <span className="text-xs font-normal text-muted-foreground">{items.length}</span>
-        <span className="ml-auto flex items-center group-data-[view=list]/board:ml-0 group-data-[view=list]/board:flex-col">
+        <span className="ml-auto flex items-center">
           {name !== UNKNOWN_STAGE && (
             <Button variant="ghost" size="icon" className="size-6" title="What this stage runs" aria-label={`What ${label} runs`} onClick={onInspect}>
               <IconInfo />
@@ -221,9 +222,9 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
           {final && items.length > 0 && <ClearColumn items={items} runner={clear} />}
         </span>
       </h2>
-      <div className={cn("flex flex-col gap-1.5 group-data-[view=list]/board:min-w-0 group-data-[view=list]/board:flex-1", pause.paused && "opacity-55")}>
-        {errors.map((error) => (
-          <ErrorText className="text-xs" key={error}>
+      <div className={cn("flex flex-col gap-1.5", pause.paused && "[&>:not(p)]:opacity-55")}>
+        {errors.map(([source, error]) => (
+          <ErrorText className="text-xs" key={source}>
             {error}
           </ErrorText>
         ))}

@@ -145,7 +145,7 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   await page.keyboard.type("postgres\n");
   await expect(terminal).toContainText("got:postgres");
 
-  await expect(page.locator(".detail").getByRole("link", { name: "#42 · CI failing" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
+  await expect(page.locator(".detail").getByRole("link", { name: "#42 merge unknown" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
   await page.getByRole("tab", { name: "PR", exact: true }).click();
   await expect(page.locator(".brief .pr-link")).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
   await page.getByRole("tab", { name: "Brief", exact: true }).click();

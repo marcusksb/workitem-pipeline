@@ -171,7 +171,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
   return (
-    <div className="flex h-screen max-md:h-auto max-md:flex-col">
+    <div className="flex h-screen">
       <Sidebar
         workspaces={workspaces.data ?? []}
         workspace={workspace}
@@ -199,7 +199,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           }}
         />
       </Sidebar>
-      <div className="flex min-w-0 flex-1 flex-col max-md:h-dvh max-md:flex-none">
+      <div className="content flex min-w-0 flex-1 flex-col">
         <TopBar
           workspace={workspaces.data?.find((w) => w.name === workspace)}
           pipelines={pipelines.data}

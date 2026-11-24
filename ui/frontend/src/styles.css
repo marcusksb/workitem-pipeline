@@ -92,6 +92,15 @@
   --stage-development: #db2777;
   --stage-review: #ea580c;
   --stage-done: #16a34a;
+  /* Board icons, picked by a hash of the board name (boardColor); no red, that means blocked. */
+  --board-1: #5e6ad2;
+  --board-2: #64748b;
+  --board-3: #d97706;
+  --board-4: #db2777;
+  --board-5: #0891b2;
+  --board-6: #16a34a;
+  --board-7: #7c3aed;
+  --board-8: #ea580c;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {

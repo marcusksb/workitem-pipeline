@@ -216,7 +216,9 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input
             </NativeSelect>
           </Field>
         )}
-        <Muted>A task that needs changes in the repos of several boards becomes one linked item per board.</Muted>
+        <Muted>
+          Enter creates, Shift+Enter adds a line. A task that needs changes in the repos of several boards becomes one linked item per board.
+        </Muted>
         <Button type="submit" variant="primary">
           Create
         </Button>

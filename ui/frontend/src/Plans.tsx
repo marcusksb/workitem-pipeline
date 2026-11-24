@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogForm, Field } from "./Dialog";
-import { IconChevronDown, IconPlus } from "./icons";
+import { IconChevronDown, IconExternal, IconPlus } from "./icons";
 import { ErrorText, Muted } from "./parts";
-import { navHeading, navItem } from "./Sidebar";
+import { navExtra, navHeading, navItem, navLabel } from "./Sidebar";
 import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
 import { AgentSession, Plan } from "./types";
 
@@ -61,14 +61,14 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       <Button
         key={`${plan.workspace}/${plan.id}`}
         variant="ghost"
-        className={cn(navItem, "plan-card h-auto min-h-[30px] items-start gap-2 py-1.5 whitespace-normal group-data-[collapsed=true]/sidebar:items-center", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
+        className={cn(navItem, "plan-card h-auto min-h-9 items-start gap-2 py-2 whitespace-normal group-data-[collapsed=true]/sidebar:items-center", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
         title={`${plan.topic || plan.id}\n${planLabel(status)}: ${summary}`}
         aria-current={isSelected || undefined}
         onClick={() => onSelect(plan)}
       >
-        <span className={cn("size-2 shrink-0 rounded-full", status === "working" ? "bg-good" : status === "waiting" ? "bg-working" : "bg-muted-foreground")} aria-hidden="true" />
-        <span className="flex-1 truncate text-left">{plan.topic || plan.id}</span>
-        {showWorkspace && <span className="text-[13.5px] text-muted-foreground">{plan.workspace}</span>}
+        <span className={cn("mt-[7px] size-2 shrink-0 rounded-full group-data-[collapsed=true]/sidebar:mt-0", status === "working" ? "bg-good" : status === "waiting" ? "bg-working" : "bg-muted-foreground")} aria-hidden="true" />
+        <span className={cn("line-clamp-2 flex-1 text-left leading-snug", navLabel)}>{plan.topic || plan.id}</span>
+        {showWorkspace && <span className={cn("text-[13.5px] text-muted-foreground", navExtra)}>{plan.workspace}</span>}
       </Button>
     );
   };
@@ -100,7 +100,7 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       {shownSessions.map((session) => (
         <a
           key={`${session.workspace}/${session.name}`}
-          className="truncate px-2 py-1 text-xs text-primary no-underline hover:underline"
+          className="flex items-center truncate px-2 py-1 text-xs text-primary no-underline hover:underline group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0"
           href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
           target="_blank"
           rel="noreferrer"

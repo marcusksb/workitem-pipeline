@@ -22,3 +22,6 @@ export const STAGE_DOT: Record<string, string> = {
   in_review: "bg-stage-review",
   done: "bg-stage-done",
 };
+
+/** Badge variant of an issue status category. */
+export const ISSUE_BADGE = { todo: "outline", progress: "info", done: "good" } as const;

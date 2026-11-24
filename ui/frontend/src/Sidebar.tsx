@@ -9,10 +9,49 @@ import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
 
-/** A full-width row of the sidebar. */
-export const navItem = "h-9 w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5";
+/** A full-width row of the sidebar; only its icon in the rail. */
+export const navItem =
+  "h-9 w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0";
 /** A section's small heading. */
 export const navHeading = "px-2 py-1 text-[13.5px] font-medium text-muted-foreground";
+/** Text that the rail keeps for screen readers only. */
+export const navLabel = "group-data-[collapsed=true]/sidebar:sr-only";
+/** Parts the rail leaves out. */
+export const navExtra = "group-data-[collapsed=true]/sidebar:hidden";
+
+/** Below this width the sidebar is a rail unless it was expanded by hand. */
+const AUTO_COLLAPSE = "(max-width: 1099px)";
+/** Below this width an expanded sidebar floats over the content (`max-md`). */
+const OVERLAY = "(max-width: 767px)";
+
+/** "1" while the sidebar is a rail that expands on hover; kept per browser. */
+const HOVER_KEY = "workload.sidebar.hover";
+
+function loadHover(): boolean {
+  try {
+    return localStorage.getItem(HOVER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveHover(hover: boolean) {
+  try {
+    localStorage.setItem(HOVER_KEY, hover ? "1" : "0");
+  } catch {
+  }
+}
+
+function useMedia(query: string): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const list = matchMedia(query);
+      list.addEventListener("change", onChange);
+      return () => list.removeEventListener("change", onChange);
+    },
+    () => matchMedia(query).matches,
+  );
+}
 
 
 type Props = {
@@ -76,8 +115,25 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
   };
 
   return (
-    <nav className="flex bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] w-[264px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
-      <DropdownMenu>
+    <>
+    {/* Keeps the rail's place under the floating sidebar. */}
+    {floating && <div className="w-[52px] shrink-0" aria-hidden="true" />}
+    {phoneOpen && <div className="fixed inset-0 z-30 bg-black/20" aria-hidden="true" onClick={() => collapse(true)} />}
+    <nav
+      className={cn(
+        "sidebar group/sidebar flex w-[264px] bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
+        collapsed && "w-[52px]",
+        floating && "fixed inset-y-0 left-0 z-40",
+        floating && !collapsed && "shadow-lg",
+      )}
+      data-collapsed={collapsed}
+      aria-label="Workspace"
+      onMouseEnter={hover ? enter : undefined}
+      onMouseLeave={hover ? leave : undefined}
+      onFocus={hover ? enter : undefined}
+      onBlur={hover ? (event) => !event.currentTarget.contains(event.relatedTarget) && leave() : undefined}
+    >
+      <DropdownMenu onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className={cn(navItem, "h-10 gap-2 text-[15.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
             <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[13px] font-semibold text-primary-foreground uppercase" aria-hidden="true">
@@ -144,7 +200,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
                       {blocked[name]}
                     </Badge>
                   ) : null}
-                  <span className="text-[13.5px] text-muted-foreground" title="workitems">
+                  <span className={cn("text-[13.5px] text-muted-foreground", navExtra)} title="workitems">
                     {counts[name] ?? 0}
                   </span>
                 </Button>
