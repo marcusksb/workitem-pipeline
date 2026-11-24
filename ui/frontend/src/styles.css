@@ -86,6 +86,15 @@
   --stage-development: #db2777;
   --stage-review: #ea580c;
   --stage-done: #16a34a;
+  /* Board icons, picked by a hash of the board name (boardColor); no red, that means blocked. */
+  --board-1: #5e6ad2;
+  --board-2: #64748b;
+  --board-3: #d97706;
+  --board-4: #db2777;
+  --board-5: #0891b2;
+  --board-6: #16a34a;
+  --board-7: #7c3aed;
+  --board-8: #ea580c;
   /* Older names the hand-written rules below use. */
   --bg: var(--background);
   --panel: var(--card);
@@ -121,6 +130,14 @@
     --stage-development: #f9a8d4;
     --stage-review: #fdba74;
     --stage-done: #86efac;
+    --board-1: #8f98f0;
+    --board-2: #94a3b8;
+    --board-3: #fbbf24;
+    --board-4: #f472b6;
+    --board-5: #22d3ee;
+    --board-6: #4ade80;
+    --board-7: #a78bfa;
+    --board-8: #fb923c;
   }
 }
 
@@ -138,14 +155,13 @@
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 var(--font-sans); }
 h1, h2 { margin: 0; }
 h1 { font-size: 18px; }
-.brand { display: flex; align-items: center; gap: 8px; }
 /* Not the shadcn components that style themselves: utilities do not set everything these rules do.
    Listed by slot, because a Radix trigger with asChild puts its own data-slot on a plain button. */
 h2:where(:not([data-slot=dialog-title])) { font-size: 14px; text-transform: capitalize; font-weight: 600; color: var(--text); }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])), input, select { font: inherit; color: inherit; }
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])), input, select { font: inherit; color: inherit; }
 input, select { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; }
 button { cursor: pointer; }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])) {
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -158,12 +174,12 @@ button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialo
   transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.05s;
 }
 button svg { flex: none; }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])):hover:not(:disabled) {
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])):hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
   background: color-mix(in srgb, var(--primary) 8%, var(--panel));
 }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])):active:not(:disabled) { transform: translateY(1px); }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])):focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])):active:not(:disabled) { transform: translateY(1px); }
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])):focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
 button.primary { background: var(--primary); border-color: var(--primary); color: var(--panel); font-weight: 600; }
 button.primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--primary) 85%, var(--text));
@@ -182,33 +198,19 @@ button.danger {
 button.danger:hover:not(:disabled) { background: var(--blocked); border-color: var(--blocked); color: var(--panel); }
 button.link, .tabs a { background: none; border: 0; color: var(--primary); padding: 4px; border-radius: 6px; text-decoration: none; transition: background-color 0.15s, color 0.15s; }
 button.link:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 12%, transparent); }
-.workspaces select {
-  appearance: none;
-  background-color: color-mix(in srgb, var(--text) 5%, var(--panel));
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%239a9a9a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 5px 30px 5px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s;
-}
-.workspaces select:hover { border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
-.workspaces select:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
-button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon])):disabled { cursor: not-allowed; opacity: 0.5; }
+button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialog-close-icon], [data-slot=dropdown-menu-trigger])):disabled { cursor: not-allowed; opacity: 0.5; }
 .error { color: var(--blocked); }
 .empty { color: var(--muted-foreground); }
 
 .login { max-width: 360px; margin: 20vh auto; display: grid; gap: 12px; padding: 0 16px; }
 
-.app { height: 100vh; display: flex; flex-direction: column; }
-.top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.workspaces { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* Sidebar, then the content column: top bar and board, which scrolls on its own. */
+.app { height: 100vh; display: flex; }
+.sidebar { background: color-mix(in srgb, var(--muted) 50%, var(--background)); }
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.content > .empty { padding: 0 24px; }
 main { flex: 1; min-height: 0; display: flex; position: relative; }
-.left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; --tabs-h: 36px; }
+.left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; }
 
 .cards { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .board { display: grid; grid-template-columns: repeat(6, minmax(200px, 1fr)); gap: 24px; }
@@ -220,19 +222,8 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .column[data-stage="in_review"] { --tint: var(--stage-review); }
 .column[data-stage="done"] { --tint: var(--stage-done); }
 .column.unknown { --tint: var(--blocked); }
-/* Sticks to the top of .left (whose 16px top padding the -16px cancels); column headers stick below it. */
-.board-tabs { display: flex; gap: 4px; margin: 8px 0; height: var(--tabs-h); border-bottom: 1px solid var(--border, currentColor); position: sticky; top: -16px; z-index: 2; background: var(--bg); }
-.board-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; cursor: pointer; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; }
-.board-tabs button.active { color: inherit; border-bottom-color: currentColor; font-weight: 600; }
-.board-tabs .repo-name { font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
-.board-tabs .add-board { margin-left: 4px; }
 .chip.waits-on { --tint: var(--muted-foreground); border: 1px dashed currentColor; background: none; color: var(--muted-foreground); cursor: pointer; margin-top: 6px; text-align: left; }
 .chip.waits-on:hover { color: inherit; }
-.view-toggle { margin-left: auto; display: flex; gap: 2px; align-self: center; }
-.board-tabs .learnings-button { margin-left: auto; font-size: 12px; }
-.learnings-button + .view-toggle { margin-left: 0; }
-.view-toggle button { border-bottom-width: 0; border-radius: 6px; padding: 2px 10px; font-size: 12px; text-transform: capitalize; }
-.view-toggle button.active { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .board.list { display: flex; flex-direction: column; gap: 16px; }
 .board.list .column { min-height: 0; }
 .board.list .column h2 { position: static; }
@@ -245,7 +236,8 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .board.list .card-foot { margin-top: 0; justify-content: flex-end; flex: none; min-height: 0; }
 .board.list .card .chip, .board.list .card .review-strip { margin-top: 0; }
 .count.blocked { --tint: var(--blocked); }
-.column h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; position: sticky; top: calc(var(--tabs-h) - 16px); z-index: 1; background: var(--bg); padding: 8px 0; }
+/* Sticks to the top of .left, whose 16px top padding the -16px cancels. */
+.column h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; position: sticky; top: -16px; z-index: 1; background: var(--bg); padding: 8px 0; }
 .column h2 .clear { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }
 .column h2 .clear-error { flex-basis: 100%; font-size: 12px; font-weight: 400; white-space: pre-line; margin: 0; }
 .count { border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; background: color-mix(in srgb, var(--tint) 15%, transparent); color: var(--tint); }
@@ -472,8 +464,6 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .dialog-close:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 .dialog-close:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
 .dialog-close svg { display: block; }
-.search-open { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
-.search-open kbd { font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .quick-search-input { width: 100%; }
 .quick-search-input:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
 .quick-search-empty { margin: 0; color: var(--muted-foreground); font-size: 13px; }
@@ -547,25 +537,11 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .learnings-body { max-height: 60vh; overflow: auto; }
 .learnings textarea { width: 100%; box-sizing: border-box; height: 55vh; resize: vertical; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; padding: 8px; }
 
-/* Planning sessions bar (decision 36) */
-.plans { padding: 6px 24px 10px; border-bottom: 1px solid var(--border); }
-.plans.collapsed { padding-bottom: 6px; }
-.plans-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.plans-toggle { font-weight: 600; color: var(--text); }
-.plans-session { font-size: 13px; color: var(--primary); }
-.plans-cards { display: flex; gap: 10px; overflow-x: auto; padding: 8px 2px 2px; align-items: stretch; }
-.plan-card { flex: 0 0 260px; align-items: flex-start; text-align: left; font-size: 14px; font-weight: 400; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; color: var(--text); }
-.plan-card:hover { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); }
-.plan-card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--panel)); }
-.plan-card.waiting { border-color: var(--working); }
-.plan-card.ended { opacity: 0.75; }
-.plan-topic { font-weight: 600; display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
-.plan-summary { font-size: 13px; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.plan-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Planning sessions in the sidebar (decision 36) */
+.plans-session { color: var(--primary); }
 .plan-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted-foreground); }
 .plan-dot.working { background: var(--good); }
 .plan-dot.waiting { background: var(--working); }
-.plans-done { align-self: center; flex: none; }
 .chip.plan-status { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .chip.plan-status.working { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 .chip.plan-status.waiting { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); }
@@ -646,4 +622,10 @@ button.toast-body { cursor: pointer; }
 :is(.children, .dependencies) .child-head .link { text-align: left; font-weight: 600; }
 :is(.children, .dependencies) .reason { margin: 0; color: var(--blocked); white-space: pre-wrap; }
 .tabs .chip { margin-left: 4px; }
+
+/* Narrow: the sidebar is a rail (an overlay when expanded, see Sidebar.tsx), and the item panel covers the content. */
+@media (max-width: 767px) {
+  .left { padding: 16px; }
+  .detail { width: 100%; }
+}
 }

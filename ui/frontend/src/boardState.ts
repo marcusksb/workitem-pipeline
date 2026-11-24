@@ -40,7 +40,7 @@ export const UNKNOWN_STAGE = "unknown stage";
 /** `final`: no stage follows it on any of the workspaces (`next` is empty), so its items can be cleared. */
 export type Column = { name: string; label: string; final: boolean };
 
-const boardOfWorkspace = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
+export const boardOfWorkspace = (pipelines: Pipelines | undefined, workspace: string, board: string) =>
   pipelines?.[workspace]?.find((b) => b.name === board);
 
 /** Column title of the item's stage: its `label` on the item's board, else the name with `_` as a space. */
@@ -98,10 +98,39 @@ export function openDependencies(item: Item, items: Item[], pipelines: Pipelines
   });
 }
 
+/** Number of `--board-*` colors in styles.css. */
+const BOARD_COLORS = 8;
+
+/**
+ * A color per board of one workspace, as CSS variables. Each board takes the slot its name hashes to, or the
+ * next free one when a board earlier by name has it, so boards differ while there are no more than colors.
+ */
+export function boardColors(names: string[]): Record<string, string> {
+  const taken = new Set<number>();
+  const colors: Record<string, string> = {};
+  for (const name of [...names].sort()) {
+    let hash = 0;
+    for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    let slot = hash % BOARD_COLORS;
+    while (taken.has(slot) && taken.size < BOARD_COLORS) slot = (slot + 1) % BOARD_COLORS;
+    taken.add(slot);
+    colors[name] = `var(--board-${slot + 1})`;
+  }
+  return colors;
+}
+
 /** Number of blocked items on each board of `items`. */
 export function blockedByBoard(items: Item[], pipelines: Pipelines | undefined): Record<string, number> {
+  return itemsByBoard(items.filter(isBlocked), pipelines);
+}
+
+/** Number of `items` on each board, counting each on the board it is shown on. */
+export function itemsByBoard(items: Item[], pipelines: Pipelines | undefined): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const item of items) if (isBlocked(item)) counts[shownBoard(item, pipelines)] = (counts[shownBoard(item, pipelines)] ?? 0) + 1;
+  for (const item of items) {
+    const board = shownBoard(item, pipelines);
+    counts[board] = (counts[board] ?? 0) + 1;
+  }
   return counts;
 }
 

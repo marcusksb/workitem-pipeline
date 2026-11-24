@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardChildren, orderFor, blockedByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -137,6 +137,32 @@ describe("blockedByBoard", () => {
       item({ dir: "d", board: "research" }),
     ];
     expect(blockedByBoard(items, pipelines)).toEqual({ default: 2, research: 1 });
+  });
+});
+
+describe("boardColors", () => {
+  it("keeps a board's color whatever its neighbours, and gives boards that collide different ones", () => {
+    // Both names hash to the same slot.
+    const colors = boardColors(["storyrails", "storyfront", "develop"]);
+    expect(colors.storyfront).toMatch(/^var\(--board-[1-8]\)$/);
+    expect(colors.storyrails).not.toBe(colors.storyfront);
+    expect(boardColors(["storyfront"]).storyfront).toBe(colors.storyfront);
+    expect(boardColors(["develop"]).develop).toBe(colors.develop);
+  });
+
+  it("reuses colors once every one is taken", () => {
+    expect(Object.keys(boardColors(Array.from({ length: 10 }, (_, i) => `b${i}`)))).toHaveLength(10);
+  });
+});
+
+describe("itemsByBoard", () => {
+  it("counts every item on the board it is shown on, a child on its own board", () => {
+    const items = [
+      item({ dir: "p" }),
+      item({ dir: "c", parent: "p", board: "research" }),
+      item({ dir: "gone", board: "gone" }),
+    ];
+    expect(itemsByBoard(items, pipelines)).toEqual({ default: 2, research: 1 });
   });
 });
 
