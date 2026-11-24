@@ -311,7 +311,7 @@ test("expand on hover keeps the sidebar a rail that floats open under the pointe
   const hover = page.getByRole("button", { name: "Expand on hover" });
   await hover.click();
   await expect(hover).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: /^(Collapse|Expand) sidebar$/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^(Collapse|Expand) sidebar$/ })).toBeDisabled();
   // Still open while the pointer is on it; a rail once it leaves, and the board does not move.
   await expect(sidebar).toHaveAttribute("data-collapsed", "false");
   const left = await page.locator(".content").boundingBox();

@@ -245,12 +245,11 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </Button>
         </>
       )}
-        {!hover && (
-          <Button variant="ghost" className={cn(navItem, "gap-2 text-muted-foreground")} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} onClick={() => collapse(!collapsed)}>
-            <IconPanelLeft />
-            <span className={navLabel}>{collapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
-          </Button>
-        )}
+        {/* Expand on hover decides the width, so the toggle stays in place but does nothing. */}
+        <Button variant="ghost" className={cn(navItem, "gap-2 text-muted-foreground")} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} disabled={hover} onClick={() => collapse(!collapsed)}>
+          <IconPanelLeft />
+          <span className={navLabel}>{collapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
+        </Button>
         {!overlay && (
           <Button
             variant="ghost"
