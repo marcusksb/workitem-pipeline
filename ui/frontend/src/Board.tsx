@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, itemKey, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Choice, Dialog, DialogForm } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -145,7 +145,8 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         "card flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(16_24_40/0.04)] outline-none hover:border-primary/35 focus-visible:ring-[3px] focus-visible:ring-ring/30",
         "group-data-[view=list]/board:flex-row group-data-[view=list]/board:flex-wrap group-data-[view=list]/board:items-center group-data-[view=list]/board:gap-x-3 group-data-[view=list]/board:gap-y-1 group-data-[view=list]/board:py-2",
         depth > 0 && "w-auto border-l-[3px]",
-        isBlocked(item) ? "blocked border-blocked/40 bg-[color-mix(in_srgb,var(--blocked)_3%,var(--card))]" : item.gate && "border-gate/35",
+        isBlocked(item) ? "blocked border-blocked/75 bg-[color-mix(in_srgb,var(--blocked)_3%,var(--card))]" : isWaiting(item) ? "waiting border-waiting/75" : needsApproval(item) && "border-gate/35",
+        isWorking(item) && "working",
         selected && "selected bg-[color-mix(in_srgb,var(--primary)_12%,var(--card))]",
       )}
       role="button"
