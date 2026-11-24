@@ -23,6 +23,7 @@ import { usePolling } from "./usePolling";
 import { useRun } from "./useRun";
 import {
   IconBoard,
+  IconBot,
   IconCheck,
   IconFileText,
   IconFolder,
@@ -81,8 +82,8 @@ function GateBar({ item, gate, runner: { busy, run }, onDiscuss }: { item: Item;
   );
 }
 
-/** Shown while the item is blocked: why, and a button that clears it. */
-function BlockedBar({ item, runner: { busy, run } }: { item: Item; runner: Runner }) {
+/** Shown while the item is blocked: why, a button that clears it, and one that starts an agent session when none runs. */
+function BlockedBar({ item, runner: { busy, run }, onStartAgent }: { item: Item; runner: Runner; onStartAgent?: () => void }) {
   const reason = item.agent_status.replace(/^blocked:?\s*/, "");
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-blocked/30 bg-blocked/5 px-3 py-2.5 text-[13px]">
@@ -93,6 +94,12 @@ function BlockedBar({ item, runner: { busy, run } }: { item: Item; runner: Runne
         <span className="font-medium text-blocked">Blocked</span>
         {reason && <> · {reason}</>}
       </span>
+      {onStartAgent && (
+        <Button disabled={busy} onClick={onStartAgent}>
+          <IconBot />
+          Start agent
+        </Button>
+      )}
       <Button disabled={busy} onClick={() => run("Clear blocked", () => api.clearBlocked(item))}>
         <IconUnlock />
         Clear
@@ -174,6 +181,11 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
       },
       `Remove workitem "${live.title}"?\nThe agent session is stopped, and the worktree and workitem folder are deleted. This cannot be recovered. Branch and PR stay.`,
     );
+  const startAgent = () =>
+    runner.run("Start session", async () => {
+      await api.startSession(live);
+      if (mounted.current) onTab("terminal");
+    });
   const discuss = () =>
     runner.run("Discuss brief", async () => {
       await api.discussBrief(live);
@@ -206,7 +218,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               }}
             />
           </Properties>
-          {isBlocked(live) && <BlockedBar item={live} runner={runner} />}
+          {isBlocked(live) && <BlockedBar item={live} runner={runner} onStartAgent={live.session ? undefined : startAgent} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} onDiscuss={live.session ? undefined : discuss} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
