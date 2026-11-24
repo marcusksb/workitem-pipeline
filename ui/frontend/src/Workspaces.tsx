@@ -92,13 +92,13 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
 export function WatchersDialog({ workspace, onClose }: { workspace: Workspace; onClose: () => void }) {
   return (
     <Dialog title={`Watchers of ${workspace.name}`} onClose={onClose}>
-      <div className="grid gap-3 text-[13px]">
+      <div className="grid gap-3 text-[15px]">
         {workspace.error && <ErrorText>{workspace.error}. The last valid version is in use.</ErrorText>}
         {workspace.watch?.length ? (
           <ul className="grid list-disc gap-1 pl-5">
             {workspace.watch.map((watch, index) => (
               <li key={index}>
-                <code className="font-mono text-[12px]">{[watch.command, ...watch.args].join(" ")}</code> every {watch.every}
+                <code className="font-mono text-[14px]">{[watch.command, ...watch.args].join(" ")}</code> every {watch.every}
                 {watch.implicit && <span className="text-muted-foreground"> (implicit: a board reads PRs)</span>}
               </li>
             ))}
@@ -106,7 +106,7 @@ export function WatchersDialog({ workspace, onClose }: { workspace: Workspace; o
         ) : (
           <Muted>None.</Muted>
         )}
-        <Muted className="[&_code]:font-mono [&_code]:text-[12px]">
+        <Muted className="[&_code]:font-mono [&_code]:text-[14px]">
           Edit {workspace.dir}/workspace.toml to change them, e.g. <code>[[watch]]</code> with <code>every = "5m"</code> and{" "}
           <code>command = "issue-status"</code>. They get every item of the workspace on stdin and run in the workspace folder.
         </Muted>

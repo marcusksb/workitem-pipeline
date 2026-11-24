@@ -72,7 +72,7 @@ export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
         <div className="grid gap-2.5">
           <div className="flex items-start gap-2">
-            <h2 className="min-w-0 flex-1 text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+            <h2 className="min-w-0 flex-1 text-[22px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
               <span className="mr-2 inline-flex align-[-0.1em] text-muted-foreground [&>svg]:size-[18px]">
                 <IconFileText />
               </span>

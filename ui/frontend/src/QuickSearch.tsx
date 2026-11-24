@@ -27,7 +27,7 @@ export function QuickSearch({ items, showWorkspace, onOpen, onClose }: Props) {
               const key = ticket(item.issue)?.key;
               return (
                 <CommandItem key={`${item.workspace}/${item.dir}`} value={`${item.workspace}/${item.dir}`} onSelect={() => onOpen(item)}>
-                  <span className="text-[14px]">{item.title}</span>
+                  <span className="text-[16px]">{item.title}</span>
                   <span className="flex flex-wrap gap-1">
                     {showWorkspace && <Badge>{item.workspace}</Badge>}
                     <Badge>{stageLabel(item.stage)}</Badge>

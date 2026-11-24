@@ -63,7 +63,7 @@ type Runner = ReturnType<typeof useRun>;
 /** Shown while the item waits at a gate: discuss the brief, or approve it. */
 function GateBar({ item, gate, runner: { busy, run }, onDiscuss }: { item: Item; gate: Gate; runner: Runner; onDiscuss?: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-[13px]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-[15px]">
       <span className="text-primary">
         <IconInfo />
       </span>
@@ -86,7 +86,7 @@ function GateBar({ item, gate, runner: { busy, run }, onDiscuss }: { item: Item;
 function BlockedBar({ item, runner: { busy, run }, onStartAgent }: { item: Item; runner: Runner; onStartAgent?: () => void }) {
   const reason = item.agent_status.replace(/^blocked:?\s*/, "");
   return (
-    <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-blocked/30 bg-blocked/5 px-3 py-2.5 text-[13px]">
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-blocked/30 bg-blocked/5 px-3 py-2.5 text-[15px]">
       <span className="flex h-7 items-center text-blocked">
         <IconInfo />
       </span>
@@ -197,7 +197,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
         <div className="grid gap-2.5">
           <div className="flex items-start gap-2">
-            <h2 className="min-w-0 flex-1 text-[20px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+            <h2 className="min-w-0 flex-1 text-[22px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
               {kindIcon && (
                 <span className="mr-2" aria-hidden="true">
                   {kindIcon}

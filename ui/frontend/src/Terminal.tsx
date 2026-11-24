@@ -18,7 +18,7 @@ export function Terminal({ path }: { path: string }) {
   const [rows, setRows] = useState(24);
 
   useEffect(() => {
-    const term = new XTerm({ cursorBlink: true, fontFamily: "Menlo, monospace", fontSize: 13, scrollback: 0 });
+    const term = new XTerm({ cursorBlink: true, fontFamily: "Menlo, monospace", fontSize: 15, scrollback: 0 });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());

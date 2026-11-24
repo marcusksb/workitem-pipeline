@@ -13,7 +13,7 @@ function CommandInput({ className, ...props }: React.ComponentProps<typeof Comma
       <IconSearch />
       <CommandPrimitive.Input
         data-slot="command-input"
-        className={cn("h-full w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground", className)}
+        className={cn("h-full w-full bg-transparent text-[16px] text-foreground outline-none placeholder:text-muted-foreground", className)}
         {...props}
       />
     </div>
@@ -25,7 +25,7 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
 }
 
 function CommandEmpty(props: React.ComponentProps<typeof CommandPrimitive.Empty>) {
-  return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-[13px] text-muted-foreground" {...props} />;
+  return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-[15px] text-muted-foreground" {...props} />;
 }
 
 function CommandItem({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Item>) {
@@ -33,7 +33,7 @@ function CommandItem({ className, ...props }: React.ComponentProps<typeof Comman
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex cursor-pointer select-none flex-col items-start gap-1 rounded-md px-2 py-1.5 text-[13px] outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:bg-primary/10",
+        "relative flex cursor-pointer select-none flex-col items-start gap-1 rounded-md px-2 py-1.5 text-[15px] outline-none data-[disabled=true]:pointer-events-none data-[selected=true]:bg-primary/10",
         className,
       )}
       {...props}

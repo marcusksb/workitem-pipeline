@@ -158,11 +158,9 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         }
       }}
     >
-      <div className="flex min-w-0 items-center gap-2 group-data-[view=list]/board:contents">
-        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground group-data-[view=list]/board:order-0 group-data-[view=list]/board:flex-[0_1_200px]" title={item.dir}>
-          {item.dir}
-        </span>
-        <PrStatus item={item} className="ml-auto flex-none group-data-[view=list]/board:order-3 group-data-[view=list]/board:ml-0" />
+      <div className="text-[15.5px] leading-[1.4] font-medium [overflow-wrap:anywhere] group-data-[view=list]/board:order-1 group-data-[view=list]/board:min-w-0 group-data-[view=list]/board:flex-[1_1_240px]">
+        {icon && <span className="mr-1.5 text-sm leading-none" title={item.kind}>{icon}</span>}
+        {item.title}
       </div>
       <div className="text-[13.5px] leading-[1.4] font-medium [overflow-wrap:anywhere] group-data-[view=list]/board:order-1 group-data-[view=list]/board:min-w-0 group-data-[view=list]/board:flex-[1_1_240px]">{item.title}</div>
       <div className="flex min-w-0 flex-wrap gap-1 group-data-[view=list]/board:order-2">
@@ -205,7 +203,7 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
       className="column flex min-h-[120px] flex-col gap-1.5 rounded-[10px] bg-[color-mix(in_srgb,var(--foreground)_4%,var(--background))] p-1.5 group-data-[view=list]/board:min-h-0 group-data-[view=list]/board:flex-row group-data-[view=list]/board:gap-2"
       data-stage={name}
     >
-      <h2 className="sticky -top-4 z-[1] flex min-h-8 items-center gap-2 bg-inherit pl-1.5 text-[13px] font-semibold capitalize group-data-[view=list]/board:static group-data-[view=list]/board:min-h-0 group-data-[view=list]/board:w-7 group-data-[view=list]/board:flex-none group-data-[view=list]/board:flex-col group-data-[view=list]/board:gap-1.5 group-data-[view=list]/board:px-0 group-data-[view=list]/board:py-1.5">
+      <h2 className="sticky -top-4 z-[1] flex min-h-8 items-center gap-2 bg-inherit pl-1.5 text-[15px] font-semibold capitalize">
         <span className={cn("size-2 flex-none rounded-full", name === UNKNOWN_STAGE ? "bg-blocked" : (STAGE_DOT[name] ?? "bg-muted-foreground"))} aria-hidden="true" />
         <span className="min-w-0 truncate group-data-[view=list]/board:relative group-data-[view=list]/board:w-full group-data-[view=list]/board:flex-[1_0_100px]" title={label}>
           <span className="group-data-[view=list]/board:absolute group-data-[view=list]/board:inset-0 group-data-[view=list]/board:rotate-180 group-data-[view=list]/board:truncate group-data-[view=list]/board:text-end group-data-[view=list]/board:leading-7 group-data-[view=list]/board:[writing-mode:vertical-rl]">{label}</span>

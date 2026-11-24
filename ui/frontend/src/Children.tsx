@@ -25,7 +25,7 @@ export function Children({ items, onSelect, onDone }: Props) {
         {rows.map((child) => (
           <li key={child.dir} className="flex flex-col gap-1 border-b border-border py-2.5">
             <div className="child-head flex items-center justify-between gap-2">
-              <button className="link cursor-pointer text-left text-[13px] font-semibold text-primary hover:underline" onClick={() => onSelect(child)}>
+              <button className="link cursor-pointer text-left text-[15px] font-semibold text-primary hover:underline" onClick={() => onSelect(child)}>
                 {child.title}
               </button>
               {child.session ? (
@@ -55,7 +55,7 @@ export function Children({ items, onSelect, onDone }: Props) {
               {isWaiting(child) && <WaitingChip item={child} />}
               {child.agent_status === "working" && <Badge variant="wait">working</Badge>}
             </div>
-            {isBlocked(child) && <p className="text-[13px] whitespace-pre-wrap text-destructive">{child.agent_status.replace(/^blocked:\s*/, "")}</p>}
+            {isBlocked(child) && <p className="text-[15px] whitespace-pre-wrap text-destructive">{child.agent_status.replace(/^blocked:\s*/, "")}</p>}
           </li>
         ))}
       </ul>

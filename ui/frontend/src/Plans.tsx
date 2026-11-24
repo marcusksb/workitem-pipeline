@@ -68,7 +68,7 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       >
         <span className={cn("size-2 shrink-0 rounded-full", status === "working" ? "bg-good" : status === "waiting" ? "bg-working" : "bg-muted-foreground")} aria-hidden="true" />
         <span className="flex-1 truncate text-left">{plan.topic || plan.id}</span>
-        {showWorkspace && <span className="text-[11.5px] text-muted-foreground">{plan.workspace}</span>}
+        {showWorkspace && <span className="text-[13.5px] text-muted-foreground">{plan.workspace}</span>}
       </Button>
     );
   };

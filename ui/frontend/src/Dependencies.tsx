@@ -40,11 +40,11 @@ export function Dependencies({ item, items, pipelines, onSelect, onSaved }: Prop
             <li key={dir} className="flex flex-col gap-1 border-b border-border py-2.5">
               <div className="child-head flex items-center justify-between gap-2">
                 {other ? (
-                  <button className="link cursor-pointer text-left text-[13px] font-semibold text-primary hover:underline" onClick={() => onSelect(other)}>
+                  <button className="link cursor-pointer text-left text-[15px] font-semibold text-primary hover:underline" onClick={() => onSelect(other)}>
                     {other.title}
                   </button>
                 ) : (
-                  <span className="font-mono text-[12px]">{dir}</span>
+                  <span className="font-mono text-[14px]">{dir}</span>
                 )}
                 <Button variant="ghost" size="icon" disabled={busy} aria-label={`Remove ${dir}`} onClick={() => void save(item.depends_on.filter((d) => d !== dir))}>
                   <IconX />
@@ -60,10 +60,10 @@ export function Dependencies({ item, items, pipelines, onSelect, onSaved }: Prop
                     {isWaiting(other) && <WaitingChip item={other} />}
                   </>
                 ) : (
-                  <span className="text-[13px] text-muted-foreground italic">gone, counts as merged</span>
+                  <span className="text-[15px] text-muted-foreground italic">gone, counts as merged</span>
                 )}
               </div>
-              {other && isBlocked(other) && <p className="text-[13px] whitespace-pre-wrap text-destructive">{other.agent_status.replace(/^blocked:\s*/, "")}</p>}
+              {other && isBlocked(other) && <p className="text-[15px] whitespace-pre-wrap text-destructive">{other.agent_status.replace(/^blocked:\s*/, "")}</p>}
             </li>
           );
         })}

@@ -15,9 +15,9 @@ function File({ source }: { source: Source }) {
   return (
     <div className="grid gap-1.5">
       <p className="flex flex-wrap items-center gap-2">
-        <strong className="text-[13px]">{source.name}</strong>
+        <strong className="text-[15px]">{source.name}</strong>
         {source.path && (
-          <code className="font-mono text-[12px] [overflow-wrap:anywhere] text-muted-foreground" title={source.path}>
+          <code className="font-mono text-[14px] [overflow-wrap:anywhere] text-muted-foreground" title={source.path}>
             {source.path}
           </code>
         )}
@@ -26,7 +26,7 @@ function File({ source }: { source: Source }) {
       {source.error ? (
         <ErrorText>{source.error}</ErrorText>
       ) : (
-        <pre className="max-h-[55vh] overflow-auto rounded-md border border-border bg-muted p-2.5 font-mono text-[12px] whitespace-pre">{source.content}</pre>
+        <pre className="max-h-[55vh] overflow-auto rounded-md border border-border bg-muted p-2.5 font-mono text-[14px] whitespace-pre">{source.content}</pre>
       )}
     </div>
   );
@@ -56,8 +56,8 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
         </NativeSelect>
       )}
       {sources && (
-        <p className="text-[13px]">
-          Model: {sources.model ? <code className="font-mono text-[12px]">{sources.model}</code> : <span className="text-muted-foreground">agent default</span>}
+        <p className="text-[15px]">
+          Model: {sources.model ? <code className="font-mono text-[14px]">{sources.model}</code> : <span className="text-muted-foreground">agent default</span>}
         </p>
       )}
       <Tabs value={shown} onValueChange={(value) => setTab(value as "script" | "prose")}>

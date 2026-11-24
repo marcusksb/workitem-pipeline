@@ -10,7 +10,7 @@ import { ErrorText, Muted, prose, scroll } from "./parts";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-const linkClass = "inline-flex cursor-pointer items-center gap-1 text-[13px] text-primary no-underline hover:underline";
+const linkClass = "inline-flex cursor-pointer items-center gap-1 text-[15px] text-primary no-underline hover:underline";
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|avif|ico)$/i;
 const VIDEO = /\.(mp4|webm|mov|m4v|ogv)$/i;
@@ -69,7 +69,7 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
   return (
     <div className="file-preview grid gap-2">
       <p className="flex flex-wrap items-center gap-2">
-        <code className="font-mono text-[12px] [overflow-wrap:anywhere] text-muted-foreground">{file.path}</code>
+        <code className="font-mono text-[14px] [overflow-wrap:anywhere] text-muted-foreground">{file.path}</code>
         <Badge>{sizeLabel(file.size)}</Badge>
         <span className="ml-auto inline-flex gap-3">
           <button className={linkClass} onClick={() => void reveal()}>
@@ -100,7 +100,7 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
           <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{text.text}</Markdown>
         </div>
       ) : (
-        <pre className="overflow-auto rounded-md border border-border bg-muted px-3 py-2.5 font-mono text-[12px] whitespace-pre">{text.text}</pre>
+        <pre className="overflow-auto rounded-md border border-border bg-muted px-3 py-2.5 font-mono text-[14px] whitespace-pre">{text.text}</pre>
       )}
     </div>
   );
@@ -125,7 +125,7 @@ export function Files({ item, onUnauthorized }: { item: Item; onUnauthorized: ()
             <li key={f.path} className="border-border not-first:border-t">
               <button
                 className={cn(
-                  "flex w-full cursor-pointer justify-between gap-3 px-2.5 py-1 text-left font-mono text-[12px] hover:bg-primary/8",
+                  "flex w-full cursor-pointer justify-between gap-3 px-2.5 py-1 text-left font-mono text-[14px] hover:bg-primary/8",
                   f.path === picked && "bg-primary/16 hover:bg-primary/16",
                 )}
                 onClick={() => setPicked(f.path)}

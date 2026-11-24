@@ -33,12 +33,17 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
       <div className="flex min-w-0 flex-[1_1_160px] items-baseline gap-2">
         <h1 className="truncate text-sm font-semibold">{workspace && board ? boardLabel(pipelines, workspace.name, board) : (workspace?.name ?? "Workload")}</h1>
         {repo && (
-          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={repo}>
+          <span className="truncate font-mono text-[13.5px] text-muted-foreground" title={repo}>
             {repoName(repo)}
           </span>
         )}
       </div>
-      {error && <span className="text-[13px] text-destructive">{error}</span>}
+      {error && <span className="text-[15px] text-destructive">{error}</span>}
+      <Button variant="secondary" className="h-[30px] gap-2 px-2 font-normal text-muted-foreground" onClick={onSearch} title="Find a workitem by title, issue key or PR number">
+        <IconSearch />
+        Search
+        <kbd className="rounded border border-border px-1 font-sans text-[13px]">{isMac ? "⌘" : "Ctrl+"}K</kbd>
+      </Button>
       {board && (
         <div role="group" aria-label="View" className="flex rounded-[7px] bg-muted p-0.5">
           {(["board", "list"] as const).map((v) => (

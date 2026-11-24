@@ -27,7 +27,7 @@ export function DialogForm({ className, ...props }: ComponentProps<"form">) {
 /** A labelled control. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-[13px] font-medium text-muted-foreground">
+    <label className="grid gap-1.5 text-[15px] font-medium text-muted-foreground">
       {label}
       {children}
     </label>
@@ -36,5 +36,5 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 /** A radio button or checkbox with its text to the right. */
 export function Choice({ children }: { children: ReactNode }) {
-  return <label className="flex cursor-pointer items-center gap-2 text-[13px] [&>input]:accent-primary">{children}</label>;
+  return <label className="flex cursor-pointer items-center gap-2 text-[15px] [&>input]:accent-primary">{children}</label>;
 }

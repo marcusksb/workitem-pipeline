@@ -78,10 +78,10 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
         )}
         {error && <ErrorText>{error}</ErrorText>}
       </ActionBar>
-      <dl className="grid text-[13px]">
+      <dl className="grid text-[15px]">
         {fields.map(([name, value], i) => (
           <div key={`${name}-${i}`} className="grid grid-cols-[minmax(110px,160px)_1fr] items-baseline gap-3 py-1.5">
-            <dt className="font-mono text-[12px] text-muted-foreground">{name}</dt>
+            <dt className="font-mono text-[14px] text-muted-foreground">{name}</dt>
             <dd className="min-w-0 [overflow-wrap:anywhere]">
               {draft && !READ_ONLY.includes(name) ? (
                 <Input

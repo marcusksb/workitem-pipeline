@@ -12,10 +12,10 @@ function Note({ note }: { note: PrNote }) {
   const verdict = note.state?.replace("_", " ").toLowerCase();
   return (
     <article className="my-2 rounded-md border border-border px-3 py-2 [&>:last-child]:mb-0">
-      <div className="flex flex-wrap gap-2 text-[12px] text-muted-foreground">
+      <div className="flex flex-wrap gap-2 text-[14px] text-muted-foreground">
         <strong>{note.author}</strong>
         <span>{verdict && note.state !== "COMMENTED" ? verdict : LABELS[note.kind]}</span>
-        {note.path && <code className="text-[12px]">{note.path}</code>}
+        {note.path && <code className="text-[14px]">{note.path}</code>}
         <time dateTime={note.at}>{note.at && new Date(note.at).toLocaleString()}</time>
       </div>
       <Markdown remarkPlugins={[remarkGfm]} components={markdownLinks}>{note.body}</Markdown>

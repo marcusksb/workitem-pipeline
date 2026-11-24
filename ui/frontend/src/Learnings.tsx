@@ -56,7 +56,7 @@ export function Learnings({ workspace, board, label, onClose }: Props) {
       <div className="grid gap-2">
         {data && (
           <p className="source-path">
-            <code className="font-mono text-[12px] [overflow-wrap:anywhere] text-muted-foreground" title={data.path}>
+            <code className="font-mono text-[14px] [overflow-wrap:anywhere] text-muted-foreground" title={data.path}>
               {data.path}
             </code>
           </p>

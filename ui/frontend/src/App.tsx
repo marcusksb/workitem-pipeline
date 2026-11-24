@@ -210,9 +210,9 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           error={error}
           onCreated={() => void sessions.reload()}
         />
-        {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[13px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+        {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
         {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
-          <p className="px-6 pt-4 text-[13px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
+          <p className="px-6 pt-4 text-[15px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
         <main className="relative flex min-h-0 flex-1">
           <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
@@ -272,7 +272,7 @@ export function TerminalPage({ path }: { path: string }) {
   if (session.state === "out") return <Login onSubmit={session.login} error={session.error} />;
   return (
     <div className="flex h-screen flex-col bg-black">
-      <div className="px-2 py-1 font-mono text-[12px] text-[#ccc]">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
+      <div className="px-2 py-1 font-mono text-[14px] text-[#ccc]">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
       <Terminal path={path} />
     </div>
   );
