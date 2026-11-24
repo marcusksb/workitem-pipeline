@@ -281,6 +281,56 @@ test("at phone width every shell action stays reachable without horizontal scrol
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
+test("the sidebar collapses to a rail on narrow windows and the toggle overrides it", async ({ page }) => {
+  await page.goto(base);
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await page.setViewportSize({ width: 1000, height: 740 });
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  // The rail keeps every entry, by name, with the board counts left out.
+  await expect(page.getByRole("tab", { name: /research/ })).toBeVisible();
+  await expect(page.getByText("15", { exact: true })).toBeHidden();
+
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+
+  // At phone width the expanded sidebar floats; picking a board closes it.
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await page.getByRole("tab", { name: /research/ }).click();
+  await expect(page).toHaveURL(/board=research/);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+});
+
+test("expand on hover keeps the sidebar a rail that floats open under the pointer", async ({ page }) => {
+  await page.goto(base);
+  const sidebar = page.locator(".sidebar");
+  const hover = page.getByRole("button", { name: "Expand on hover" });
+  await hover.click();
+  await expect(hover).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /^(Collapse|Expand) sidebar$/ })).toHaveCount(0);
+  // Still open while the pointer is on it; a rail once it leaves, and the board does not move.
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  const left = await page.locator(".content").boundingBox();
+  await page.mouse.move(800, 400);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  expect((await page.locator(".content").boundingBox())?.x).toBe(left?.x);
+  await sidebar.hover();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+
+  // The choice survives a reload; turning it off keeps the sidebar open.
+  await page.reload();
+  await page.mouse.move(800, 400);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  await hover.click();
+  await expect(hover).toHaveAttribute("aria-pressed", "false");
+  await page.mouse.move(800, 400);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+});
+
 test("the selected workspace stays in the URL and survives a reload", async ({ page }) => {
   await page.goto(base);
   const switcher = page.getByRole("button", { name: /^Workspace/ });

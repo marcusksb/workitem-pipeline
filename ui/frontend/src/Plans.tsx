@@ -3,8 +3,8 @@ import { agentTerminal, api } from "./api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Dialog } from "./Dialog";
-import { IconChevronDown, IconPlus } from "./icons";
-import { navHeading, navItem } from "./Sidebar";
+import { IconChevronDown, IconExternal, IconPlus } from "./icons";
+import { navExtra, navHeading, navItem, navLabel } from "./Sidebar";
 import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
 import { AgentSession, Plan } from "./types";
 
@@ -60,21 +60,21 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
         key={`${plan.workspace}/${plan.id}`}
         variant="ghost"
         className={cn(navItem, "plan-card gap-2", status, isSelected && "selected bg-foreground/[0.07] font-medium", status === "ended" && "text-muted-foreground")}
-        title={`${planLabel(status)}: ${summary}`}
+        title={`${plan.topic || plan.id}\n${planLabel(status)}: ${summary}`}
         aria-current={isSelected || undefined}
         onClick={() => onSelect(plan)}
       >
         <span className={`plan-dot ${status}`} aria-hidden="true" />
-        <span className="flex-1 truncate text-left">{plan.topic || plan.id}</span>
-        {showWorkspace && <span className="text-[11.5px] text-muted-foreground">{plan.workspace}</span>}
+        <span className={cn("flex-1 truncate text-left", navLabel)}>{plan.topic || plan.id}</span>
+        {showWorkspace && <span className={cn("text-[11.5px] text-muted-foreground", navExtra)}>{plan.workspace}</span>}
       </Button>
     );
   };
 
   return (
-    <section className="plans flex flex-col gap-px" aria-label="Planning sessions">
-      <div className="flex items-center">
-        <Button variant="ghost" size="sm" className={cn(navHeading, "plans-toggle h-auto flex-1 justify-start hover:bg-foreground/5")} onClick={toggle} aria-expanded={!collapsed}>
+    <section className="plans flex flex-col gap-px group-data-[collapsed=true]/sidebar:border-t group-data-[collapsed=true]/sidebar:border-border group-data-[collapsed=true]/sidebar:pt-3.5" aria-label="Planning sessions">
+      <div className="flex items-center group-data-[collapsed=true]/sidebar:justify-center">
+        <Button variant="ghost" size="sm" className={cn(navHeading, navExtra, "plans-toggle h-auto flex-1 justify-start hover:bg-foreground/5")} onClick={toggle} aria-expanded={!collapsed}>
           Plans · {planCounts(open)}
           <span className={collapsed ? "-rotate-90" : undefined}>
             <IconChevronDown />
@@ -88,7 +88,7 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
         <>
           {open.map(card)}
           {done.length > 0 && (
-            <Button variant="ghost" size="sm" className={cn(navItem, "h-6 text-xs text-muted-foreground")} onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>
+            <Button variant="ghost" size="sm" className={cn(navItem, navExtra, "h-6 text-xs text-muted-foreground")} onClick={() => setShowDone(!showDone)} aria-expanded={showDone}>
               {showDone ? "Hide" : "Show"} {done.length} done
             </Button>
           )}
@@ -98,13 +98,16 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       {shownSessions.map((session) => (
         <a
           key={`${session.workspace}/${session.name}`}
-          className="plans-session truncate px-2 py-1 text-xs"
+          className="plans-session flex items-center truncate px-2 py-1 text-xs group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0"
           href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
           target="_blank"
           rel="noreferrer"
           title="A workitem is being created; a blocked one can only be answered here"
         >
-          {session.workspace} · {session.name} ↗
+          <span className={navLabel}>{session.workspace} · {session.name} ↗</span>
+          <span className="hidden group-data-[collapsed=true]/sidebar:inline-flex" aria-hidden="true">
+            <IconExternal />
+          </span>
         </a>
       ))}
       {creating && (

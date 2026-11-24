@@ -167,6 +167,15 @@ export const IconBoard = make(
     <path d="M9 3v18M15 3v12" />
   </>,
 );
+/** A window with a left panel: show or hide the sidebar. */
+export const IconPanelLeft = make(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M9 3v18" />
+  </>,
+);
+/** A mouse pointer: the sidebar opens on hover. */
+export const IconPointer = make(<path d="M4 4l7 17 2.5-7.5L21 11z" />);
 export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
 export const IconChevronDown = make(<path d="m6 9 6 6 6-6" />);
 export const IconBook = make(<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />);

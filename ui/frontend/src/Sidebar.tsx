@@ -1,18 +1,57 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useRef, useState, useSyncExternalStore } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { blockedByBoard, boardLabel, boardNames, itemsByBoard } from "./boardState";
-import { IconBoard, IconBook, IconChevronDown, IconEye, IconPlus, IconSliders } from "./icons";
+import { blockedByBoard, boardColors, boardLabel, boardNames, itemsByBoard } from "./boardState";
+import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
 
-/** A full-width row of the sidebar. */
-export const navItem = "h-[30px] w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5";
+/** A full-width row of the sidebar; only its icon in the rail. */
+export const navItem =
+  "h-[30px] w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0";
 /** A section's small heading. */
 export const navHeading = "px-2 py-1 text-[11.5px] font-medium text-muted-foreground";
+/** Text that the rail keeps for screen readers only. */
+export const navLabel = "group-data-[collapsed=true]/sidebar:sr-only";
+/** Parts the rail leaves out. */
+export const navExtra = "group-data-[collapsed=true]/sidebar:hidden";
+
+/** Below this width the sidebar is a rail unless it was expanded by hand. */
+const AUTO_COLLAPSE = "(max-width: 1099px)";
+/** Below this width an expanded sidebar floats over the content (`max-md`). */
+const OVERLAY = "(max-width: 767px)";
+
+/** "1" while the sidebar is a rail that expands on hover; kept per browser. */
+const HOVER_KEY = "workload.sidebar.hover";
+
+function loadHover(): boolean {
+  try {
+    return localStorage.getItem(HOVER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveHover(hover: boolean) {
+  try {
+    localStorage.setItem(HOVER_KEY, hover ? "1" : "0");
+  } catch {
+  }
+}
+
+function useMedia(query: string): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const list = matchMedia(query);
+      list.addEventListener("change", onChange);
+      return () => list.removeEventListener("change", onChange);
+    },
+    () => matchMedia(query).matches,
+  );
+}
 
 
 type Props = {
@@ -42,17 +81,68 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
   const names = boardNames(pipelines, current ? [current.name] : []);
   const counts = itemsByBoard(items, pipelines);
   const blocked = blockedByBoard(items, pipelines);
+  const colors = boardColors(names);
+  // The width decides until the toggle is used; the choice holds until the width crosses AUTO_COLLAPSE again.
+  const narrow = useMedia(AUTO_COLLAPSE);
+  const overlay = useMedia(OVERLAY);
+  const [choice, setChoice] = useState<{ narrow: boolean; collapsed: boolean }>();
+  const pinnedCollapsed = choice?.narrow === narrow ? choice.collapsed : narrow;
+  const collapse = (value: boolean) => setChoice({ narrow, collapsed: value });
+  // Expand on hover: a rail that floats open while the pointer or focus is in it, or a menu or dialog
+  // of it is open. Phones have no hover, so it does not apply there.
+  const [hoverMode, setHoverMode] = useState(loadHover);
+  const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const leaveTimer = useRef<number>(undefined);
+  const hover = hoverMode && !overlay;
+  const collapsed = hover ? !(hovered || menuOpen || open) : pinnedCollapsed;
+  const phoneOpen = overlay && !pinnedCollapsed;
+  const floating = hover || phoneOpen;
+  const enter = () => {
+    window.clearTimeout(leaveTimer.current);
+    setHovered(true);
+  };
+  const leave = () => {
+    window.clearTimeout(leaveTimer.current);
+    leaveTimer.current = window.setTimeout(() => setHovered(false), 250);
+  };
+  const toggleHover = () => {
+    setHoverMode(!hoverMode);
+    saveHover(!hoverMode);
+    // The button is under the pointer (or focused) now, so the sidebar stays open either way.
+    if (hoverMode) collapse(false);
+    else setHovered(true);
+  };
 
   return (
-    <nav className="sidebar flex w-[232px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
-      <DropdownMenu>
+    <>
+    {/* Keeps the rail's place under the floating sidebar. */}
+    {floating && <div className="w-[52px] shrink-0" aria-hidden="true" />}
+    {phoneOpen && <div className="fixed inset-0 z-30 bg-black/20" aria-hidden="true" onClick={() => collapse(true)} />}
+    <nav
+      className={cn(
+        "sidebar group/sidebar flex w-[232px] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
+        collapsed && "w-[52px]",
+        floating && "fixed inset-y-0 left-0 z-40",
+        floating && !collapsed && "shadow-lg",
+      )}
+      data-collapsed={collapsed}
+      aria-label="Workspace"
+      onMouseEnter={hover ? enter : undefined}
+      onMouseLeave={hover ? leave : undefined}
+      onFocus={hover ? enter : undefined}
+      onBlur={hover ? (event) => !event.currentTarget.contains(event.relatedTarget) && leave() : undefined}
+    >
+      <DropdownMenu onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className={cn(navItem, "h-8 gap-2 text-[13.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
             <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[11px] font-semibold text-primary-foreground uppercase" aria-hidden="true">
               {current?.name[0] ?? "+"}
             </span>
-            <span className="flex-1 truncate text-left">{current?.name ?? "No workspace"}</span>
-            <IconChevronDown />
+            <span className={cn("flex-1 truncate text-left", navLabel)}>{current?.name ?? "No workspace"}</span>
+            <span className={navExtra}>
+              <IconChevronDown />
+            </span>
           </Button>
         </DropdownMenuTrigger>
         {/* A dialog opened from the menu keeps its focus. */}
@@ -78,13 +168,15 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
 
       {current && (
         <div className="flex flex-col gap-px">
-          <div className={navHeading} id="boards-heading">
+          <div className={cn(navHeading, navLabel)} id="boards-heading">
             Boards
           </div>
           <div role="tablist" aria-orientation="vertical" aria-labelledby="boards-heading" className="flex flex-col gap-px">
             {names.map((name) => {
               const repo = pipelines?.[current.name]?.find((b) => b.name === name)?.pipeline?.repo;
               const active = name === board;
+              const label = boardLabel(pipelines, current.name, name);
+              const color = colors[name];
               return (
                 <Button
                   key={name}
@@ -92,17 +184,23 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
                   role="tab"
                   aria-selected={active}
                   className={cn(navItem, "gap-2", active && "bg-foreground/[0.07] font-medium")}
-                  title={repo}
-                  onClick={() => onBoard(name)}
+                  title={[label, repo, blocked[name] && `${blocked[name]} blocked`].filter(Boolean).join("\n")}
+                  onClick={() => {
+                    onBoard(name);
+                    if (overlay) collapse(true);
+                  }}
                 >
-                  <IconBoard />
-                  <span className="flex-1 truncate text-left">{boardLabel(pipelines, current.name, name)}</span>
+                  <span className="relative flex size-5 shrink-0 items-center justify-center rounded-[5px]" style={{ color, backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` }}>
+                    <IconBoard />
+                    {blocked[name] ? <span className="absolute -top-0.5 -right-0.5 hidden size-2 rounded-full bg-destructive ring-2 ring-background group-data-[collapsed=true]/sidebar:block" /> : null}
+                  </span>
+                  <span className={cn("flex-1 truncate text-left", navLabel)}>{label}</span>
                   {blocked[name] ? (
-                    <Badge variant="danger" title="blocked workitems">
+                    <Badge variant="danger" className={navExtra} title="blocked workitems">
                       {blocked[name]}
                     </Badge>
                   ) : null}
-                  <span className="text-[11.5px] text-muted-foreground" title="workitems">
+                  <span className={cn("text-[11.5px] text-muted-foreground", navExtra)} title="workitems">
                     {counts[name] ?? 0}
                   </span>
                 </Button>
@@ -111,19 +209,20 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </div>
           <Button variant="ghost" className={cn(navItem, "gap-2 text-muted-foreground")} title="Add a board for a repository" onClick={() => setOpen("board")}>
             <IconPlus />
-            New board
+            <span className={navLabel}>New board</span>
           </Button>
         </div>
       )}
 
       {children}
 
+      <div className="mt-auto flex flex-col gap-px">
       {current && (
-        <div className="mt-auto flex flex-col gap-px">
+        <>
           {board && (
-            <Button variant="ghost" className={cn(navItem, "gap-2")} onClick={() => setOpen("learnings")}>
+            <Button variant="ghost" className={cn(navItem, "gap-2")} title="What agents learned on this board" onClick={() => setOpen("learnings")}>
               <IconBook />
-              Learnings
+              <span className={navLabel}>Learnings</span>
             </Button>
           )}
           <Button
@@ -133,7 +232,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
             onClick={() => setOpen("watchers")}
           >
             <IconEye />
-            Watchers{current.error ? ": invalid workspace.toml" : ""}
+            <span className={navLabel}>Watchers{current.error ? ": invalid workspace.toml" : ""}</span>
           </Button>
           <Button
             variant="ghost"
@@ -142,10 +241,29 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
             onClick={() => setOpen("settings")}
           >
             <IconSliders />
-            Settings
+            <span className={navLabel}>Settings</span>
           </Button>
-        </div>
+        </>
       )}
+        {!hover && (
+          <Button variant="ghost" className={cn(navItem, "gap-2 text-muted-foreground")} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} onClick={() => collapse(!collapsed)}>
+            <IconPanelLeft />
+            <span className={navLabel}>{collapsed ? "Expand sidebar" : "Collapse sidebar"}</span>
+          </Button>
+        )}
+        {!overlay && (
+          <Button
+            variant="ghost"
+            className={cn(navItem, "gap-2 text-muted-foreground", hoverMode && "bg-foreground/[0.07] text-foreground")}
+            title={hoverMode ? "Keep the sidebar open" : "Collapse the sidebar and open it while the pointer is on it"}
+            aria-pressed={hoverMode}
+            onClick={toggleHover}
+          >
+            <IconPointer />
+            <span className={navLabel}>Expand on hover</span>
+          </Button>
+        )}
+      </div>
 
       {open === "workspace" && (
         <AddWorkspaceDialog
@@ -182,5 +300,6 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
         <Learnings workspace={current.name} board={board} label={boardLabel(pipelines, current.name, board)} onClose={close} />
       )}
     </nav>
+    </>
   );
 }

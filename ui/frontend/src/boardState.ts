@@ -98,6 +98,27 @@ export function openDependencies(item: Item, items: Item[], pipelines: Pipelines
   });
 }
 
+/** Number of `--board-*` colors in styles.css. */
+const BOARD_COLORS = 8;
+
+/**
+ * A color per board of one workspace, as CSS variables. Each board takes the slot its name hashes to, or the
+ * next free one when a board earlier by name has it, so boards differ while there are no more than colors.
+ */
+export function boardColors(names: string[]): Record<string, string> {
+  const taken = new Set<number>();
+  const colors: Record<string, string> = {};
+  for (const name of [...names].sort()) {
+    let hash = 0;
+    for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    let slot = hash % BOARD_COLORS;
+    while (taken.has(slot) && taken.size < BOARD_COLORS) slot = (slot + 1) % BOARD_COLORS;
+    taken.add(slot);
+    colors[name] = `var(--board-${slot + 1})`;
+  }
+  return colors;
+}
+
 /** Number of blocked items on each board of `items`. */
 export function blockedByBoard(items: Item[], pipelines: Pipelines | undefined): Record<string, number> {
   return itemsByBoard(items.filter(isBlocked), pipelines);
