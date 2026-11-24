@@ -22,7 +22,7 @@ function seed() {
   };
   write(
     join(ws, "T-1-demo/workitem.md"),
-    "---\ntitle: Demo blocked item\ntype: bug\nstage: analyze\nboard: default\napproved: false\nagent_status: blocked: need your answer\nissue: T-1\npr: https://github.com/demo/repo/pull/42\n---\n\n# Demo\n\nHello brief text.\n",
+    "---\ntitle: Demo blocked item\ntype: bug\nstage: analyze\nboard: default\napproved: false\nagent_status: blocked: need your answer\nissue: T-1\npr: https://github.com/demo/repo/pull/42\npr_state: open\npr_ci: failing\n---\n\n# Demo\n\nHello brief text.\n",
   );
   write(
     join(ws, "T-2-gate/workitem.md"),
@@ -131,7 +131,12 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   const board = page.locator(".board");
   await expect(board.getByText("Demo blocked item")).toBeVisible();
   expect(JSON.parse(readFileSync(join(ws, "boards/default.json"), "utf8")).repo).toBe(realpathSync(repo));
-  await expect(board.locator(".card.blocked", { hasText: "Demo blocked item" })).toBeVisible();
+  const blocked = board.locator(".card.blocked", { hasText: "Demo blocked item" });
+  await expect(blocked).toBeVisible();
+  // The card's PR pill is coloured by its merge state, then approval and CI icons; its status line says why the agent stopped.
+  await expect(blocked.getByRole("link", { name: "#42 merge unknown" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
+  await expect(blocked.getByRole("img", { name: /^CI failing/ })).toBeVisible();
+  await expect(blocked.locator(".agent-status")).toHaveText("Blocked");
   await board.getByText("Demo blocked item").click();
 
   const terminal = page.locator(".detail .xterm-rows");

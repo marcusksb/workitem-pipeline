@@ -177,6 +177,7 @@ export const IconPanelLeft = make(
 /** A mouse pointer: the sidebar opens on hover. */
 export const IconPointer = make(<path d="M4 4l7 17 2.5-7.5L21 11z" />);
 export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
+export const IconArrowUp = make(<path d="M12 19V5M5 12l7-7 7 7" />);
 export const IconChevronDown = make(<path d="m6 9 6 6 6-6" />);
 export const IconBook = make(<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />);
 export const IconEye = make(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -298,6 +298,19 @@ describe("waiting", () => {
     expect(isBlocked(waiting)).toBe(false);
     expect(waitingFor(waiting)).toBe("CI on PR #12");
     expect(isWaiting(item({ agent_status: "working" }))).toBe(false);
+  });
+});
+
+describe("agentLine", () => {
+  const gate = { label: "Approve", approve_to: "doing", reject_to: "todo" };
+  it("says blocked, waiting for what, or that a gate needs approval", () => {
+    expect(agentLine(item({ agent_status: "blocked: which flag?" }))).toEqual({ label: "Blocked", tone: "bad" });
+    expect(agentLine(item({ agent_status: "blocked", gate }))?.label).toBe("Blocked");
+    expect(agentLine(item({ agent_status: "working" }))).toBeUndefined();
+    expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "idle" });
+    expect(agentLine(item({ gate }))).toEqual({ label: "Needs approval", tone: "gate" });
+    expect(agentLine(item({ gate, approved: true }))).toBeUndefined();
+    expect(agentLine(item({}))).toBeUndefined();
   });
 });
 

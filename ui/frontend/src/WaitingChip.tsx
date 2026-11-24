@@ -1,11 +1,12 @@
 import { waitingFor } from "./boardState";
 import { IconSnooze } from "./icons";
 import { Item } from "./types";
+import { Badge } from "@/components/ui/badge";
 
 export function WaitingChip({ item }: { item: Item }) {
   return (
-    <span className="chip waiting" title={waitingFor(item) || "waiting"}>
+    <Badge title={waitingFor(item) || "waiting"}>
       <IconSnooze /> waiting
-    </span>
+    </Badge>
   );
 }

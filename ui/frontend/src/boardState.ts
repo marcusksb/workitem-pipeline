@@ -257,6 +257,23 @@ export function issueCategory(category: string): "todo" | "progress" | "done" | 
 /** Number of a GitHub PR URL, or undefined. */
 export const prNumber = (pr: string) => pr.match(/\/pull\/(\d+)/)?.[1];
 
+/** How a status reads: `good` green, `bad` red, `wait` amber, `merged` purple, `gate` blue, `idle` grey. */
+export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
+
+/** In a gate stage and not approved yet. */
+export const needsApproval = (item: Pick<Item, "gate" | "approved">) => !!item.gate && !item.approved;
+
+/** What the agent is doing, for the card's status line: blocked, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
+export function agentLine(item: Pick<Item, "agent_status" | "gate" | "approved">): { label: string; tone: Tone } | undefined {
+  const status = item.agent_status;
+  if (status.startsWith("blocked")) return { label: "Blocked", tone: "bad" };
+  if (status.startsWith("waiting")) {
+    const what = status.replace(/^waiting:?\s*/, "");
+    return { label: what ? `Waiting · ${what}` : "Waiting", tone: "idle" };
+  }
+  if (needsApproval(item)) return { label: "Needs approval", tone: "gate" };
+}
+
 /**
  * Items matching every word of `query` in their title, issue key or PR number (`#123` or `123`).
  * Items whose key or PR number equals the whole query come first, then by title.

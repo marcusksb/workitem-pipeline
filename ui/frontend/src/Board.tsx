@@ -1,17 +1,20 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isWaiting, isBlocked, isWorking, itemKey, KIND_ICONS, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE, waitingFor } from "./boardState";
+import { AgentStatus } from "./AgentStatus";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Dialog } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
-import { ReviewStrip } from "./ReviewStrip";
+import { PrStatus } from "./PrStatus";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
 import { StageSource } from "./StageSource";
 import type { View } from "./TopBar";
 import { Item, Pipelines } from "./types";
 import { Tab } from "./url";
 import { useRun } from "./useRun";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   items: Item[];
@@ -28,10 +31,11 @@ type Props = {
   onChanged: () => void;
 };
 
+type Runner = ReturnType<typeof useRun>;
+
 /** Removes the items of a final column, one by one, the same way as "Remove workitem". A dialog
  * picks which: by default only those without open follow-ups, so the ones with work left stay. */
-function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
-  const { busy, error, run } = useRun(onDone);
+function ClearColumn({ items, runner: { busy, run } }: { items: Item[]; runner: Runner }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
   const withoutFollowUps = items.filter((item) => item.follow_ups.length === 0);
@@ -55,19 +59,20 @@ function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
   };
   return (
     <>
-      <button
-        className="link clear"
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-6"
         disabled={busy}
         title="Remove workitems in this column"
+        aria-label="Clear"
         onClick={() => {
           setAll(false);
           setOpen(true);
         }}
       >
         <IconTrash />
-        Clear
-      </button>
-      {error && <p className="error clear-error">{error}</p>}
+      </Button>
       {open && (
         <Dialog title="Clear column" onClose={() => setOpen(false)}>
           <form className="dialog-form" onSubmit={submit}>
@@ -93,39 +98,37 @@ function ClearColumn({ items, onDone }: { items: Item[]; onDone: () => void }) {
 }
 
 /** Pauses or resumes the watchers of a column in every workspace that has them. Running scripts and sessions go on. */
-function PauseColumn({ workspaces, board, stage, label, paused, onDone }: { workspaces: string[]; board: string; stage: string; label: string; paused: boolean; onDone: () => void }) {
-  const { busy, error, run } = useRun(onDone);
+function PauseColumn({ workspaces, board, stage, label, paused, runner: { busy, run } }: { workspaces: string[]; board: string; stage: string; label: string; paused: boolean; runner: Runner }) {
   const toggle = () => run(paused ? "Resume" : "Pause", () => Promise.all(workspaces.map((workspace) => api.pauseStage(workspace, board, stage, !paused))));
   return (
-    <>
-      {paused && <span className="chip paused">Paused</span>}
-      <button
-        className="link pause"
-        disabled={busy}
-        title={paused ? "Resume this column's watchers" : "Pause this column's watchers: nothing new starts here until you resume"}
-        aria-label={`${paused ? "Resume" : "Pause"} ${label}`}
-        onClick={toggle}
-      >
-        {paused ? <IconPlay /> : <IconPause />}
-      </button>
-      {error && <p className="error clear-error">{error}</p>}
-    </>
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-6"
+      disabled={busy}
+      title={paused ? "Resume this column's watchers" : "Pause this column's watchers: nothing new starts here until you resume"}
+      aria-label={`${paused ? "Resume" : "Pause"} ${label}`}
+      onClick={toggle}
+    >
+      {paused ? <IconPlay /> : <IconPause />}
+    </Button>
   );
 }
 
 /** How many dependencies are not merged yet; a click opens the item's Depends on tab. */
 function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
-    <button
-      className="chip waits-on"
-      title={`Waits until ${count === 1 ? "1 dependency is" : `${count} dependencies are`} merged`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpen();
-      }}
-    >
-      depends on {count}
-    </button>
+    <Badge asChild className="chip waits-on cursor-pointer border-dashed hover:text-foreground">
+      <button
+        title={`Waits until ${count === 1 ? "1 dependency is" : `${count} dependencies are`} merged`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
+        depends on {count}
+      </button>
+    </Badge>
   );
 }
 
@@ -135,8 +138,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
   return (
     <div
       style={depth ? { marginLeft: depth * 16 } : undefined}
-      className={`card${selected ? " selected" : ""}${isWorking(item) ? " working" : ""}${isBlocked(item) ? " blocked" : ""}${isWaiting(item) ? " waiting" : ""}`}
-      title={isWaiting(item) ? `waiting: ${waitingFor(item) || "?"}` : undefined}
+      className={`card${selected ? " selected" : ""}${isWorking(item) ? " working" : ""}${isBlocked(item) ? " blocked" : needsApproval(item) ? " gate" : ""}`}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -147,29 +149,75 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         }
       }}
     >
-      <div className="title">{item.title}</div>
-      <div className="meta">
-        {showWorkspace && <span className="badge">{item.workspace}</span>}
-        {where && <span className="badge where">{where}</span>}
-        <span className="badge">{item.kind}</span>
-        <LinkBadges item={item} />
+      <div className="title">
+        {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}
+        {item.title}
       </div>
-      {waitsOn.length > 0 && (
-        <div className="meta">
-          <DependencyBadge count={waitsOn.length} onOpen={onDependencies} />
-        </div>
-      )}
-      {(item.review || icon || !!item.unpushed || item.follow_ups.length > 0) && (
-        <div className="card-foot">
-          <div className="foot-left">
-            <FollowUpsChip followUps={item.follow_ups} />
-            {!!item.unpushed && <div className="chip unpushed" title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</div>}
-            <ReviewStrip review={item.review} />
-          </div>
-          {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}
-        </div>
-      )}
+      <div className="card-chips">
+        <Badge>{item.kind}</Badge>
+        {showWorkspace && (
+          <Badge title={item.workspace}>
+            <span className="truncate">{item.workspace}</span>
+          </Badge>
+        )}
+        {where && (
+          <Badge title={where}>
+            <span className="truncate">{where}</span>
+          </Badge>
+        )}
+        <LinkBadges item={item} pr={false} />
+        {waitsOn.length > 0 && <DependencyBadge count={waitsOn.length} onOpen={onDependencies} />}
+        <FollowUpsChip followUps={item.follow_ups} />
+        {!!item.unpushed && (
+          <Badge title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</Badge>
+        )}
+      </div>
+      <div className="card-foot">
+        <AgentStatus item={item} className="card-status" />
+        <PrStatus item={item} className="card-pr" />
+      </div>
     </div>
+  );
+}
+
+/**
+ * A stage: header (dot, name, count, info, pause, clear) and its cards.
+ */
+function Column({ name, label, final, items, board, pause, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
+  const clear = useRun(onChanged);
+  const pauser = useRun(onChanged);
+  const errors = [
+    ["pause", pauser.error],
+    ["clear", clear.error],
+  ].filter(([, error]) => error);
+  return (
+    <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}${pause.paused ? " paused" : ""}`} data-stage={name}>
+      <h2>
+        <span className="column-dot" aria-hidden="true" />
+        <span className="column-label" title={label}>
+          {label}
+        </span>
+        {pause.paused && <Badge className="paused">Paused</Badge>}
+        <span className="count">{items.length}</span>
+        <span className="column-actions">
+          {name !== UNKNOWN_STAGE && (
+            <Button variant="ghost" size="icon" className="size-6" title="What this stage runs" aria-label={`What ${label} runs`} onClick={onInspect}>
+              <IconInfo />
+            </Button>
+          )}
+          {pause.workspaces.length > 0 && <PauseColumn workspaces={pause.workspaces} board={board} stage={name} label={label} paused={pause.paused} runner={pauser} />}
+          {final && items.length > 0 && <ClearColumn items={items} runner={clear} />}
+        </span>
+      </h2>
+      <div className="cards">
+        {errors.map(([source, error]) => (
+          <p className="error column-error" key={source}>
+            {error}
+          </p>
+        ))}
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -209,22 +257,12 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
           const inColumn = columns[name] ?? [];
           const pause = pauseState(pipelines, workspaces, active, name);
           return (
-            <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}${pause.paused ? " paused" : ""}`} data-stage={name} key={name}>
-              <h2>
-                {label} <span className="count">{inColumn.length}</span>
-                {name !== UNKNOWN_STAGE && (
-                  <button className="link info" title="What this stage runs" aria-label={`What ${label} runs`} onClick={() => setInspected({ name, label })}>
-                    <IconInfo />
-                  </button>
-                )}
-                {pause.workspaces.length > 0 && <PauseColumn workspaces={pause.workspaces} board={active} stage={name} label={label} paused={pause.paused} onDone={onChanged} />}
-                {final && inColumn.length > 0 && <ClearColumn items={inColumn} onDone={onChanged} />}
-              </h2>
-              <div className="cards">{treeOrder(inColumn, orderFor(pipelines, workspaces, active, name)).flatMap(({ item, depth }) => [
-                  card(item, depth),
-                  ...cardChildren(item, items).map((child) => card(child, depth + 1, `${boardLabel(pipelines, child.workspace, child.board)} · ${stageTitle(child, pipelines)}`)),
-                ])}</div>
-            </section>
+            <Column key={name} name={name} label={label} final={final} items={inColumn} board={active} pause={pause} onInspect={() => setInspected({ name, label })} onChanged={onChanged}>
+              {treeOrder(inColumn, orderFor(pipelines, workspaces, active, name)).flatMap(({ item, depth }) => [
+                card(item, depth),
+                ...cardChildren(item, items).map((child) => card(child, depth + 1, `${boardLabel(pipelines, child.workspace, child.board)} · ${stageTitle(child, pipelines)}`)),
+              ])}
+            </Column>
           );
         })}
       </div>

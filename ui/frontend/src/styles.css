@@ -141,8 +141,6 @@
   }
 }
 
-@property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
-
 @layer components {
 /* Preflight resets these; the screens below were built on the browser defaults.
    Zero specificity, so every rule below still wins. */
@@ -212,9 +210,9 @@ button:where(:not([data-slot=button], [data-slot=tabs-trigger], [data-slot=dialo
 main { flex: 1; min-height: 0; display: flex; position: relative; }
 .left { flex: 1; min-width: 0; overflow: auto; padding: 16px 24px; }
 
-.cards { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
-.board { display: grid; grid-template-columns: repeat(6, minmax(200px, 1fr)); gap: 24px; }
-.column { min-height: 120px; --tint: var(--muted-foreground); }
+/* Board: each stage is a lane, its header a dot, the name, the count and icon buttons. */
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap: 10px; }
+.column { --tint: var(--muted-foreground); display: flex; flex-direction: column; gap: 6px; min-height: 120px; padding: 6px; border-radius: 10px; background: color-mix(in srgb, var(--foreground) 4%, var(--background)); }
 .column[data-stage="backlog"] { --tint: var(--stage-backlog); }
 .column[data-stage="analyze"] { --tint: var(--stage-analyze); }
 .column[data-stage="ready_for_development"] { --tint: var(--stage-ready); }
@@ -222,75 +220,40 @@ main { flex: 1; min-height: 0; display: flex; position: relative; }
 .column[data-stage="in_review"] { --tint: var(--stage-review); }
 .column[data-stage="done"] { --tint: var(--stage-done); }
 .column.unknown { --tint: var(--blocked); }
-.chip.waits-on { --tint: var(--muted-foreground); border: 1px dashed currentColor; background: none; color: var(--muted-foreground); cursor: pointer; margin-top: 6px; text-align: left; }
-.chip.waits-on:hover { color: inherit; }
-.board.list { display: flex; flex-direction: column; gap: 16px; }
-.board.list .column { min-height: 0; }
-.board.list .column h2 { position: static; }
-.board.list .cards { gap: 6px; }
-.board.list .card { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 16px; border-radius: 8px; }
-.board.list .card::before { border-radius: 8px; }
-/* The basis keeps the title readable: chips that do not fit wrap to the next line instead of squeezing it. */
-.board.list .card .title { flex: 1 1 240px; min-width: 0; margin-bottom: 0; }
-.board.list .card .chip.waits-on { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.board.list .card-foot { margin-top: 0; justify-content: flex-end; flex: none; min-height: 0; }
-.board.list .card .chip, .board.list .card .review-strip { margin-top: 0; }
-.count.blocked { --tint: var(--blocked); }
 /* Sticks to the top of .left, whose 16px top padding the -16px cancels. */
-.column h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; position: sticky; top: -16px; z-index: 1; background: var(--bg); padding: 8px 0; }
-.column h2 .clear { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }
-.column h2 .clear-error { flex-basis: 100%; font-size: 12px; font-weight: 400; white-space: pre-line; margin: 0; }
-.count { border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; background: color-mix(in srgb, var(--tint) 15%, transparent); color: var(--tint); }
+.column h2 { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 0; padding: 0 0 0 6px; font-size: 13px; position: sticky; top: -16px; z-index: 1; background: inherit; }
+.column-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tint); }
+.column-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.column .count { font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
+.column-actions { margin-left: auto; display: flex; align-items: center; }
+.cards { display: flex; flex-direction: column; gap: 6px; }
+.column-error { margin: 0; font-size: 12px; white-space: pre-line; }
 
-.card { text-align: left; background: var(--panel); border: 1px solid transparent; border-radius: 12px; padding: 14px 16px; display: block; width: 100%; cursor: pointer; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 1px 3px rgb(0 0 0 / 0.06); }
+/* List: the header stays horizontal above the cards, which are rows, so an empty stage is one line. */
+.board.list { display: flex; flex-direction: column; gap: 10px; }
+.board.list .column { min-height: 0; }
+.board.list .card { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 12px; }
+.board.list .card-foot { display: contents; }
+.board.list .card .title { order: 1; flex: 1 1 240px; min-width: 0; }
+.board.list .card-chips { order: 2; }
+.board.list .card-pr { order: 3; margin-left: 0; }
+.board.list .card-status { order: 4; max-width: 320px; }
+
+.card { display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 10px 12px; text-align: left; cursor: pointer; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 1px 2px rgb(16 24 40 / 0.04); }
 .card[style*="margin-left"] { width: auto; border-left: 3px solid var(--border); }
-.card:hover { border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
-.card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--panel)); }
-.card.blocked { --card-ring: var(--blocked); }
-.card.waiting { --card-ring: var(--waiting); }
-.card.blocked, .card.waiting { position: relative; border-color: var(--card-ring); }
-.card.blocked::before, .card.waiting::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  padding: 1px;
-  background: conic-gradient(
-    from var(--card-angle),
-    color-mix(in srgb, var(--card-ring) 45%, transparent),
-    var(--card-ring),
-    color-mix(in srgb, var(--card-ring) 45%, transparent),
-    var(--card-ring)
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask-composite: exclude;
-  pointer-events: none;
-  animation: card-spin 2s linear infinite;
-}
-@media (prefers-color-scheme: dark) {
-  .card { border-color: var(--border); }
-  .card.blocked, .card.waiting { border-color: var(--card-ring); }
-}
-.card .title { font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere; }
-.meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.badge { font-size: 12px; color: var(--muted-foreground); border-radius: 999px; padding: 2px 8px; background: color-mix(in srgb, var(--text) 7%, transparent); }
-.chip { font-size: 12px; border-radius: 999px; padding: 2px 8px; width: fit-content; }
-.chip.unpushed { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
-.chip.pr-moved { display: inline-flex; align-items: center; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
-.chip.follow-ups { color: var(--working); background: color-mix(in srgb, var(--working) 12%, transparent); }
-button.chip.follow-ups { border: none; font: inherit; font-size: 12px; cursor: pointer; }
-.chip.blocked { color: var(--blocked); background: color-mix(in srgb, var(--blocked) 10%, transparent); }
-.chip.waiting { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
-span.chip.waiting { display: inline-flex; align-items: center; gap: 4px; }
+.card:hover { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.card:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
+.card.blocked { border-color: color-mix(in srgb, var(--blocked) 75%, var(--border)); background: color-mix(in srgb, var(--blocked) 3%, var(--card)); }
+.card.gate { border-color: color-mix(in srgb, var(--gate) 35%, var(--border)); }
+.card.selected { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+@property --card-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 @keyframes card-spin { to { --card-angle: 360deg; } }
 .card.working { position: relative; }
 .card.working::before {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: 12px;
+  inset: -1px;
+  border-radius: inherit;
   padding: 1px;
   background: conic-gradient(from var(--card-angle), #f43f5e, #f97316, #facc15, #34d399, #38bdf8, #818cf8, #e879f9, #f43f5e);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -302,24 +265,22 @@ span.chip.waiting { display: inline-flex; align-items: center; gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .card.working::before { animation: none; }
-  .card.blocked::before, .card.waiting::before { animation: none; }
 }
-.review-strip { display: flex; gap: 6px; align-items: center; }
-.card .chip, .card .review-strip { margin-top: 8px; }
-.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; min-height: 18px; }
-.card-foot .review-strip, .card-foot .chip { margin-top: 0; }
-.card-foot .foot-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.kind-icon { font-size: 14px; line-height: 1; flex: none; }
-.review-strip .slot { display: inline-flex; padding: 1px; border-radius: 999px; }
-.review-strip .slot.good { color: var(--good); }
-.review-strip .slot.bad { color: var(--blocked); }
-.review-strip .slot.wait { color: var(--working); }
-.review-strip .slot.idle { color: color-mix(in srgb, var(--muted-foreground) 65%, transparent); }
-.review-strip .slot.spin svg { animation: slot-spin 2.5s linear infinite; }
-@keyframes slot-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .review-strip .slot.spin svg { animation: none; }
-}
+.card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card-foot:empty { display: none; }
+.card-pr { margin-left: auto; flex: none; }
+.card .title { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.card .kind-icon { margin-right: 6px; font-size: 14px; line-height: 1; }
+.card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.card-chips > * { max-width: 100%; }
+.meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.badge { font-size: 12px; color: var(--muted-foreground); border-radius: 999px; padding: 2px 8px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.chip { font-size: 12px; border-radius: 999px; padding: 2px 8px; width: fit-content; }
+.chip.unpushed { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.chip.pr-moved { display: inline-flex; align-items: center; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.chip.blocked { color: var(--blocked); background: color-mix(in srgb, var(--blocked) 10%, transparent); }
+.chip.waiting { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
+span.chip.waiting { display: inline-flex; align-items: center; gap: 4px; }
 .chip { font-size: 12px; border-radius: 999px; padding: 2px 8px; width: fit-content; }
 
 /* Overlays the board's right half instead of narrowing it. */
@@ -396,11 +357,6 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .pr-note-head { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted-foreground); }
 .pr-note-head code { font-size: 12px; }
 .pr-note > :last-child { margin-bottom: 0; }
-.link-badge { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); text-decoration: none; }
-.link-badge:hover { text-decoration: underline; }
-.badge.issue-todo, .chip.issue-todo { color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
-.badge.issue-progress, .chip.issue-progress { color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
-.badge.issue-done, .chip.issue-done { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
 
 .dialog-overlay {
   position: fixed;
@@ -508,10 +464,7 @@ button.danger { color: var(--blocked); border-color: var(--blocked); }
 .source-path { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
 .source-path code { color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
 .source pre { margin: 0; padding: 10px; max-height: 55vh; overflow: auto; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; white-space: pre; }
-.column h2 .info { padding: 2px; margin-left: 2px; color: var(--muted-foreground); }
-.column h2 .pause { padding: 2px; color: var(--muted-foreground); }
-.column h2 .chip.paused { font-weight: 500; color: var(--muted-foreground); background: color-mix(in srgb, var(--text) 7%, transparent); }
-.column.paused .cards { opacity: 0.55; }
+.column.paused .cards > :not(.column-error) { opacity: 0.55; }
 
 .info { margin: 0; display: grid; }
 .info > div { display: grid; grid-template-columns: minmax(110px, 160px) 1fr; gap: 12px; align-items: baseline; padding: 6px 0; }
@@ -629,3 +582,4 @@ button.toast-body { cursor: pointer; }
   .detail { width: 100%; }
 }
 }
+
