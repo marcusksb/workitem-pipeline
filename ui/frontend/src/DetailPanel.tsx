@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, itemTerminal } from "./api";
 import { AgentStatus } from "./AgentStatus";
 import { boardLabel, boardOfWorkspace, isBlocked, KIND_ICONS, openDependencies, shownBoard, stageLabel, stageTitle, stripFrontmatter } from "./boardState";
@@ -101,8 +101,8 @@ function BlockedBar({ item, runner: { busy, run } }: { item: Item; runner: Runne
   );
 }
 
-/** Stage, board (click to show it), issue and PR of the item, as the pills the card uses, then the agent status unless blocked. */
-function Properties({ item, pipelines, onBoard }: { item: Item; pipelines: Pipelines | undefined; onBoard: (board: string) => void }) {
+/** Stage, board (click to show it), issue and PR of the item, as the pills the card uses, then the agent status unless blocked, then `children`. */
+function Properties({ item, pipelines, onBoard, children }: { item: Item; pipelines: Pipelines | undefined; onBoard: (board: string) => void; children?: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 *:max-w-full">
       <Badge>
@@ -118,6 +118,7 @@ function Properties({ item, pipelines, onBoard }: { item: Item; pipelines: Pipel
       <IssueBadge item={item} />
       <PrStatus item={item} />
       {!isBlocked(item) && <AgentStatus item={{ agent_status: item.agent_status, gate: null, approved: item.approved }} />}
+      {children}
     </div>
   );
 }
@@ -196,7 +197,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               <IconX />
             </Button>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
+          <Properties item={live} pipelines={pipelines} onBoard={onBoard}>
             <FollowUpsChip
               followUps={live.follow_ups}
               onClick={() => {
@@ -204,8 +205,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
                 onTab("brief");
               }}
             />
-          </div>
-          <Properties item={live} pipelines={pipelines} onBoard={onBoard} />
+          </Properties>
           {isBlocked(live) && <BlockedBar item={live} runner={runner} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} onDiscuss={live.session ? undefined : discuss} />}
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
