@@ -77,7 +77,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
   };
 
   return (
-    <nav className="flex bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] w-[232px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
+    <nav className="flex bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] w-[264px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className={cn(navItem, "h-8 gap-2 text-[15.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
@@ -91,7 +91,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </Button>
         </DropdownMenuTrigger>
         {/* A dialog opened from the menu keeps its focus. */}
-        <DropdownMenuContent align="start" className="w-[240px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
+        <DropdownMenuContent align="start" className="w-[244px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
           {workspaces.length > 0 && (
             <>
               <DropdownMenuRadioGroup value={workspace} onValueChange={(name) => name !== workspace && onWorkspace(name)}>
