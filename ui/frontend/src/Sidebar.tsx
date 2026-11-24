@@ -9,9 +9,8 @@ import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
 import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
 
-/** A full-width row of the sidebar; only its icon in the rail. */
-export const navItem =
-  "h-[30px] w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0";
+/** A full-width row of the sidebar. */
+export const navItem = "h-9 w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5";
 /** A section's small heading. */
 export const navHeading = "px-2 py-1 text-[13.5px] font-medium text-muted-foreground";
 
@@ -80,7 +79,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
     <nav className="flex bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] w-[264px] shrink-0 flex-col gap-3.5 overflow-y-auto border-r border-border px-2.5 py-3 max-md:w-full max-md:overflow-visible max-md:border-r-0 max-md:border-b" aria-label="Workspace">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className={cn(navItem, "h-8 gap-2 text-[15.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
+          <Button variant="ghost" className={cn(navItem, "h-10 gap-2 text-[15.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
             <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[13px] font-semibold text-primary-foreground uppercase" aria-hidden="true">
               {current?.name[0] ?? "+"}
             </span>
