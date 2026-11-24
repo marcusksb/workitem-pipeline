@@ -1,35 +1,40 @@
-import { ReactNode, useEffect, useRef } from "react";
+import { ComponentProps, ReactNode } from "react";
+import { Dialog as Root, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
-type Props = { title: string; onClose: () => void; children: ReactNode };
+type Props = { title: string; onClose: () => void; className?: string; children: ReactNode };
 
-/** Modal dialog. Escape or a click on the backdrop closes it; the form inside decides otherwise. */
-export function Dialog({ title, onClose, children }: Props) {
-  const panel = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!panel.current?.contains(document.activeElement)) panel.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseRef.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
+/** Modal dialog, open while it is mounted. Escape, the close button or a click outside call
+ * `onClose`, which may refuse (for example to keep unsaved changes) by not unmounting it. */
+export function Dialog({ title, onClose, className, children }: Props) {
   return (
-    <div className="dialog-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog" ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}>
-        <header>
-          <h2>{title}</h2>
-          <button className="dialog-close" onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </header>
+    <Root open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className={className} aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
         {children}
-      </div>
-    </div>
+      </DialogContent>
+    </Root>
   );
+}
+
+/** A dialog's form: fields stacked, the submit button at the bottom right. */
+export function DialogForm({ className, ...props }: ComponentProps<"form">) {
+  return <form className={cn("grid gap-3 [&>button[type=submit]]:justify-self-end", className)} {...props} />;
+}
+
+/** A labelled control. */
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="grid gap-1.5 text-[15px] font-medium text-muted-foreground">
+      {label}
+      {children}
+    </label>
+  );
+}
+
+/** A radio button or checkbox with its text to the right. */
+export function Choice({ children }: { children: ReactNode }) {
+  return <label className="flex cursor-pointer items-center gap-2 text-[15px] [&>input]:accent-primary">{children}</label>;
 }

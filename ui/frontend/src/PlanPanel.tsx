@@ -2,29 +2,41 @@ import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, planTerminal } from "./api";
-import { IconExternal, IconFileText, IconTerminalSquare, IconX } from "./icons";
+import { Children } from "./Children";
+import { IconFileText, IconListTree, IconTerminalSquare, IconTrash, IconX } from "./icons";
+import { ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
 import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
-import { Plan } from "./types";
+import { Item, Plan } from "./types";
+import { Tab as ItemTab } from "./url";
 import { usePolling } from "./usePolling";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+
+type Tab = "terminal" | "plan" | "workitems";
 
 type Props = {
   plan: Plan;
-  /** Opens the workitem made from this plan. */
-  onWorkitem: (workspace: string, dir: string) => void;
+  /** The workitems made from this plan that still exist. */
+  workitems: Item[];
+  onSelect: (item: Item, tab?: ItemTab) => void;
+  onItemsChanged: () => void;
   onClose: () => void;
   onChanged: () => void;
   onUnauthorized: () => void;
 };
 
-/** Right panel for one planning session: its terminal (or Resume) and the saved plan. */
-export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized }: Props) {
+/** Right panel for one planning session: its terminal (or Resume), the saved plan and the workitems made from it. */
+export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, onChanged, onUnauthorized }: Props) {
   const key = `${plan.workspace}/${plan.id}`;
   const { data: detail, error: loadError, reload } = usePolling(() => api.plan(plan.workspace, plan.id), 3000, key, onUnauthorized);
   const live = detail ?? plan;
   const status = planStatus(live);
-  const [tab, setTab] = useState<"terminal" | "plan">();
-  const shown = tab === "plan" && !detail?.text ? "terminal" : tab ?? (live.live || !detail?.text ? "terminal" : "plan");
+  const [tab, setTab] = useState<Tab>();
+  const gone = (tab === "plan" && !detail?.text) || (tab === "workitems" && !workitems.length);
+  const shown = gone ? "terminal" : tab ?? (live.live || !detail?.text ? "terminal" : "plan");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const path = planTerminal(live);
@@ -56,70 +68,82 @@ export function PlanPanel({ plan, onWorkitem, onClose, onChanged, onUnauthorized
   };
 
   return (
-    <aside className="detail">
-      <header>
-        <div>
-          <h2>{live.topic || live.id}</h2>
-          <div className="meta">
-            <span className="badge">{live.workspace}</span>
-            <span className={`chip plan-status ${status}`}>{planLabel(status)}</span>
-            {live.workitems.map((dir) => (
-              <button key={dir} className="link" onClick={() => onWorkitem(live.workspace, dir)}>
-                → {dir}
-              </button>
-            ))}
+    <SidePanel aria-label="Plan">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pt-5">
+        <div className="grid gap-2.5">
+          <div className="flex items-start gap-2">
+            <h2 className="min-w-0 flex-1 text-[22px] leading-[1.3] font-semibold tracking-[-0.01em] [overflow-wrap:anywhere]">
+              <span className="mr-2 inline-flex align-[-0.1em] text-muted-foreground [&>svg]:size-[18px]">
+                <IconFileText />
+              </span>
+              {live.topic || live.id}
+            </h2>
+            <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
+              <IconX />
+            </Button>
           </div>
-          {live.summary && <p className="plan-panel-summary">{live.summary}</p>}
+          {live.summary && <Muted>{live.summary}</Muted>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant={status === "working" ? "good" : status === "waiting" ? "wait" : "outline"}>{planLabel(status)}</Badge>
+          </div>
+          {(error ?? loadError) && <ErrorText>{error ?? loadError}</ErrorText>}
         </div>
-        <button className="link" onClick={onClose}>
-          <IconX />
-          Close
-        </button>
-      </header>
-      <nav className="tabs">
-        <button className={shown === "terminal" ? "active" : ""} onClick={() => setTab("terminal")}>
-          <IconTerminalSquare />
-          Terminal
-        </button>
-        {detail?.text && (
-          <button className={shown === "plan" ? "active" : ""} onClick={() => setTab("plan")}>
-            <IconFileText />
-            Plan
-          </button>
-        )}
-        {live.live && (
-          <a href={`/?terminal=${encodeURIComponent(path)}`} target="_blank" rel="noreferrer">
-            <IconExternal />
-            Pop out
-          </a>
-        )}
-        <button className="plan-delete" onClick={() => void remove()} disabled={busy}>
-          Delete
-        </button>
-      </nav>
-      {(error ?? loadError) && <p className="error">{error ?? loadError}</p>}
-      {shown === "terminal" &&
-        (live.live ? (
-          <Terminal key={path} path={path} />
-        ) : (
-          <div className="brief">
-            <p>The session has ended. Resume continues the same Claude conversation in the repo.</p>
-            <button onClick={() => void resume()} disabled={busy}>
-              Resume
-            </button>
-            {detail?.prompt && (
-              <>
-                <h3>Started with</h3>
-                <Markdown remarkPlugins={[remarkGfm]}>{detail.prompt}</Markdown>
-              </>
+        <Tabs value={shown} activationMode="manual" onValueChange={(value) => setTab(value as Tab)} className="min-h-[420px] flex-1 gap-3">
+          <div className="flex items-end gap-2 border-b border-border">
+            <TabsList className="min-w-0 flex-1 border-b-0">
+              <TabsTrigger value="terminal">
+                <IconTerminalSquare />
+                Terminal
+              </TabsTrigger>
+              {detail?.text && (
+                <TabsTrigger value="plan">
+                  <IconFileText />
+                  Plan
+                </TabsTrigger>
+              )}
+              {workitems.length > 0 && (
+                <TabsTrigger value="workitems">
+                  <IconListTree />
+                  Workitems
+                  <Badge>{workitems.length}</Badge>
+                </TabsTrigger>
+              )}
+            </TabsList>
+            <Button variant="ghost" className="mb-1.5 shrink-0 text-destructive hover:text-destructive" onClick={() => void remove()} disabled={busy}>
+              <IconTrash />
+              Delete
+            </Button>
+          </div>
+          <TabsContent value="terminal" className="flex min-h-0 flex-col pb-4">
+            {live.live ? (
+              <Terminal key={path} path={path} />
+            ) : (
+              <div className={cn("brief", scroll, prose)}>
+                <p>The session has ended. Resume continues the same Claude conversation in the repo.</p>
+                <Button variant="primary" className="mb-3" onClick={() => void resume()} disabled={busy}>
+                  Resume
+                </Button>
+                {detail?.prompt && (
+                  <>
+                    <h3>Started with</h3>
+                    <Markdown remarkPlugins={[remarkGfm]}>{detail.prompt}</Markdown>
+                  </>
+                )}
+              </div>
             )}
-          </div>
-        ))}
-      {shown === "plan" && detail?.text && (
-        <div className="brief">
-          <Markdown remarkPlugins={[remarkGfm]}>{detail.text}</Markdown>
-        </div>
-      )}
-    </aside>
+          </TabsContent>
+          {detail?.text && (
+            <TabsContent value="plan" className={cn("brief", scroll, prose)}>
+              <Markdown remarkPlugins={[remarkGfm]}>{detail.text}</Markdown>
+            </TabsContent>
+          )}
+          {workitems.length > 0 && (
+            <TabsContent value="workitems" className={scroll}>
+              <Children items={workitems} onSelect={onSelect} onDone={onItemsChanged} />
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+    </SidePanel>
   );
 }

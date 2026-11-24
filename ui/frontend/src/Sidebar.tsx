@@ -11,9 +11,9 @@ import { AddBoardDialog, AddWorkspaceDialog, SettingsDialog, trackerName, Watche
 
 /** A full-width row of the sidebar; only its icon in the rail. */
 export const navItem =
-  "h-[30px] w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0";
+  "h-9 w-full justify-start px-2 font-normal text-foreground hover:bg-foreground/5 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0";
 /** A section's small heading. */
-export const navHeading = "px-2 py-1 text-[11.5px] font-medium text-muted-foreground";
+export const navHeading = "px-2 py-1 text-[13.5px] font-medium text-muted-foreground";
 /** Text that the rail keeps for screen readers only. */
 export const navLabel = "group-data-[collapsed=true]/sidebar:sr-only";
 /** Parts the rail leaves out. */
@@ -121,7 +121,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
     {phoneOpen && <div className="fixed inset-0 z-30 bg-black/20" aria-hidden="true" onClick={() => collapse(true)} />}
     <nav
       className={cn(
-        "sidebar group/sidebar flex w-[260px] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
+        "sidebar group/sidebar flex w-[264px] bg-[color-mix(in_srgb,var(--muted)_50%,var(--background))] shrink-0 flex-col gap-3.5 overflow-x-hidden overflow-y-auto border-r border-border px-2.5 py-3 transition-[width] duration-150 max-md:transition-none",
         collapsed && "w-[52px]",
         floating && "fixed inset-y-0 left-0 z-40",
         floating && !collapsed && "shadow-lg",
@@ -135,8 +135,8 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
     >
       <DropdownMenu onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className={cn(navItem, "h-8 gap-2 text-[13.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
-            <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[11px] font-semibold text-primary-foreground uppercase" aria-hidden="true">
+          <Button variant="ghost" className={cn(navItem, "h-10 gap-2 text-[15.5px] font-semibold")} aria-label={current ? `Workspace: ${current.name}` : "Workspace"}>
+            <span className="flex size-5 items-center justify-center rounded-[5px] bg-primary text-[13px] font-semibold text-primary-foreground uppercase" aria-hidden="true">
               {current?.name[0] ?? "+"}
             </span>
             <span className={cn("flex-1 truncate text-left", navLabel)}>{current?.name ?? "No workspace"}</span>
@@ -146,7 +146,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
           </Button>
         </DropdownMenuTrigger>
         {/* A dialog opened from the menu keeps its focus. */}
-        <DropdownMenuContent align="start" className="w-[240px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
+        <DropdownMenuContent align="start" className="w-[244px]" onCloseAutoFocus={(event) => open && event.preventDefault()}>
           {workspaces.length > 0 && (
             <>
               <DropdownMenuRadioGroup value={workspace} onValueChange={(name) => name !== workspace && onWorkspace(name)}>
@@ -200,7 +200,7 @@ export function Sidebar({ workspaces, workspace, pipelines, items, board, onWork
                       {blocked[name]}
                     </Badge>
                   ) : null}
-                  <span className={cn("text-[11.5px] text-muted-foreground", navExtra)} title="workitems">
+                  <span className={cn("text-[13.5px] text-muted-foreground", navExtra)} title="workitems">
                     {counts[name] ?? 0}
                   </span>
                 </Button>

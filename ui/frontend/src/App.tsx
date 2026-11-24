@@ -13,7 +13,7 @@ import { Terminal } from "./Terminal";
 import { TopBar, View } from "./TopBar";
 import { useAlerts } from "./useAlerts";
 import { usePolling } from "./usePolling";
-import { Item } from "./types";
+import { Item, Plan } from "./types";
 import { readRoute, Route, routeHash, Tab } from "./url";
 
 /** Exchanges `#token=…` from the printed URL for the session cookie, then strips it from the address bar. */
@@ -52,7 +52,7 @@ export function useSession() {
 /** A click on the board that hits no card, control or dialog, and selects no text; it closes the open item. */
 function isBackground(target: EventTarget): boolean {
   if (!(target instanceof Element)) return false;
-  if (target.closest(".card, button, a, input, select, textarea, label, .dialog-overlay")) return false;
+  if (target.closest(".card, button, a, input, select, textarea, label, [role=dialog], [data-slot=dialog-overlay]")) return false;
   return window.getSelection()?.isCollapsed ?? true;
 }
 
@@ -71,7 +71,7 @@ function useLeaving<T>(value: T | null) {
 /** Wraps a `.detail` panel so it slides out before it unmounts. */
 function Leaving({ leaving, onDone, children }: { leaving: boolean; onDone: () => void; children: ReactNode }) {
   return (
-    <div className={leaving ? "panel-slot leaving" : "panel-slot"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
+    <div className={leaving ? "contents leaving" : "contents"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
       {children}
     </div>
   );
@@ -161,6 +161,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
   useAlerts(items.data, open);
+  /** The workitems made from a plan that still exist. */
+  const planWorkitems = (plan: Plan) => (items.data ?? []).filter((i) => i.workspace === plan.workspace && plan.workitems.includes(i.dir));
   const openFound = (item: Item) => {
     setSearching(false);
     open(item);
@@ -169,7 +171,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
   return (
-    <div className="app">
+    <div className="flex h-screen">
       <Sidebar
         workspaces={workspaces.data ?? []}
         workspace={workspace}
@@ -197,7 +199,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           }}
         />
       </Sidebar>
-      <div className="content">
+      <div className="content flex min-w-0 flex-1 flex-col">
         <TopBar
           workspace={workspaces.data?.find((w) => w.name === workspace)}
           pipelines={pipelines.data}
@@ -208,12 +210,12 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           error={error}
           onCreated={() => void sessions.reload()}
         />
-        {workspaces.data?.length === 0 && <p className="empty">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+        {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
         {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
-          <p className="empty">No boards in {workspace} yet. Add one for a repository with New board.</p>
+          <p className="px-6 pt-4 text-[15px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
-        <main>
-          <div className="left" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
+        <main className="relative flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
             <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
               void items.reload();
               void pipelines.reload();
@@ -222,12 +224,14 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           {itemPanel.shown && (
             <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
               <DetailPanel
+                key={`${itemPanel.shown.workspace}/${itemPanel.shown.dir}`}
                 item={itemPanel.shown}
                 items={shown}
                 pipelines={pipelines.data}
                 onSelect={open}
                 tab={route.tab}
                 onTab={onTab}
+                onBoard={(board) => navigate({ ...route, board })}
                 onClose={() => navigate({})}
                 onUnauthorized={onUnauthorized}
               />
@@ -238,10 +242,9 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
               <PlanPanel
                 key={`${planPanel.shown.workspace}/${planPanel.shown.id}`}
                 plan={planPanel.shown}
-                onWorkitem={(itemWorkspace, dir) => {
-                  const item = (items.data ?? []).find((i) => i.workspace === itemWorkspace && i.dir === dir);
-                  if (item) open(item);
-                }}
+                workitems={planWorkitems(planPanel.shown)}
+                onSelect={open}
+                onItemsChanged={() => void items.reload()}
                 onClose={() => navigate({})}
                 onChanged={() => void plans.reload()}
                 onUnauthorized={onUnauthorized}
@@ -268,8 +271,8 @@ export function TerminalPage({ path }: { path: string }) {
   if (session.state === "checking") return null;
   if (session.state === "out") return <Login onSubmit={session.login} error={session.error} />;
   return (
-    <div className="popout">
-      <div className="popout-title">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
+    <div className="flex h-screen flex-col bg-black">
+      <div className="px-2 py-1 font-mono text-[14px] text-[#ccc]">{decodeURIComponent(path.replace(/^(terminal|session)\//, ""))}</div>
       <Terminal path={path} />
     </div>
   );

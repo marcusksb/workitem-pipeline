@@ -2,20 +2,32 @@ import { useEffect, useState } from "react";
 
 import { api } from "./api";
 import { Dialog } from "./Dialog";
+import { ErrorText, Muted } from "./parts";
 import { Source, StageSource as Sources } from "./types";
+import { Badge } from "@/components/ui/badge";
+import { NativeSelect } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type Props = { label: string; stage: string; board: string; workspaces: string[]; onClose: () => void };
 
 function File({ source }: { source: Source }) {
   const where = [source.origin, source.note].filter(Boolean).join(", ");
   return (
-    <div className="source">
-      <p className="source-path">
-        <strong>{source.name}</strong>
-        {source.path && <code title={source.path}>{source.path}</code>}
-        {where && <span className="badge">{where}</span>}
+    <div className="grid gap-1.5">
+      <p className="flex flex-wrap items-center gap-2">
+        <strong className="text-[15px]">{source.name}</strong>
+        {source.path && (
+          <code className="font-mono text-[14px] [overflow-wrap:anywhere] text-muted-foreground" title={source.path}>
+            {source.path}
+          </code>
+        )}
+        {where && <Badge>{where}</Badge>}
       </p>
-      {source.error ? <p className="error">{source.error}</p> : <pre>{source.content}</pre>}
+      {source.error ? (
+        <ErrorText>{source.error}</ErrorText>
+      ) : (
+        <pre className="max-h-[55vh] overflow-auto rounded-md border border-border bg-muted p-2.5 font-mono text-[14px] whitespace-pre">{source.content}</pre>
+      )}
     </div>
   );
 }
@@ -37,30 +49,32 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
   const hasProse = !!sources?.prose;
   const shown = tab === "script" && hasScript ? "script" : tab === "prose" && hasProse ? "prose" : hasProse ? "prose" : "script";
   return (
-    <Dialog title={`${label}: what runs`} onClose={onClose}>
+    <Dialog title={`${label}: what runs`} onClose={onClose} className="max-w-[760px]">
       {workspaces.length > 1 && (
-        <select value={workspace} onChange={(e) => setWorkspace(e.target.value)} aria-label="Workspace">
+        <NativeSelect className="w-auto" value={workspace} onChange={(e) => setWorkspace(e.target.value)} aria-label="Workspace">
           {workspaces.map((name) => <option key={name}>{name}</option>)}
-        </select>
+        </NativeSelect>
       )}
       {sources && (
-        <p className="stage-model">
-          Model: {sources.model ? <code>{sources.model}</code> : <span className="muted">agent default</span>}
+        <p className="text-[15px]">
+          Model: {sources.model ? <code className="font-mono text-[14px]">{sources.model}</code> : <span className="text-muted-foreground">agent default</span>}
         </p>
       )}
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={shown === "prose"} className={shown === "prose" ? "active" : ""} disabled={!hasProse} onClick={() => setTab("prose")}>
-          Skill / prompt
-        </button>
-        <button role="tab" aria-selected={shown === "script"} className={shown === "script" ? "active" : ""} disabled={!hasScript} onClick={() => setTab("script")}>
-          Script
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
-      {!sources && !error && <p className="empty">Loading…</p>}
+      <Tabs value={shown} onValueChange={(value) => setTab(value as "script" | "prose")}>
+        <TabsList>
+          <TabsTrigger value="prose" disabled={!hasProse}>
+            Skill / prompt
+          </TabsTrigger>
+          <TabsTrigger value="script" disabled={!hasScript}>
+            Script
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {error && <ErrorText>{error}</ErrorText>}
+      {!sources && !error && <Muted>Loading…</Muted>}
       {sources && shown === "prose" && sources.prose && <File source={sources.prose} />}
       {sources && shown === "script" && sources.scripts.map((script, i) => <File key={i} source={script} />)}
-      {sources && !hasProse && !hasScript && <p className="empty">This stage runs nothing.</p>}
+      {sources && !hasProse && !hasScript && <Muted>This stage runs nothing.</Muted>}
     </Dialog>
   );
 }

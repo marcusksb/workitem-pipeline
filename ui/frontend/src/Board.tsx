@@ -2,19 +2,22 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
-import { Dialog } from "./Dialog";
+import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { Choice, Dialog, DialogForm } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { PrStatus } from "./PrStatus";
 import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
+import { ErrorText, Muted } from "./parts";
 import { StageSource } from "./StageSource";
+import { STAGE_DOT } from "./tone";
 import type { View } from "./TopBar";
 import { Item, Pipelines } from "./types";
 import { Tab } from "./url";
 import { useRun } from "./useRun";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Props = {
   items: Item[];
@@ -75,22 +78,22 @@ function ClearColumn({ items, runner: { busy, run } }: { items: Item[]; runner: 
       </Button>
       {open && (
         <Dialog title="Clear column" onClose={() => setOpen(false)}>
-          <form className="dialog-form" onSubmit={submit}>
-            <label className="choice">
+          <DialogForm onSubmit={submit}>
+            <Choice>
               <input type="radio" name="clear" checked={!all} onChange={() => setAll(false)} />
               Only workitems without follow-ups ({withoutFollowUps.length})
-            </label>
-            <label className="choice">
+            </Choice>
+            <Choice>
               <input type="radio" name="clear" checked={all} onChange={() => setAll(true)} />
               All workitems ({items.length})
-            </label>
-            <span className="hint">
+            </Choice>
+            <Muted>
               Their agent sessions are stopped, and their worktrees and workitem folders are deleted. This cannot be recovered. Branches and PRs stay.
-            </span>
-            <button type="submit" disabled={chosen.length === 0}>
+            </Muted>
+            <Button type="submit" variant="danger" disabled={chosen.length === 0}>
               Remove {chosen.length} workitem{chosen.length === 1 ? "" : "s"}
-            </button>
-          </form>
+            </Button>
+          </DialogForm>
         </Dialog>
       )}
     </>
@@ -138,7 +141,14 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
   return (
     <div
       style={depth ? { marginLeft: depth * 16 } : undefined}
-      className={`card${selected ? " selected" : ""}${isWorking(item) ? " working" : ""}${isBlocked(item) ? " blocked" : needsApproval(item) ? " gate" : ""}`}
+      className={cn(
+        "card flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-left shadow-[0_1px_2px_rgb(16_24_40/0.04)] outline-none hover:border-primary/35 focus-visible:ring-[3px] focus-visible:ring-ring/30",
+        "group-data-[view=list]/board:flex-row group-data-[view=list]/board:flex-wrap group-data-[view=list]/board:items-center group-data-[view=list]/board:gap-x-3 group-data-[view=list]/board:gap-y-1 group-data-[view=list]/board:py-2",
+        depth > 0 && "w-auto border-l-[3px]",
+        isBlocked(item) ? "blocked border-blocked/75 inset-ring inset-ring-blocked/75 bg-[color-mix(in_srgb,var(--blocked)_3%,var(--card))]" : isWaiting(item) ? "waiting border-waiting/75 inset-ring inset-ring-waiting/75" : needsApproval(item) && "border-gate/35 inset-ring inset-ring-gate/35",
+        isWorking(item) && "working",
+        selected && "selected bg-[color-mix(in_srgb,var(--primary)_12%,var(--card))]",
+      )}
       role="button"
       tabIndex={0}
       onClick={onSelect}
@@ -149,11 +159,11 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
         }
       }}
     >
-      <div className="title">
-        {icon && <span className="kind-icon" title={item.kind}>{icon}</span>}
+      <div className="text-[15.5px] leading-[1.4] font-medium [overflow-wrap:anywhere] group-data-[view=list]/board:order-1 group-data-[view=list]/board:min-w-0 group-data-[view=list]/board:flex-[1_1_240px]">
+        {icon && <span className="mr-1.5 text-sm leading-none" title={item.kind}>{icon}</span>}
         {item.title}
       </div>
-      <div className="card-chips">
+      <div className="flex min-w-0 flex-wrap gap-1 *:max-w-full group-data-[view=list]/board:order-2">
         <Badge>{item.kind}</Badge>
         {showWorkspace && (
           <Badge title={item.workspace}>
@@ -172,9 +182,9 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
           <Badge title="Commits in the worktree that are not on any remote">{item.unpushed} unpushed</Badge>
         )}
       </div>
-      <div className="card-foot">
-        <AgentStatus item={item} className="card-status" />
-        <PrStatus item={item} className="card-pr" />
+      <div className="flex min-w-0 items-center gap-2 empty:hidden group-data-[view=list]/board:contents">
+        <AgentStatus item={item} className="group-data-[view=list]/board:order-4 group-data-[view=list]/board:max-w-[320px]" />
+        <PrStatus item={item} className="ml-auto flex-none group-data-[view=list]/board:order-3 group-data-[view=list]/board:ml-0" />
       </div>
     </div>
   );
@@ -191,15 +201,18 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
     ["clear", clear.error],
   ].filter(([, error]) => error);
   return (
-    <section className={`column${name === UNKNOWN_STAGE ? " unknown" : ""}${pause.paused ? " paused" : ""}`} data-stage={name}>
-      <h2>
-        <span className="column-dot" aria-hidden="true" />
-        <span className="column-label" title={label}>
+    <section
+      className="column flex min-h-[120px] flex-col gap-1.5 rounded-[10px] bg-[color-mix(in_srgb,var(--foreground)_4%,var(--background))] p-1.5 group-data-[view=list]/board:min-h-0"
+      data-stage={name}
+    >
+      <h2 className="sticky -top-4 z-[1] flex min-h-8 items-center gap-2 bg-inherit pl-1.5 text-[15px] font-semibold capitalize">
+        <span className={cn("size-2 flex-none rounded-full", name === UNKNOWN_STAGE ? "bg-blocked" : (STAGE_DOT[name] ?? "bg-muted-foreground"))} aria-hidden="true" />
+        <span className="min-w-0 truncate" title={label}>
           {label}
         </span>
-        {pause.paused && <Badge className="paused">Paused</Badge>}
-        <span className="count">{items.length}</span>
-        <span className="column-actions">
+        {pause.paused && <Badge>Paused</Badge>}
+        <span className="text-xs font-normal text-muted-foreground">{items.length}</span>
+        <span className="ml-auto flex items-center">
           {name !== UNKNOWN_STAGE && (
             <Button variant="ghost" size="icon" className="size-6" title="What this stage runs" aria-label={`What ${label} runs`} onClick={onInspect}>
               <IconInfo />
@@ -209,11 +222,11 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
           {final && items.length > 0 && <ClearColumn items={items} runner={clear} />}
         </span>
       </h2>
-      <div className="cards">
+      <div className={cn("flex flex-col gap-1.5", pause.paused && "[&>:not(p)]:opacity-55")}>
         {errors.map(([source, error]) => (
-          <p className="error column-error" key={source}>
+          <ErrorText className="text-xs" key={source}>
             {error}
-          </p>
+          </ErrorText>
         ))}
         {children}
       </div>
@@ -248,11 +261,14 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
   return (
     <>
       {broken.map(({ workspace, pipeline, error }) => (
-        <p className="error" key={workspace}>
+        <ErrorText className="mb-2" key={workspace}>
           {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}
-        </p>
+        </ErrorText>
       ))}
-      <div className={`board${view === "list" ? " list" : ""}`}>
+      <div
+        data-view={view}
+        className={cn("board group/board gap-2.5", view === "list" ? "list flex flex-col" : "grid auto-cols-[minmax(240px,1fr)] grid-flow-col")}
+      >
         {shown.map(({ name, label, final }) => {
           const inColumn = columns[name] ?? [];
           const pause = pauseState(pipelines, workspaces, active, name);

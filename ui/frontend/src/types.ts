@@ -61,6 +61,8 @@ export type Item = {
   pr_watch: boolean;
   develops: boolean;
   review: Review | null;
+  /** Branch checked out in the item's worktree; null without a worktree. */
+  branch: string | null;
   /** Commits in the item's worktree that no remote has; null without a worktree. */
   unpushed: number | null;
   /** Open `- [ ]` items under `## Follow-ups`. */

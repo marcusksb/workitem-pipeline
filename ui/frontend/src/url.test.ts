@@ -9,9 +9,9 @@ describe("readRoute", () => {
       tab: "terminal",
     });
     expect(readRoute("#app/x-1/children")).toEqual({ item: { workspace: "app", dir: "x-1" }, tab: "children" });
-    expect(readRoute("#my%20proj/a%2Fb/actions")).toEqual({
+    expect(readRoute("#my%20proj/a%2Fb/files")).toEqual({
       item: { workspace: "my proj", dir: "a/b" },
-      tab: "actions",
+      tab: "files",
     });
   });
 

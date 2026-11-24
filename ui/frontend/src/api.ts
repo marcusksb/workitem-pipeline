@@ -49,7 +49,6 @@ export const api = {
   prConversation: (item: Item) => request<PrConversation>("GET", `${itemUrl(item)}/pr`),
   sessions: () => request<AgentSession[]>("GET", "/api/sessions"),
   approve: (item: Item) => request<void>("POST", `${itemUrl(item)}/approve`),
-  reject: (item: Item, comment: string) => request<void>("POST", `${itemUrl(item)}/reject`, { comment }),
   editBrief: (item: Item, base: string, body: string) => request<void>("POST", `${itemUrl(item)}/brief`, { base, body }),
   editFrontmatter: (item: Item, fields: Record<string, string>) =>
     request<void>("POST", `${itemUrl(item)}/frontmatter`, { fields }),

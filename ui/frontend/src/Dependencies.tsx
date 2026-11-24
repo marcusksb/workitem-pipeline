@@ -4,6 +4,10 @@ import { boardLabel, isBlocked, isWaiting, openDependencies, shownBoard, stageTi
 import { IconX } from "./icons";
 import { Item, Pipelines } from "./types";
 import { WaitingChip } from "./WaitingChip";
+import { ErrorText, Muted } from "./parts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/input";
 
 type Props = { item: Item; items: Item[]; pipelines: Pipelines | undefined; onSelect: (item: Item) => void; onSaved: () => void };
 
@@ -27,54 +31,54 @@ export function Dependencies({ item, items, pipelines, onSelect, onSaved }: Prop
     setBusy(false);
   };
   return (
-    <div className="brief dependencies">
-      {item.depends_on.length === 0 && <p className="empty">Depends on nothing.</p>}
-      <ul>
+    <div className="dependencies grid content-start gap-3">
+      {item.depends_on.length === 0 && <Muted className="italic">Depends on nothing.</Muted>}
+      <ul className="empty:hidden">
         {item.depends_on.map((dir) => {
           const other = items.find((i) => i.workspace === item.workspace && i.dir === dir);
           return (
-            <li key={dir} className={other && isBlocked(other) ? "blocked" : ""}>
-              <div className="child-head">
+            <li key={dir} className="flex flex-col gap-1 border-b border-border py-2.5">
+              <div className="child-head flex items-center justify-between gap-2">
                 {other ? (
-                  <button className="link" onClick={() => onSelect(other)}>
+                  <button className="link cursor-pointer text-left text-[15px] font-semibold text-primary hover:underline" onClick={() => onSelect(other)}>
                     {other.title}
                   </button>
                 ) : (
-                  <span>{dir}</span>
+                  <span className="font-mono text-[14px]">{dir}</span>
                 )}
-                <button className="link" disabled={busy} aria-label={`Remove ${dir}`} onClick={() => void save(item.depends_on.filter((d) => d !== dir))}>
+                <Button variant="ghost" size="icon" disabled={busy} aria-label={`Remove ${dir}`} onClick={() => void save(item.depends_on.filter((d) => d !== dir))}>
                   <IconX />
-                </button>
+                </Button>
               </div>
-              <div className="meta">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {other ? (
                   <>
-                    <span className="badge">{boardLabel(pipelines, other.workspace, shownBoard(other, pipelines))}</span>
-                    <span className="badge">{stageTitle(other, pipelines)}</span>
-                    {open.includes(other) ? <span className="chip waiting">not merged</span> : <span className="chip pr-moved">merged</span>}
-                    {isBlocked(other) && <span className="chip blocked">blocked</span>}
+                    <Badge>{boardLabel(pipelines, other.workspace, shownBoard(other, pipelines))}</Badge>
+                    <Badge>{stageTitle(other, pipelines)}</Badge>
+                    {open.includes(other) ? <Badge variant="wait">not merged</Badge> : <Badge variant="good">merged</Badge>}
+                    {isBlocked(other) && <Badge variant="danger">blocked</Badge>}
                     {isWaiting(other) && <WaitingChip item={other} />}
                   </>
                 ) : (
-                  <span className="empty">gone, counts as merged</span>
+                  <span className="text-[15px] text-muted-foreground italic">gone, counts as merged</span>
                 )}
               </div>
-              {other && isBlocked(other) && <p className="reason">{other.agent_status.replace(/^blocked:\s*/, "")}</p>}
+              {other && isBlocked(other) && <p className="text-[15px] whitespace-pre-wrap text-destructive">{other.agent_status.replace(/^blocked:\s*/, "")}</p>}
             </li>
           );
         })}
       </ul>
       {others.length > 0 && (
-        <select value="" disabled={busy} aria-label="Add a dependency" onChange={(e) => e.target.value && void save([...item.depends_on, e.target.value])}>
+        <NativeSelect className="w-auto max-w-full" value="" disabled={busy} aria-label="Add a dependency" onChange={(e) => e.target.value && void save([...item.depends_on, e.target.value])}>
           <option value="">Add a dependency…</option>
           {others.map((other) => (
             <option key={other.dir} value={other.dir}>
               {other.dir} ({boardLabel(pipelines, other.workspace, other.board)})
             </option>
           ))}
-        </select>
+        </NativeSelect>
       )}
-      {error && <span className="error">{error}</span>}
+      {error && <ErrorText>{error}</ErrorText>}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "./api";
 import { toggleTask } from "./boardState";
 import { markdownLinks } from "./markdownLinks";
+import { ErrorText } from "./parts";
 import { Item } from "./types";
 
 type Props = { item: Item; body: string; onSaved: () => void };
@@ -57,7 +58,7 @@ export function BriefView({ item, body, onSaved }: Props) {
 
   return (
     <>
-      {error && <p className="error">{error}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
       <Markdown remarkPlugins={[remarkGfm]} components={components}>
         {body}
       </Markdown>

@@ -1,8 +1,11 @@
 import { FormEvent, useState } from "react";
 import { api } from "./api";
-import { Dialog } from "./Dialog";
+import { Dialog, DialogForm, Field } from "./Dialog";
 import { boardLabel } from "./boardState";
+import { ErrorText, Muted } from "./parts";
 import { Pipelines, Workspace } from "./types";
+import { Button } from "@/components/ui/button";
+import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 
 /** The dialogs of a workspace: the sidebar and the top bar open them. */
 
@@ -24,15 +27,16 @@ export function AddWorkspaceDialog({ onClose, onAdded }: { onClose: () => void; 
   };
   return (
     <Dialog title="Add workspace" onClose={onClose}>
-      <form className="dialog-form" onSubmit={add}>
-        <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="content-delivery" pattern="[A-Za-z0-9_-]+" required autoFocus />
-        </label>
-        <span className="hint">Creates ~/.workitems-pipeline/workspaces/{name || "<name>"}. Add a board per repository next.</span>
-        <button type="submit">Add</button>
-        {error && <span className="error">{error}</span>}
-      </form>
+      <DialogForm onSubmit={add}>
+        <Field label="Name">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="content-delivery" pattern="[A-Za-z0-9_-]+" required autoFocus />
+        </Field>
+        <Muted>Creates ~/.workitems-pipeline/workspaces/{name || "<name>"}. Add a board per repository next.</Muted>
+        <Button type="submit" variant="primary">
+          Add
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
     </Dialog>
   );
 }
@@ -53,37 +57,34 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
   };
   return (
     <Dialog title={`Settings of ${workspace.name}`} onClose={onClose}>
-      <form className="dialog-form" onSubmit={save}>
-        {workspace.account_error && <span className="error">{workspace.account_error}. No sessions or watchers run until it is fixed.</span>}
-        <label>
-          Agent
-          <input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="default (claude)" autoFocus />
-        </label>
-        <span className="hint">
+      <DialogForm onSubmit={save}>
+        {workspace.account_error && <ErrorText>{workspace.account_error}. No sessions or watchers run until it is fixed.</ErrorText>}
+        <Field label="Agent">
+          <Input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="default (claude)" autoFocus />
+        </Field>
+        <Muted>
           One executable on PATH or an absolute path, taking the same arguments as claude. Put flags in a wrapper script. Empty uses
           the default. Applies to sessions started from now on.
-        </span>
-        <label>
-          Issue tracker
-          <select value={tracker} onChange={(e) => setTracker(e.target.value)}>
+        </Muted>
+        <Field label="Issue tracker">
+          <NativeSelect value={tracker} onChange={(e) => setTracker(e.target.value)}>
             <option value="jira">Jira</option>
             <option value="github">GitHub Issues</option>
-          </select>
-        </label>
-        <span className="hint">
-          Where items link their issue. Boards hold tracker-specific issue states, so pick it before adding boards.
-        </span>
-        <label>
-          GitHub account
-          <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="gh's active account" />
-        </label>
-        <span className="hint">
+          </NativeSelect>
+        </Field>
+        <Muted>Where items link their issue. Boards hold tracker-specific issue states, so pick it before adding boards.</Muted>
+        <Field label="GitHub account">
+          <Input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="gh's active account" />
+        </Field>
+        <Muted>
           A login gh is signed in to (gh auth login). Its token goes to this workspace's sessions, watchers and PR actions. Empty uses
           gh's active account.
-        </span>
-        <button type="submit">Save</button>
-        {error && <span className="error">{error}</span>}
-      </form>
+        </Muted>
+        <Button type="submit" variant="primary">
+          Save
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
     </Dialog>
   );
 }
@@ -91,24 +92,24 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
 export function WatchersDialog({ workspace, onClose }: { workspace: Workspace; onClose: () => void }) {
   return (
     <Dialog title={`Watchers of ${workspace.name}`} onClose={onClose}>
-      <div className="dialog-form">
-        {workspace.error && <span className="error">{workspace.error}. The last valid version is in use.</span>}
+      <div className="grid gap-3 text-[15px]">
+        {workspace.error && <ErrorText>{workspace.error}. The last valid version is in use.</ErrorText>}
         {workspace.watch?.length ? (
-          <ul className="workspace-watchers">
+          <ul className="grid list-disc gap-1 pl-5">
             {workspace.watch.map((watch, index) => (
               <li key={index}>
-                <code>{[watch.command, ...watch.args].join(" ")}</code> every {watch.every}
-                {watch.implicit && <span className="hint"> (implicit: a board reads PRs)</span>}
+                <code className="font-mono text-[14px]">{[watch.command, ...watch.args].join(" ")}</code> every {watch.every}
+                {watch.implicit && <span className="text-muted-foreground"> (implicit: a board reads PRs)</span>}
               </li>
             ))}
           </ul>
         ) : (
-          <span className="hint">None.</span>
+          <Muted>None.</Muted>
         )}
-        <span className="hint">
+        <Muted className="[&_code]:font-mono [&_code]:text-[14px]">
           Edit {workspace.dir}/workspace.toml to change them, e.g. <code>[[watch]]</code> with <code>every = "5m"</code> and{" "}
           <code>command = "issue-status"</code>. They get every item of the workspace on stdin and run in the workspace folder.
-        </span>
+        </Muted>
       </div>
     </Dialog>
   );
@@ -133,31 +134,29 @@ export function AddBoardDialog({ workspace, onClose, onAdded }: { workspace: str
   };
   return (
     <Dialog title={`Add a board to ${workspace}`} onClose={onClose}>
-      <form className="dialog-form" onSubmit={add}>
-        <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="backend" pattern="[A-Za-z0-9_-]+" required autoFocus />
-        </label>
-        <label>
-          Repository path
-          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="/absolute/path/to/repo" required />
-        </label>
-        <label>
-          Issue project
-          <input value={issueProject} onChange={(e) => setIssueProject(e.target.value)} placeholder="GitHub owner/repo or Jira project key (optional)" />
-        </label>
-        <label>
-          Reviewers
-          <input value={reviewers} onChange={(e) => setReviewers(e.target.value)} placeholder="org/team (optional)" />
-        </label>
-        <span className="hint">
+      <DialogForm onSubmit={add}>
+        <Field label="Name">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="backend" pattern="[A-Za-z0-9_-]+" required autoFocus />
+        </Field>
+        <Field label="Repository path">
+          <Input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="/absolute/path/to/repo" required />
+        </Field>
+        <Field label="Issue project">
+          <Input value={issueProject} onChange={(e) => setIssueProject(e.target.value)} placeholder="GitHub owner/repo or Jira project key (optional)" />
+        </Field>
+        <Field label="Reviewers">
+          <Input value={reviewers} onChange={(e) => setReviewers(e.target.value)} placeholder="org/team (optional)" />
+        </Field>
+        <Muted>
           Starts with the bundled stages and the issue states of the workspace's tracker. On GitHub an empty issue project means the
           repo's own issues; on Jira it is needed to create issues. Edit boards/{name || "<name>"}.json in the workspace folder to change
           any of it.
-        </span>
-        <button type="submit">Add</button>
-        {error && <span className="error">{error}</span>}
-      </form>
+        </Muted>
+        <Button type="submit" variant="primary">
+          Add
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
     </Dialog>
   );
 }
@@ -189,10 +188,9 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input
   };
   return (
     <Dialog title={`New workitem in ${workspace.name}`} onClose={onClose}>
-      <form className="dialog-form" onSubmit={create}>
-        <label>
-          Task
-          <textarea
+      <DialogForm onSubmit={create}>
+        <Field label="Task">
+          <Textarea
             value={input}
             onChange={(e) => onInput(e.target.value)}
             onKeyDown={(e) => {
@@ -206,25 +204,26 @@ export function NewWorkitemDialog({ workspace, pipelines, board: onScreen, input
             required
             autoFocus
           />
-        </label>
+        </Field>
         {boards.length > 1 && (
-          <label>
-            Board
-            <select value={board} onChange={(e) => setBoard(e.target.value)}>
+          <Field label="Board">
+            <NativeSelect value={board} onChange={(e) => setBoard(e.target.value)}>
               {boards.map((name) => (
                 <option key={name} value={name}>
                   {boardLabel(pipelines, workspace.name, name)}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </Field>
         )}
-        <span className="hint">
+        <Muted>
           Enter creates, Shift+Enter adds a line. A task that needs changes in the repos of several boards becomes one linked item per board.
-        </span>
-        <button type="submit">Create</button>
-        {error && <span className="error">{error}</span>}
-      </form>
+        </Muted>
+        <Button type="submit" variant="primary">
+          Create
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
     </Dialog>
   );
 }

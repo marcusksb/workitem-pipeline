@@ -61,7 +61,7 @@ function seed() {
   );
   write(
     join(ws, "plans/abc123.md"),
-    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
+    "---\ntopic: Split the auth module\nsummary: Comparing a facade with a full split\nstatus: waiting\nworkitems: T-2-gate\nclaude_session: 1\ncreated: 2\n---\n\n## Prompt\n\nSplit the auth module\n\n## Plan\n\n1. Extract the token store\n",
   );
   write(
     join(ws, "plans/def456.md"),
@@ -145,10 +145,10 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   await page.keyboard.type("postgres\n");
   await expect(terminal).toContainText("got:postgres");
 
-  await expect(page.getByRole("link", { name: "PR #42 ↗" }).first()).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
-  await page.getByRole("button", { name: "PR", exact: true }).click();
+  await expect(page.locator(".detail").getByRole("link", { name: "#42 merge unknown" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
+  await page.getByRole("tab", { name: "PR", exact: true }).click();
   await expect(page.locator(".brief .pr-link")).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
-  await page.getByRole("button", { name: "Brief", exact: true }).click();
+  await page.getByRole("tab", { name: "Brief", exact: true }).click();
   await expect(page.getByText("Hello brief text.")).toBeVisible();
 
   // Closing the panel detaches; the agent session survives.
@@ -156,45 +156,47 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   execFileSync("tmux", ["-L", socket, "has-session", "-t", "wi-T-1-demo"]);
 });
 
-test("approve and reject at the gate from the Actions tab", async ({ page }) => {
+test("approve at the gate from the gate bar", async ({ page }) => {
   await page.goto(base);
   const gateColumn = page.locator(".column", { hasText: "ready for development" });
 
   // Approving moves the item on, to the stage the gate names.
   await gateColumn.getByText("Approve me").click();
-  await page.getByRole("button", { name: "Actions" }).click();
-  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.locator(".detail").getByRole("button", { name: "Discuss brief" })).toHaveCount(2);
+  await page.locator(".detail").getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.locator(".column", { hasText: "in development" })).toContainText("Approve me");
   await expect(gateColumn).not.toContainText("Approve me");
-
-  // Rejecting needs a comment and sends the item to the stage the gate names.
-  await gateColumn.getByText("Brief waiting").click();
-  await page.getByRole("button", { name: "Actions" }).click();
-  await page.getByPlaceholder("Why is this rejected?").fill("needs a rollback plan");
-  await page.getByRole("button", { name: /Reject/ }).click();
-  await expect(page.locator(".column", { hasText: "analyze" }).first()).toContainText("Brief waiting");
 });
 
 test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.goto(base);
   await page.locator(".board").getByText("Demo blocked item").click();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
-  await page.getByRole("button", { name: "Actions" }).click();
-  await expect(page).toHaveURL(/#demo\/T-1-demo\/actions$/);
-  await expect(page.getByRole("button", { name: "Remove workitem" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Info" }).click();
+  await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
   // T-1 is blocked with a live session, so the default tab is the terminal.
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
   await page.goForward();
-  await expect(page).toHaveURL(/#demo\/T-1-demo\/actions$/);
+  await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
 
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.locator(".detail")).toHaveCount(0);
 
   await page.goto(`${base.split("#")[0]}#demo/T-1-demo/terminal`);
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
+
+  // A dialog opened from the board renders outside it, but a click in it does not close the item.
+  await page.getByRole("button", { name: "What analyze runs" }).click();
+  const source = page.getByRole("dialog", { name: "analyze: what runs" });
+  await source.getByRole("heading", { name: "analyze: what runs" }).click();
+  await page.keyboard.press("Escape");
+  await expect(source).toHaveCount(0);
+  await expect(page.locator(".detail")).toHaveCount(1);
 
   // A click on the board outside any card closes the item like the Close button.
   await page.locator(".column h2").first().click({ position: { x: 2, y: 2 } });
@@ -368,7 +370,7 @@ test("a card that waits on an unmerged item opens its Depends on tab, which open
   await expect(deps).toContainText("not merged");
   await deps.locator(".child-head .link").first().click();
   await expect(page).toHaveURL(/#demo\/T-1-demo\?board=default$/);
-  await expect(page.getByRole("tablist").getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tablist", { name: "Boards" }).getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
 
   // The tab edits the list; Info no longer shows it.
   await page.goto(`${base.split("#")[0]}#demo/T-7-ui/info`);
@@ -437,7 +439,7 @@ test("the Learnings button shows and edits the learnings of the board on screen"
   await dialog.getByRole("button", { name: "Close" }).click();
 
   // Another board has its own file, empty until you add a rule.
-  await page.getByRole("tablist").getByRole("tab", { name: /research/ }).click();
+  await page.getByRole("tablist", { name: "Boards" }).getByRole("tab", { name: /research/ }).click();
   await page.getByRole("button", { name: "Learnings", exact: true }).click();
   const research = page.getByRole("dialog", { name: "Learnings in demo · research" });
   await expect(research.locator(".source-path code")).toContainText("boards/research/learnings.md");
@@ -488,7 +490,7 @@ test("open follow-ups show on the card and the detail chip jumps to them", async
   await expect(chip).toHaveAttribute("title", "• Deploy to prod\n• Remove the flag");
 
   await page.goto(`${base.split("#")[0]}#demo/T-6-follow-ups/info`);
-  await page.locator(".detail header .chip.follow-ups").click();
+  await page.locator(".detail .chip.follow-ups").click();
   await expect(page.locator("#follow-ups")).toBeInViewport();
 });
 
@@ -501,15 +503,19 @@ test("planning sessions show in the sidebar and open in the side panel", async (
   await expect(bar.locator(".plan-card.ended")).toContainText("Old idea");
 
   await live.click();
-  await expect(page.locator(".detail h2")).toHaveText("Split the auth module");
+  await expect(page.locator(".detail").getByRole("heading", { level: 2, name: "Split the auth module", exact: true })).toBeVisible();
   await expect(page.locator(".detail .xterm-rows")).toContainText("planning-agent-ready");
-  await page.getByRole("button", { name: "Plan", exact: true }).click();
+  await page.getByRole("tab", { name: "Plan", exact: true }).click();
   await expect(page.locator(".detail .brief")).toContainText("Extract the token store");
   expect(page.url()).toContain("plan=demo%2Fabc123");
+  await page.getByRole("tab", { name: /Workitems/ }).click();
+  await page.locator(".detail").getByRole("button", { name: "Brief waiting" }).click();
+  await expect(page).toHaveURL(/#demo\/T-2-gate/);
+  await page.goBack();
 
   await bar.locator(".plan-card", { hasText: "Old idea" }).click();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Plan", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Plan", exact: true })).toHaveCount(0);
 
   await bar.getByRole("button", { name: /Plans ·/ }).click();
   await expect(bar.locator(".plan-card")).toHaveCount(0);
@@ -519,7 +525,7 @@ test("planning sessions show in the sidebar and open in the side panel", async (
 
 test("moving an item into a final stage shows a toast that opens it", async ({ page }) => {
   await page.goto(base);
-  await page.getByRole("tablist").getByRole("tab", { name: /research/ }).click();
+  await page.getByRole("tablist", { name: "Boards" }).getByRole("tab", { name: /research/ }).click();
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
   execFileSync("python3", [resolve("../../skills/workitem-pipeline/bin/workitem-move"), join(ws, "T-4-research/workitem.md"), "findings"]);
 

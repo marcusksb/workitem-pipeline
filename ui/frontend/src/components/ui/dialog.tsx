@@ -44,7 +44,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-auto rounded-xl border border-border bg-popover p-4 text-[14px] text-popover-foreground shadow-xl outline-none duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          "fixed top-1/2 left-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-auto rounded-xl border border-border bg-popover p-4 text-[16px] text-popover-foreground shadow-xl outline-none duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           className,
         )}
         {...props}
@@ -76,7 +76,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-[15px] leading-tight font-semibold tracking-[-0.01em]", className)}
+      className={cn("text-[17px] leading-tight font-semibold tracking-[-0.01em]", className)}
       {...props}
     />
   );
@@ -86,7 +86,7 @@ function DialogDescription({ className, ...props }: React.ComponentProps<typeof 
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-[13px] text-muted-foreground", className)}
+      className={cn("text-[15px] text-muted-foreground", className)}
       {...props}
     />
   );

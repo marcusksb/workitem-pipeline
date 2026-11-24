@@ -3,6 +3,10 @@ import { api } from "./api";
 import { frontmatterFields } from "./boardState";
 import { IssueStatusChip } from "./IssueStatusChip";
 import { IconCheck, IconPencil, IconX } from "./icons";
+import { ActionBar, ErrorText, Muted } from "./parts";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Item } from "./types";
 
 /** Fields only a stage move may change; the backend refuses them too. */
@@ -11,16 +15,16 @@ const READ_ONLY = ["stage", "board"];
 const isUrl = (value: string) => /^https?:\/\/\S+$/.test(value);
 
 function Value({ name, value, category }: { name: string; value: string; category: string }) {
-  if (!value) return <span className="empty">empty</span>;
+  if (!value) return <span className="text-muted-foreground italic">empty</span>;
   if (isUrl(value))
     return (
-      <a href={value} target="_blank" rel="noreferrer">
+      <a className="text-primary no-underline hover:underline" href={value} target="_blank" rel="noreferrer">
         {value} ↗
       </a>
     );
-  if (name === "agent_status") return <span className={`chip ${value.startsWith("blocked") ? "blocked" : value.startsWith("waiting") ? "waiting" : "pr-moved"}`}>{value}</span>;
+  if (name === "agent_status") return <Badge className="h-auto whitespace-normal" variant={value.startsWith("blocked") ? "danger" : value.startsWith("waiting") ? "outline" : "info"}>{value}</Badge>;
   if (name === "issue_status") return <IssueStatusChip status={value} category={category} />;
-  if (name === "stage") return <span className="badge">{value}</span>;
+  if (name === "stage") return <Badge>{value}</Badge>;
   return <>{value}</>;
 }
 
@@ -32,7 +36,7 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
   const [draft, setDraft] = useState<Record<string, string>>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  if (fields.length === 0) return <p className="empty">No frontmatter.</p>;
+  if (fields.length === 0) return <Muted className="italic">No frontmatter.</Muted>;
 
   const changed = draft ? Object.fromEntries(fields.filter(([name, value]) => name in draft && draft[name] !== value).map(([name]) => [name, draft[name]])) : {};
   const close = () => {
@@ -54,33 +58,34 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
 
   return (
     <>
-      <div className="action-bar">
+      <ActionBar>
         {draft ? (
           <>
-            <button className="primary" disabled={busy || Object.keys(changed).length === 0} onClick={() => void save()}>
+            <Button variant="primary" disabled={busy || Object.keys(changed).length === 0} onClick={() => void save()}>
               <IconCheck />
               Save
-            </button>
-            <button disabled={busy} onClick={close}>
+            </Button>
+            <Button disabled={busy} onClick={close}>
               <IconX />
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
-          <button onClick={() => setDraft(Object.fromEntries(fields))}>
+          <Button onClick={() => setDraft(Object.fromEntries(fields))}>
             <IconPencil />
             Edit
-          </button>
+          </Button>
         )}
-        {error && <span className="error">{error}</span>}
-      </div>
-      <dl className="info">
+        {error && <ErrorText>{error}</ErrorText>}
+      </ActionBar>
+      <dl className="grid text-[15px]">
         {fields.map(([name, value], i) => (
-          <div key={`${name}-${i}`}>
-            <dt>{name}</dt>
-            <dd>
+          <div key={`${name}-${i}`} className="grid grid-cols-[minmax(110px,160px)_1fr] items-baseline gap-3 py-1.5">
+            <dt className="font-mono text-[14px] text-muted-foreground">{name}</dt>
+            <dd className="min-w-0 [overflow-wrap:anywhere]">
               {draft && !READ_ONLY.includes(name) ? (
-                <input
+                <Input
+                  className="h-7 px-1.5"
                   value={draft[name] ?? value}
                   onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
                   onKeyDown={(e) => e.key === "Enter" && Object.keys(changed).length > 0 && void save()}
