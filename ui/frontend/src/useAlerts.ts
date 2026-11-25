@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { blockedKey, isBlocked, issueDone, itemKey, newlyBlocked, newlyMatching, readyToMerge } from "./boardState";
+import { alertsFor, blockedKey, isBlocked, issueDone, itemKey, newlyBlocked, newlyMatching, readyToMerge } from "./boardState";
 import { Item } from "./types";
 
 let audio: AudioContext | undefined;
@@ -40,13 +40,16 @@ const matching = (items: Item[], matches: (item: Item) => boolean) => new Set(it
 
 /**
  * Beep, plus a notification while the page is not focused, when an item becomes blocked; a chime when its PR becomes ready to merge, a fanfare
- * when its issue becomes done. Items already in that state on first load stay quiet. Clicking a notification
- * calls `onOpen` with the item.
+ * when its issue becomes done. Items already in that state on first load stay quiet, and so does the item open in the detail panel
+ * (`openKey`) while the page has focus. Clicking a notification calls `onOpen` with the item.
  */
-export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => void) {
+export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => void, openKey: string | undefined) {
   // A notification is clicked long after it is shown, so it must call the latest `onOpen`, not the one of its render.
   const openRef = useRef(onOpen);
   openRef.current = onOpen;
+  // Read when a poll arrives, so opening another item does not rerun the effects.
+  const openKeyRef = useRef(openKey);
+  openKeyRef.current = openKey;
   const seen = useRef<Set<string>>(undefined);
   const ready = useRef<Set<string>>(undefined);
   const done = useRef<Set<string>>(undefined);
@@ -70,12 +73,13 @@ export function useAlerts(items: Item[] | undefined, onOpen: (item: Item) => voi
 
   useEffect(() => {
     if (!items) return;
-    const fresh = seen.current ? newlyBlocked(seen.current, items) : [];
+    const focused = document.hasFocus();
+    const fresh = seen.current ? newlyBlocked(seen.current, items).filter(alertsFor(openKeyRef.current, focused)) : [];
     seen.current = new Set(items.filter(isBlocked).map(blockedKey));
     if (fresh.length === 0) return;
     beep();
     // While the page has focus, the toasts show it already.
-    if (document.hasFocus()) return;
+    if (focused) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     for (const item of fresh) {
       const note = new Notification(`Workitem blocked (${item.workspace})`, { body: `${item.dir}: ${item.agent_status}` });

@@ -12,6 +12,10 @@ export const waitingFor = (item: Item) => item.agent_status.replace(/^waiting:?\
 
 export const blockedKey = (item: Item) => `${itemKey(item)}|${item.agent_status}`;
 
+/** Whether a blocked alert for `item` is worth raising: not for the item open in the detail panel (`openKey`, an `itemKey`) while the page
+ * has focus, since its question is on screen already. */
+export const alertsFor = (openKey: string | undefined, focused: boolean) => (item: Item) => !(focused && itemKey(item) === openKey);
+
 /** Blocked items that were not blocked with the same reason in `seen` (keys from `blockedKey`). */
 export function newlyBlocked(seen: Set<string>, items: Item[]): Item[] {
   return items.filter((item) => isBlocked(item) && !seen.has(blockedKey(item)));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, alertsFor, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -11,6 +11,18 @@ describe("newlyBlocked", () => {
     const fresh = item({ dir: "fresh", agent_status: "blocked: c" });
     const seen = new Set([blockedKey(old), blockedKey({ ...changed, agent_status: "blocked: a" })]);
     expect(newlyBlocked(seen, [old, changed, fresh, item({ dir: "ok" })]).map((i) => i.dir)).toEqual(["changed", "fresh"]);
+  });
+});
+
+describe("alertsFor", () => {
+  const open = item({ workspace: "app", dir: "open" });
+  const other = item({ workspace: "app", dir: "other" });
+  it("hides the open item while the page has focus", () => {
+    expect([open, other].filter(alertsFor("app/open", true)).map((i) => i.dir)).toEqual(["other"]);
+  });
+  it("keeps every item while the page has no focus or nothing is open", () => {
+    expect([open, other].filter(alertsFor("app/open", false))).toHaveLength(2);
+    expect([open, other].filter(alertsFor(undefined, true))).toHaveLength(2);
   });
 });
 
