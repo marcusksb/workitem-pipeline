@@ -48,7 +48,7 @@ export function QuickSearch({ items, actions, showWorkspace, onOpen, onClose }: 
                     action.run();
                   }}
                 >
-                  {action.label}
+                  <span className="font-semibold">{action.label}</span>
                 </CommandItem>
               ))}
             </CommandGroup>
