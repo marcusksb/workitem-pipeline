@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Action, prNumber, searchActions, searchItems, stageLabel, ticket } from "./boardState";
+import { Action, highlight, prNumber, searchActions, searchItems, stageLabel, ticket } from "./boardState";
 import { Dialog } from "./Dialog";
 import { Item } from "./types";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +27,22 @@ export function QuickSearch({ items, actions, showWorkspace, onOpen, onClose }: 
             const key = ticket(item.issue)?.key;
             return (
               <CommandItem key={`${item.workspace}/${item.dir}`} value={`${item.workspace}/${item.dir}`} onSelect={() => onOpen(item)}>
-                <span className="text-[16px]">{item.title}</span>
+                <span className="text-[16px]">
+                  <Marked text={item.title} query={query} />
+                </span>
                 <span className="flex flex-wrap gap-1">
                   {showWorkspace && <Badge>{item.workspace}</Badge>}
                   <Badge>{stageLabel(item.stage)}</Badge>
-                  {key && <Badge>{key}</Badge>}
-                  {pr && <Badge>PR #{pr}</Badge>}
+                  {key && (
+                    <Badge>
+                      <Marked text={key} query={query} />
+                    </Badge>
+                  )}
+                  {pr && (
+                    <Badge>
+                      <Marked text={`PR #${pr}`} query={query} />
+                    </Badge>
+                  )}
                 </span>
               </CommandItem>
             );
@@ -48,7 +58,9 @@ export function QuickSearch({ items, actions, showWorkspace, onOpen, onClose }: 
                     action.run();
                   }}
                 >
-                  <span className="font-semibold">{action.label}</span>
+                  <span className="font-semibold">
+                    <Marked text={action.label} query={query} />
+                  </span>
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -56,5 +68,18 @@ export function QuickSearch({ items, actions, showWorkspace, onOpen, onClose }: 
         </CommandList>
       </Command>
     </Dialog>
+  );
+}
+
+/** `text` with the words of `query` marked. */
+function Marked({ text, query }: { text: string; query: string }) {
+  return highlight(text, query).map((run, i) =>
+    run.match ? (
+      <mark key={i} className="rounded-sm bg-primary/30 text-inherit">
+        {run.text}
+      </mark>
+    ) : (
+      run.text
+    ),
   );
 }

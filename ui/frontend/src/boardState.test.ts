@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -288,6 +288,19 @@ describe("searchItems", () => {
 
   it("returns nothing for an empty query", () => {
     expect(dirs("  ")).toEqual([]);
+  });
+});
+
+describe("highlight", () => {
+  const marks = (text: string, query: string) => highlight(text, query).map((run) => (run.match ? `[${run.text}]` : run.text)).join("");
+
+  it("marks every occurrence of every word, case-insensitively", () => {
+    expect(marks("New plan for New board", "new PL")).toBe("[New] [pl]an for [New] board");
+  });
+
+  it("merges overlapping matches and leaves an empty query unmarked", () => {
+    expect(marks("Workitem", "work rki")).toBe("[Worki]tem");
+    expect(marks("Workitem", " ")).toBe("Workitem");
   });
 });
 
