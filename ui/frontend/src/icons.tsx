@@ -168,6 +168,13 @@ export const IconPanelLeft = make(
     <path d="M9 3v18" />
   </>,
 );
+/** A window with a right panel and an arrow out: close a side panel. */
+export const IconPanelRightClose = make(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M15 3v18M8 9l3 3-3 3" />
+  </>,
+);
 /** A mouse pointer: the sidebar opens on hover. */
 export const IconPointer = make(<path d="M4 4l7 17 2.5-7.5L21 11z" />);
 export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
