@@ -15,7 +15,7 @@ type Toast = { id: number; events: ActivityEvent[]; quip: string; sticky: boolea
 const tone = (kind: ActivityKind) => (kind === "blocked" ? "tone-bad" : "tone-good");
 
 /**
- * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), top right below the header,
+ * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), bottom left of the board, clear of the detail panel,
  * newest on top, with confetti when an item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  * The item open in the detail panel (`openKey`) gets no blocked toast while the page has focus.
  */
