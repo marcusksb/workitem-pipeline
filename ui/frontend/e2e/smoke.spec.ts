@@ -599,3 +599,22 @@ test("a newly blocked item gets a toast that stays until it is dismissed", async
   await toast.getByRole("button", { name: "Dismiss" }).click();
   await expect(toast).toHaveCount(0);
 });
+
+test("toasts stay clear of the open detail panel", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Task list");
+  await page.goto(`${base.split("#")[0]}#demo/T-5-tasks/info`);
+  const panel = page.locator(".detail");
+  await expect(panel).toContainText("Task list");
+  const file = join(ws, "T-6-follow-ups/workitem.md");
+  writeFileSync(file, readFileSync(file, "utf8").replace(/^agent_status: .*$/m, "agent_status: blocked: deploy now?"));
+
+  const toast = page.locator(".toast", { hasText: "Merged with follow-ups" });
+  await expect(toast).toContainText("Blocked: deploy now?");
+  // Let the slide-in finish, so the box is where the toast rests.
+  await page.waitForTimeout(700);
+  const a = (await toast.boundingBox())!;
+  const b = (await panel.boundingBox())!;
+  const overlaps = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  expect(overlaps).toBe(false);
+});

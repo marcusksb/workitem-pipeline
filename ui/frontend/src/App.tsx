@@ -266,9 +266,9 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
               />
             </Leaving>
           )}
+          <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
         </main>
       </div>
-      <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
       {searching && <QuickSearch items={items.data ?? []} actions={actions} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );

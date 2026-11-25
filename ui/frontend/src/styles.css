@@ -182,23 +182,23 @@
 .terminal-scrollbar:hover .terminal-thumb { background: #888; }
 
 .activity-toasts {
-  position: fixed;
-  top: 52px;
-  right: 16px;
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
   z-index: 60;
   display: flex;
   flex-direction: column;
   width: min(360px, calc(100vw - 32px));
 }
-.toast-more { align-self: flex-end; padding: 2px 8px; color: var(--muted-foreground); font-size: 14px; }
-/* The wrap animates in and out; its grid row collapses on the way out so the toasts below slide up. */
+.toast-more { align-self: flex-start; padding: 2px 8px; color: var(--muted-foreground); font-size: 14px; }
+/* The wrap animates in and out; its grid row collapses on the way out so the others close the gap. */
 .toast-wrap { display: grid; grid-template-rows: 1fr; padding-top: 8px; animation: toast-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .toast-wrap.leaving { animation: toast-out 0.45s ease-in forwards; }
-@keyframes toast-in { from { transform: translateX(120%); opacity: 0; } }
+@keyframes toast-in { from { transform: translateX(-120%); opacity: 0; } }
 @keyframes toast-out {
   0% { transform: none; opacity: 1; grid-template-rows: 1fr; padding-top: 8px; }
-  55% { transform: translateX(120%); opacity: 0; grid-template-rows: 1fr; padding-top: 8px; }
-  100% { transform: translateX(120%); opacity: 0; grid-template-rows: 0fr; padding-top: 0; }
+  55% { transform: translateX(-120%); opacity: 0; grid-template-rows: 1fr; padding-top: 8px; }
+  100% { transform: translateX(-120%); opacity: 0; grid-template-rows: 0fr; padding-top: 0; }
 }
 .toast {
   --tone: var(--primary);
