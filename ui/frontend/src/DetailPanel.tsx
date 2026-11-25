@@ -266,6 +266,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="[&_svg:not([class*='size-'])]:size-4"
                   aria-label="Start agent session"
                   title="Start agent session"
                   disabled={runner.busy}
@@ -277,7 +278,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-destructive hover:text-destructive"
+                className="text-destructive hover:text-destructive [&_svg:not([class*='size-'])]:size-4"
                 aria-label="Remove"
                 title="Remove workitem"
                 disabled={runner.busy}
