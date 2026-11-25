@@ -14,13 +14,15 @@ Jira or GitHub Issues themselves.
 or an issue URL into the `issue:` value (`<ref> (<url>)`) and the folder prefix. `read` prints the
 issue as markdown, each comment under `## Comment by <author>` with a `Posted <time> · id <id>` line.
 `search` prints the open issues of the board's `issue_project` that match the words, one
-`ref<TAB>status<TAB>labels<TAB>summary` line each, in the tracker's order. `create` files a new issue in the board's `issue_project` and sets `issue:`. `comment` posts the file as a
+`ref<TAB>status<TAB>labels<TAB>summary` line each, in the tracker's order (labels comma-joined,
+commas and whitespace in a label become one space). `create` files a new issue in the board's `issue_project` and sets `issue:`. `comment` posts the file as a
 comment on the item's issue. `set-state` moves the issue to the first
 of the states it can reach; it skips an item without an issue, an item another one depends on
 (only the last of a chain moves the shared issue), and an issue already there. `pr-line` prints
 the line the PR body needs: `Closes owner/repo#123`, the Jira key, or nothing.
 
-Exit 2 is a bad input or setup (unknown ref, missing key, no issue linked). An API error exits 1,
+Exit 2 is a bad input or setup (unknown ref, missing key, no issue linked,
+an unreadable or empty --body-file). An API error exits 1,
 except in `set-state`, where it only warns (exit 0): a missing transition must not stop the work.
 """
 import os, sys
@@ -110,7 +112,7 @@ def search(args):
     name = tracker.tracker_of(workspace)
     issues = tracker.client(name, workspace).search(project_of(workspace, name, config), " ".join(args))
     for ref, status, labels, summary in issues:
-        print("\t".join([ref, status, ",".join(labels), " ".join(summary.split())]))
+        print("\t".join([ref, status, ",".join(" ".join(label.replace(",", " ").split()) for label in labels), " ".join(summary.split())]))
 
 
 def project_of(workspace, name, config):
@@ -127,12 +129,22 @@ def create(args):
     if tracker.issue_key(fields.get("issue")):
         die(f"{path.parent.name} already has issue {fields['issue']}")
     name = tracker.tracker_of(workspace)
-    body = Path(body_file).read_text()
+    body = body_of(body_file)
     client = tracker.client(name, workspace)
     ref = client.create(project_of(workspace, name, config), title, body)
     value = f"{ref} ({client.url(ref)})"
     set_fields(path, {"issue": value})
     print(f"issue: {value}")
+
+
+def body_of(body_file):
+    try:
+        body = Path(body_file).read_text()
+    except OSError as e:
+        die(f"cannot read --body-file: {e}")
+    if not body.strip():
+        die(f"--body-file {body_file} is empty")
+    return body
 
 
 def comment(args):
@@ -144,7 +156,7 @@ def comment(args):
     key = tracker.own_key(name, fields.get("issue"))
     if not key:
         die(f"{path.parent.name} has no issue linked")
-    tracker.client(name, workspace).comment(key, Path(body_file).read_text())
+    tracker.client(name, workspace).comment(key, body_of(body_file))
     print(f"commented on {key}")
 
 

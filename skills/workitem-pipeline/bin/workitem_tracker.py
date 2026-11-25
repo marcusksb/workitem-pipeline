@@ -18,6 +18,7 @@ GITHUB_URL = re.compile(rf"https://github\.com/({GITHUB_REPO.pattern})/issues/(\
 GITHUB_STATES = ("assigned", "closed")
 TIMEOUT = 30
 PAGE = 100
+LUCENE_SYNTAX = re.compile(r'[-+&|!(){}\[\]^"~*?:\\/]')
 
 
 class Problem(Exception):
@@ -86,12 +87,12 @@ def gh_path():
     return os.environ.get("WORKITEM_GH", "gh")
 
 
-def gh(workspace, *args, cwd=None, partial=False):
-    """stdout of `gh <args>`; RuntimeError with gh's message when it fails. With `partial`, a
+def gh(workspace, *args, cwd=None, partial=False, stdin=None):
+    """stdout of `gh <args>` (fed `stdin`); RuntimeError with gh's message when it fails. With `partial`, a
     failed GraphQL query that still answered with data returns that answer: one issue that is
     gone (or a PR) must not hide the others."""
     try:
-        result = subprocess.run([gh_path(), *args], capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd, env=gh_env(workspace))
+        result = subprocess.run([gh_path(), *args], input=stdin, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd, env=gh_env(workspace))
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"gh {args[0]} timed out")
     if result.returncode != 0 and not (partial and result.stdout.lstrip().startswith('{"data"')):
@@ -174,9 +175,13 @@ class Jira:
         return {i["key"]: (i["fields"]["status"]["name"], i["fields"]["status"]["statusCategory"]["key"]) for i in issues}
 
     def search(self, project, words):
-        """`[(key, status, labels, summary)]` of up to PAGE open issues of `project` matching `words`."""
-        text = words.replace("\\", "\\\\").replace('"', '\\"')
-        body = {"jql": f'project = {project} AND statusCategory != Done AND text ~ "{text}"',
+        """`[(key, status, labels, summary)]` of up to PAGE open issues of `project` matching `words`.
+        Lucene syntax characters become spaces and the words lower case (no AND/OR/NOT), so any
+        words make a valid query; Jira's text search ignores punctuation and case anyway."""
+        text = " ".join(LUCENE_SYNTAX.sub(" ", words).lower().split())
+        if not text:
+            raise Problem(f"no words to search for in {words!r}")
+        body = {"jql": f'project = "{project}" AND statusCategory != Done AND text ~ "{text}"',
                 "fields": ["summary", "status", "labels"], "maxResults": PAGE}
         issues = self.call("POST", "/rest/api/3/search/jql", body)["issues"]
         return [(i["key"], i["fields"]["status"]["name"], i["fields"].get("labels") or [], i["fields"]["summary"]) for i in issues]
@@ -213,9 +218,18 @@ class Jira:
 
 
 def adf_doc(text):
-    """An Atlassian Document Format doc of `text`, one paragraph per blank-line-separated block."""
-    paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": p}]} for p in text.split("\n\n") if p.strip()]
-    return {"type": "doc", "version": 1, "content": paragraphs}
+    """An Atlassian Document Format doc of `text`, one paragraph per blank-line-separated block,
+    its lines joined by hard breaks."""
+    return {"type": "doc", "version": 1, "content": [adf_paragraph(p) for p in text.split("\n\n") if p.strip()]}
+
+def adf_paragraph(block):
+    content = []
+    for line in block.strip("\n").split("\n"):
+        if content:
+            content.append({"type": "hardBreak"})
+        if line:
+            content.append({"type": "text", "text": line})
+    return {"type": "paragraph", "content": content}
 
 def adf_text(node):
     """Plain text of an Atlassian Document Format node: text joined, blocks on their own lines."""
@@ -294,7 +308,7 @@ class GitHub:
 
     def comment(self, ref, body):
         repo, number = ref.split("#")
-        gh(self.workspace, "issue", "comment", number, "-R", repo, "--body", body)
+        gh(self.workspace, "issue", "comment", number, "-R", repo, "--body-file", "-", stdin=body)
 
     def create(self, project, title, body):
         url = gh(self.workspace, "issue", "create", "-R", project, "--title", title, "--body", body).strip().splitlines()[-1]

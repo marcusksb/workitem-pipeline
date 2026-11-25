@@ -14,7 +14,7 @@ import json, os, sys
 here = os.path.dirname(os.path.abspath(__file__))
 args = sys.argv[1:]
 with open(os.path.join(here, "calls.jsonl"), "a") as f:
-    f.write(json.dumps({"args": args, "token": os.environ.get("GH_TOKEN", "")}) + "\\n")
+    f.write(json.dumps({"args": args, "token": os.environ.get("GH_TOKEN", ""), "stdin": sys.stdin.read() if "-" in args else ""}) + "\\n")
 with open(os.path.join(here, "answers.json")) as f:
     answers = json.load(f)
 for prefix, (out, code) in answers:
@@ -195,22 +195,23 @@ class WorkitemIssueTest(unittest.TestCase):
 
     def test_search_jira_lists_open_issues(self):
         self.setup("jira", {"issue_project": "SUP"})
-        result = self.run_script(ISSUE, "search", "--workspace", self.workspace, "--board", "dev", "login", 'say "hi"\\')
+        result = self.run_script(ISSUE, "search", "--workspace", self.workspace, "--board", "dev",
+                                 "Login", "Error:", "500", '(time-out) AND say "hi"\\ a/b*')
         self.assertEqual(result.returncode, 0, result.stderr)
         jql = Jira.requests[-1][2]["jql"]
-        self.assertEqual(jql, 'project = SUP AND statusCategory != Done AND text ~ "login say \\"hi\\"\\\\"')
+        self.assertEqual(jql, 'project = "SUP" AND statusCategory != Done AND text ~ "login error 500 time out and say hi a b"')
         self.assertEqual(result.stdout, "MNT-1\tTo Do\t\tLogin fails\nMNT-2\tTo Do\tui,escalated\tLogin slow\nMNT-3\tTo Do\t\tLogin 500\n")
 
     def test_search_github_lists_open_issues(self):
         self.setup("github", {"issue_project": "acme/web"})
         issues = [{"number": 4, "title": "Crash", "labels": [], "assignees": [{"login": "me"}]},
-                  {"number": 9, "title": "Crash on save", "labels": [{"name": "bug"}], "assignees": []}]
+                  {"number": 9, "title": "Crash on save", "labels": [{"name": "bug"}, {"name": "needs info, triage"}], "assignees": []}]
         self.answers([[["issue", "list"], [json.dumps(issues), 0]]])
         result = self.run_script(ISSUE, "search", self.item("x"), "crash", "save")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[0]["args"], ["issue", "list", "-R", "acme/web", "--state", "open", "--search", "crash save",
                                                    "--limit", "100", "--json", "number,title,labels,assignees"])
-        self.assertEqual(result.stdout, "acme/web#4\tIn progress\t\tCrash\nacme/web#9\tOpen\tbug\tCrash on save\n")
+        self.assertEqual(result.stdout, "acme/web#4\tIn progress\t\tCrash\nacme/web#9\tOpen\tbug,needs info triage\tCrash on save\n")
 
     def test_search_needs_words_and_a_jira_issue_project(self):
         self.setup("jira")
@@ -219,6 +220,8 @@ class WorkitemIssueTest(unittest.TestCase):
         result = self.run_script(ISSUE, "search", path, "login")
         self.assertEqual(result.returncode, 2)
         self.assertIn("set issue_project", result.stderr)
+        self.setup("jira", {"issue_project": "SUP"})
+        self.assertEqual(self.run_script(ISSUE, "search", path, "(*)", "-").returncode, 2)
         self.assertEqual(Jira.requests, [])
 
     # comment
@@ -231,16 +234,19 @@ class WorkitemIssueTest(unittest.TestCase):
 
     def test_comment_posts_adf_paragraphs_on_jira(self):
         self.setup("jira")
-        result = self.run_script(ISSUE, "comment", self.item("x", "MNT-1"), "--body-file", self.comment_file("One\n\nTwo\n"))
+        result = self.run_script(ISSUE, "comment", self.item("x", "MNT-1"), "--body-file", self.comment_file("One\n\n- a\n- b\n"))
         self.assertEqual(result.returncode, 0, result.stderr)
-        paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": t}]} for t in ("One", "Two\n")]
+        text = lambda t: {"type": "text", "text": t}
+        paragraphs = [{"type": "paragraph", "content": [text("One")]},
+                      {"type": "paragraph", "content": [text("- a"), {"type": "hardBreak"}, text("- b")]}]
         self.assertEqual(Jira.requests[-1], ("POST", "/rest/api/3/issue/MNT-1/comment", {"body": {"type": "doc", "version": 1, "content": paragraphs}}))
 
     def test_comment_on_github(self):
         self.setup("github")
         result = self.run_script(ISSUE, "comment", self.item("x", "acme/web#7"), "--body-file", self.comment_file("Fixed"))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls()[0]["args"], ["issue", "comment", "7", "-R", "acme/web", "--body", "Fixed"])
+        self.assertEqual(self.calls()[0]["args"], ["issue", "comment", "7", "-R", "acme/web", "--body-file", "-"])
+        self.assertEqual(self.calls()[0]["stdin"], "Fixed")
 
     def test_comment_without_an_issue_or_with_a_bad_ref_exits_2(self):
         self.setup("github")
@@ -248,6 +254,14 @@ class WorkitemIssueTest(unittest.TestCase):
         for name, issue in (("none", "none"), ("jira", "MNT-1")):
             self.assertEqual(self.run_script(ISSUE, "comment", self.item(name, issue), "--body-file", body).returncode, 2, name)
         self.assertEqual(self.calls(), [])
+
+    def test_comment_with_an_empty_or_missing_body_file_exits_2(self):
+        self.setup("jira")
+        path = self.item("x", "MNT-1")
+        for body in (self.comment_file(" \n\n"), os.path.join(self.root, "nope.md")):
+            result = self.run_script(ISSUE, "comment", path, "--body-file", body)
+            self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(Jira.requests, [])
 
     def test_a_failed_comment_exits_nonzero(self):
         self.setup("jira")
