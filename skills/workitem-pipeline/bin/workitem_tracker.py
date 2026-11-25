@@ -202,17 +202,32 @@ class Jira:
         self.call("POST", f"/rest/api/3/issue/{key}/comment", {"body": adf_doc(body)})
 
     def set_state(self, key, states):
-        """Moves the issue to the first of `states` it has a transition to; what happened, as text."""
-        current = self.call("GET", f"/rest/api/3/issue/{key}?fields=status")["fields"]["status"]["name"]
+        """Moves the issue to the first of `states` it has a transition to and, when `states` names
+        `assigned`, assigns it to the API user (replacing another assignee); what happened, as text.
+        It assigns first, so a missing transition does not skip the assignment."""
+        fields = self.call("GET", f"/rest/api/3/issue/{key}?fields=status,assignee")["fields"]
+        done = []
+        if "assigned" in states:
+            me = self.call("GET", "/rest/api/3/myself")
+            if (fields.get("assignee") or {}).get("accountId") == me["accountId"]:
+                done.append(f"already assigned to {me['displayName']}")
+            else:
+                self.call("PUT", f"/rest/api/3/issue/{key}/assignee", {"accountId": me["accountId"]})
+                done.append(f"assigned to {me['displayName']}")
+        if statuses := [s for s in states if s != "assigned"]:
+            done.insert(0, self.transition(key, fields["status"]["name"], statuses))
+        return f"{key}: {', '.join(done)}"
+
+    def transition(self, key, current, states):
         if current.lower() in (s.lower() for s in states):
-            return f"{key} is already {current}"
+            return f"already {current}"
         transitions = self.call("GET", f"/rest/api/3/issue/{key}/transitions")["transitions"]
         by_target = {t["to"]["name"].lower(): t for t in transitions}
         for state in states:
             transition = by_target.get(state.lower())
             if transition:
                 self.call("POST", f"/rest/api/3/issue/{key}/transitions", {"transition": {"id": transition["id"]}})
-                return f"{key}: {current} -> {transition['to']['name']}"
+                return f"{current} -> {transition['to']['name']}"
         available = ", ".join(t["to"]["name"] for t in transitions) or "none"
         raise RuntimeError(f"{key} has no transition to {' or '.join(states)} (available: {available})")
 

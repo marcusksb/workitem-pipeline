@@ -520,7 +520,7 @@ fn board_text(template: &str, repo: &Path, issue_project: &str, reviewers: &str,
     let defaults = |stage: &Stage| match (tracker, stage.develops(), stage.watches_prs()) {
         ("github", true, _) => Some(json!(["assigned"])),
         ("github", _, _) => None,
-        (_, true, _) => Some(json!(["In development", "In Progress"])),
+        (_, true, _) => Some(json!(["In development", "In Progress", "assigned"])),
         (_, _, true) => Some(json!(["In Review"])),
         _ => None,
     };
@@ -733,7 +733,7 @@ mod tests {
         let jira = Pipeline::parse(&text).unwrap();
         assert_eq!((jira.issue_project.as_deref(), jira.reviewers.as_deref()), (Some("MNT"), Some("acme/backend")));
         let states = |p: &Pipeline| p.stages.iter().map(|s| s.issue_state.join("|")).collect::<Vec<_>>();
-        assert_eq!(states(&jira), ["In development|In Progress", "In Review", ""]);
+        assert_eq!(states(&jira), ["In development|In Progress|assigned", "In Review", ""]);
         let github = Pipeline::parse(&board_text(template, Path::new("/"), "", "", "github").unwrap()).unwrap();
         assert_eq!((states(&github), github.issue_project), (vec!["assigned".to_string(), "".into(), "".into()], None));
     }

@@ -30,6 +30,7 @@ class Jira(BaseHTTPRequestHandler):
     status = "To Do"
     comments = []
     fail = None
+    assignee = None
     transitions = [{"id": "31", "to": {"name": "In Progress"}}, {"id": "41", "to": {"name": "In Review"}}]
 
     def answer(self, data, code=200):
@@ -43,8 +44,17 @@ class Jira(BaseHTTPRequestHandler):
         Jira.requests.append(("GET", self.path, None))
         if self.path.endswith("/transitions"):
             self.answer({"transitions": Jira.transitions})
+        elif self.path == "/rest/api/3/myself":
+            self.answer({"accountId": "acc-me", "displayName": "Me Myself"})
         else:
-            self.answer({"fields": {"status": {"name": Jira.status}, "summary": "Fix it", "description": None, "comment": {"comments": Jira.comments}}})
+            self.answer({"fields": {"status": {"name": Jira.status}, "assignee": Jira.assignee, "summary": "Fix it",
+                                    "description": None, "comment": {"comments": Jira.comments}}})
+
+    def do_PUT(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Jira.requests.append(("PUT", self.path, body))
+        self.send_response(204)
+        self.end_headers()
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -69,7 +79,7 @@ class Jira(BaseHTTPRequestHandler):
 
 class WorkitemIssueTest(unittest.TestCase):
     def setUp(self):
-        Jira.requests, Jira.status, Jira.comments, Jira.fail = [], "To Do", [], None
+        Jira.requests, Jira.status, Jira.comments, Jira.fail, Jira.assignee = [], "To Do", [], None, None
         self.server = HTTPServer(("127.0.0.1", 0), Jira)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.tmp = tempfile.TemporaryDirectory()
@@ -306,6 +316,33 @@ class WorkitemIssueTest(unittest.TestCase):
         result = self.run_script(ISSUE, "set-state", path, "In development", "In Progress")
         self.assertEqual(result.stdout.strip(), "MNT-1: To Do -> In Progress")
         self.assertIn(("POST", "/rest/api/3/issue/MNT-1/transitions", {"transition": {"id": "31"}}), Jira.requests)
+        self.assertNotIn("/rest/api/3/myself", [r[1] for r in Jira.requests], "no assignment without assigned")
+
+    def test_jira_assigned_moves_and_assigns_me_replacing_another_assignee(self):
+        self.setup("jira")
+        path = self.item("x", "MNT-1")
+        Jira.assignee = {"accountId": "acc-ann", "displayName": "Ann"}
+        result = self.run_script(ISSUE, "set-state", path, "In development", "In Progress", "assigned")
+        self.assertEqual(result.stdout.strip(), "MNT-1: To Do -> In Progress, assigned to Me Myself", result.stderr)
+        self.assertIn(("POST", "/rest/api/3/issue/MNT-1/transitions", {"transition": {"id": "31"}}), Jira.requests)
+        self.assertIn(("PUT", "/rest/api/3/issue/MNT-1/assignee", {"accountId": "acc-me"}), Jira.requests)
+
+    def test_jira_assigned_alone_or_already_there_still_assigns_once(self):
+        self.setup("jira")
+        path = self.item("x", "MNT-1")
+        Jira.status = "In Progress"
+        result = self.run_script(ISSUE, "set-state", path, "In Progress", "assigned")
+        self.assertEqual(result.stdout.strip(), "MNT-1: already In Progress, assigned to Me Myself")
+        Jira.requests, Jira.assignee = [], {"accountId": "acc-me"}
+        result = self.run_script(ISSUE, "set-state", path, "assigned")
+        self.assertEqual(result.stdout.strip(), "MNT-1: already assigned to Me Myself")
+        self.assertEqual([r[0] for r in Jira.requests], ["GET", "GET"], "no transition and no PUT")
+
+    def test_jira_assigns_even_without_a_transition(self):
+        self.setup("jira")
+        result = self.run_script(ISSUE, "set-state", self.item("x", "MNT-1"), "Done", "assigned")
+        self.assertIn("no transition to Done", result.stderr)
+        self.assertIn(("PUT", "/rest/api/3/issue/MNT-1/assignee", {"accountId": "acc-me"}), Jira.requests)
 
     def test_jira_already_there_or_without_a_transition_warns_and_exits_zero(self):
         self.setup("jira")
