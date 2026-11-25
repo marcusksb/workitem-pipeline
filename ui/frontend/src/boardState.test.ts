@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -288,6 +288,40 @@ describe("searchItems", () => {
 
   it("returns nothing for an empty query", () => {
     expect(dirs("  ")).toEqual([]);
+  });
+});
+
+describe("highlight", () => {
+  const marks = (text: string, query: string) => highlight(text, query).map((run) => (run.match ? `[${run.text}]` : run.text)).join("");
+
+  it("marks every occurrence of every word, case-insensitively", () => {
+    expect(marks("New plan for New board", "new PL")).toBe("[New] [pl]an for [New] board");
+  });
+
+  it("merges overlapping matches and leaves an empty query unmarked", () => {
+    expect(marks("Workitem", "work rki")).toBe("[Worki]tem");
+    expect(marks("Workitem", " ")).toBe("Workitem");
+  });
+});
+
+describe("searchActions", () => {
+  const run = () => {};
+  const actions = [{ label: "New workitem", run }, { label: "New plan", run }, { label: "Switch to workspace Demo", run }];
+  const labels = (query: string) => searchActions(actions, query).map((a) => a.label);
+
+  it("returns every action for an empty query", () => {
+    expect(labels("  ")).toEqual(["New workitem", "New plan", "Switch to workspace Demo"]);
+  });
+
+  it("matches every word, case-insensitively", () => {
+    expect(labels("NEW")).toEqual(["New workitem", "New plan"]);
+    expect(labels("new plan")).toEqual(["New plan"]);
+    expect(labels("demo")).toEqual(["Switch to workspace Demo"]);
+  });
+
+  it("returns nothing when a word does not match", () => {
+    expect(labels("new board")).toEqual([]);
+    expect(labels("#42")).toEqual([]);
   });
 });
 

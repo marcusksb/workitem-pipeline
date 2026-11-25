@@ -413,6 +413,25 @@ test("quick search opens an item by Jira key, PR number or title, on its own boa
   await expect(page).toHaveURL(/#demo\/T-3-approve$/);
 });
 
+test("the palette runs New plan and New workitem", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board").getByText("Demo blocked item")).toBeVisible();
+  const search = page.getByRole("combobox", { name: "Search workitems" });
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("group", { name: "Actions" }).getByRole("option")).toContainText(["New workitem", "New plan"]);
+  await search.fill("new plan");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New planning session" }).getByRole("textbox")).toBeFocused();
+  await expect(search).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await search.fill("new workitem");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New workitem in demo" })).toBeVisible();
+});
+
 test("the Files tab lists the workitem folder and previews a file", async ({ page }) => {
   await page.goto(base);
   await expect(page.locator(".board")).toContainText("Brief waiting");

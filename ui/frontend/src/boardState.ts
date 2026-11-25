@@ -294,6 +294,31 @@ export function searchItems(items: Item[], query: string): Item[] {
     .map((found) => found.item);
 }
 
+/** Something the palette can run besides opening a workitem. */
+export type Action = { label: string; run: () => void };
+
+/** Actions whose label contains every word of `query`, case-insensitively, in their given order; all of them for an empty query. */
+export function searchActions(actions: Action[], query: string): Action[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return actions.filter((action) => words.every((word) => action.label.toLowerCase().includes(word)));
+}
+
+/** `text` cut into runs, `match` where a word of `query` occurs (case-insensitively, every occurrence); one unmatched run for an empty query. */
+export function highlight(text: string, query: string): { text: string; match: boolean }[] {
+  const lower = text.toLowerCase();
+  const marked = new Array<boolean>(text.length).fill(false);
+  for (const word of query.toLowerCase().split(/\s+/).filter(Boolean)) {
+    for (let at = lower.indexOf(word); at !== -1; at = lower.indexOf(word, at + 1)) marked.fill(true, at, at + word.length);
+  }
+  const runs: { text: string; match: boolean }[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const last = runs[runs.length - 1];
+    if (last && last.match === marked[i]) last.text += text[i];
+    else runs.push({ text: text[i], match: marked[i] });
+  }
+  return runs;
+}
+
 export const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
 /** Icon per workitem kind; unknown kinds (including the `-` default) have no entry. */
