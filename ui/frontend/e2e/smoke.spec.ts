@@ -40,7 +40,7 @@ function seed() {
   );
   write(
     join(ws, "T-4-research/workitem.md"),
-    "---\ntitle: Research item\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nissue: T-4\n---\n\n# Research\n",
+    "---\ntitle: Research item\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nissue: T-4\npr: https://github.com/demo/repo/pull/43\npr_state: open\npr_ci: pending\n---\n\n# Research\n",
   );
   const findings = Array.from({ length: 6 }, (_, i) => `- [ ] **Finding ${i}**\\\n  What is wrong and how to fix it.\n`).join("\n");
   write(
@@ -140,6 +140,7 @@ test("add a workspace, find the blocked item, answer the agent in the browser te
   // The card's PR pill is coloured by its merge state, then approval and CI icons; its status line says why the agent stopped.
   await expect(blocked.getByRole("link", { name: "#42 merge unknown" })).toHaveAttribute("href", "https://github.com/demo/repo/pull/42");
   await expect(blocked.getByRole("img", { name: /^CI failing/ })).toBeVisible();
+  await expect(blocked.getByRole("img", { name: /^CI failing/ })).not.toHaveClass(/animate-spin/);
   await expect(blocked.locator(".agent-status")).toHaveText("Blocked");
   await board.getByText("Demo blocked item").click();
 
@@ -230,6 +231,8 @@ test("a workspace's boards are tabs in the sidebar and the chosen board stays in
   await tabs.getByRole("tab", { name: /research/ }).click();
   await expect(page).toHaveURL(/#\?workspace=demo&board=research$/);
   await expect(page.locator(".column", { hasText: "idea" })).toContainText("Research item");
+  // A running CI spins its icon (unless the user prefers reduced motion); a failing one stays still (see the first test).
+  await expect(page.locator(".card", { hasText: "Research item" }).getByRole("img", { name: "CI running" })).toHaveClass(/motion-safe:animate-spin/);
   await expect(page.locator(".column", { hasText: "backlog" })).toHaveCount(0);
 
   // The choice survives a reload, and an item's deep link keeps it.

@@ -26,8 +26,14 @@ export function PrStatus({ item, className }: { item: Pick<Item, "pr" | "review"
           {pill && <span className="sr-only">{pill.label}</span>}
         </a>
       </Badge>
-      {icons.map(({ glyph, tone, label }) => (
-        <span key={label} role="img" aria-label={label} title={label} className={cn("inline-flex [&>svg]:size-3.5", TONE_TEXT[tone])}>
+      {icons.map(({ glyph, tone, label, spin }) => (
+        <span
+          key={label}
+          role="img"
+          aria-label={label}
+          title={label}
+          className={cn("inline-flex [&>svg]:size-3.5", TONE_TEXT[tone], spin && "motion-safe:animate-spin")}
+        >
           {glyph}
         </span>
       ))}

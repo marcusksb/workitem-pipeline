@@ -3,7 +3,7 @@ import type { Tone } from "./boardState";
 import { IconCircleCheck, IconGitMerge, IconGitPullRequest, IconUserCheck } from "./icons";
 import { Review } from "./types";
 
-type Slot = { glyph: ReactNode; tone: Tone; label: string };
+type Slot = { glyph: ReactNode; tone: Tone; label: string; spin?: true };
 
 // One fixed glyph per dimension; the tone (color) carries the state.
 export const APPROVAL: Record<Review["approval"], Slot> = {
@@ -23,7 +23,7 @@ export function ci(failedCount: number): Record<Review["ci"], Slot> {
   return {
     passing: { glyph: <IconCircleCheck />, tone: "good", label: "CI passing" },
     failing: { glyph: <IconCircleCheck />, tone: "bad", label: `CI failing — ${failedCount} ${failedCount === 1 ? "check" : "checks"}` },
-    pending: { glyph: <IconCircleCheck />, tone: "wait", label: "CI running" },
+    pending: { glyph: <IconCircleCheck />, tone: "wait", label: "CI running", spin: true },
     none: { glyph: <IconCircleCheck />, tone: "idle", label: "no CI" },
   };
 }
