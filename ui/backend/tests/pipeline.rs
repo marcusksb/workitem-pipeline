@@ -1929,6 +1929,37 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     assert_eq!((&ui_item["workspace"], &ui_item["depends_on"]), (&serde_json::json!("app"), &serde_json::json!(["T-70-api"])));
 }
 
+#[tokio::test]
+async fn board_settings_are_edited_from_the_ui_and_checked_before_the_file_is_written() {
+    let w = world();
+    let file = w.ws.join("boards/default.json");
+    let settings = r#"{"label":"Backend","entry":"analyze","order":["created desc"],"issue_project":"MNT","reviewers":"acme/web"}"#;
+    let (status, body) = put(&w, "/api/workspaces/app/boards/default", settings).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let board = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "default").unwrap()["pipeline"].clone();
+    assert_eq!((&board["label"], &board["entry"], &board["order"]), (&serde_json::json!("Backend"), &serde_json::json!("analyze"), &serde_json::json!(["created desc"])));
+    assert_eq!((&board["issue_project"], &board["reviewers"]), (&serde_json::json!("MNT"), &serde_json::json!("acme/web")));
+    assert_eq!(board["repo"], w.repo.display().to_string());
+
+    let saved = fs::read_to_string(&file).unwrap();
+    for (bad, why) in [
+        (r#"{"entry":"gone"}"#, "entry 'gone'"),
+        (r#"{"entry":"backlog","order":["nope"]}"#, "nope"),
+        (r#"{"entry":"backlog","issue_project":"acme/web"}"#, "Jira project key"),
+        (r#"{"entry":"backlog","reviewers":"team"}"#, "org/team"),
+    ] {
+        let (status, body) = put(&w, "/api/workspaces/app/boards/default", bad).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        assert!(body.contains(why), "{body}");
+    }
+    let (status, _) = put(&w, "/api/workspaces/app/boards/default", r#"{"entry":"backlog","repo":"/tmp"}"#).await;
+    assert!(status.is_client_error(), "repo cannot be changed: {status}");
+    assert_eq!(fs::read_to_string(&file).unwrap(), saved, "a refused change leaves the file as it was");
+    assert_eq!(put(&w, "/api/workspaces/app/boards/nope", r#"{"entry":"backlog"}"#).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(put(&w, "/api/workspaces/nope/boards/default", r#"{"entry":"backlog"}"#).await.0, StatusCode::NOT_FOUND);
+}
+
 /// One JSON-RPC message to an item's MCP endpoint (`questions.rs`), as an agent sends it: with the
 /// Bearer token, not the cookie.
 async fn mcp(w: &World, dir: &str, message: serde_json::Value) -> (StatusCode, serde_json::Value) {
