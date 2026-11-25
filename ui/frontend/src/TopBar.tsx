@@ -20,6 +20,9 @@ type Props = {
   onView: (view: View) => void;
   onSearch: () => void;
   error: string | undefined;
+  /** Whether the New workitem dialog is open; App owns it so the palette can open it too. */
+  creating: boolean;
+  onCreating: (creating: boolean) => void;
   /** Called once a workitem session was started. */
   onCreated: () => void;
   /** Called once the board's settings were saved. */
@@ -27,8 +30,7 @@ type Props = {
 };
 
 /** The bar above the board: which board and repo, Search, Board or List, New workitem, and Board settings. */
-export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, onCreated, onBoardChanged }: Props) {
-  const [creating, setCreating] = useState(false);
+export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, creating, onCreating, onCreated, onBoardChanged }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const pipeline = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline : undefined;
@@ -65,7 +67,7 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
         </div>
       )}
       {workspace && board && (
-        <Button variant="primary" className="h-[30px] px-3" onClick={() => setCreating(true)}>
+        <Button variant="primary" className="h-[30px] px-3" onClick={() => onCreating(true)}>
           <IconPlus />
           New workitem
         </Button>
@@ -91,9 +93,9 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
           board={board}
           input={draft}
           onInput={setDraft}
-          onClose={() => setCreating(false)}
+          onClose={() => onCreating(false)}
           onCreated={() => {
-            setCreating(false);
+            onCreating(false);
             setDraft("");
             onCreated();
           }}

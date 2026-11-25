@@ -32,11 +32,11 @@ import {
   IconLink,
   IconListTree,
   IconMessage,
+  IconPanelRightClose,
   IconPencil,
   IconTerminalSquare,
   IconTrash,
   IconUnlock,
-  IconX,
 } from "./icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -206,7 +206,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               {live.title}
             </h2>
             <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
-              <IconX />
+              <IconPanelRightClose />
             </Button>
           </div>
           <Properties item={live} pipelines={pipelines} onBoard={onBoard}>
@@ -261,10 +261,32 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
                 Terminal
               </TabsTrigger>
             </TabsList>
-            <Button variant="ghost" className="mb-1.5 shrink-0 text-destructive hover:text-destructive" disabled={runner.busy} onClick={remove}>
-              <IconTrash />
-              Remove
-            </Button>
+            <div className="mb-1.5 flex shrink-0">
+              {!live.session && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="[&_svg:not([class*='size-'])]:size-4"
+                  aria-label="Start agent session"
+                  title="Start agent session"
+                  disabled={runner.busy}
+                  onClick={startAgent}
+                >
+                  <IconBot />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive hover:text-destructive [&_svg:not([class*='size-'])]:size-4"
+                aria-label="Remove"
+                title="Remove workitem"
+                disabled={runner.busy}
+                onClick={remove}
+              >
+                <IconTrash />
+              </Button>
+            </div>
           </div>
           <TabsContent value="brief" className="flex min-h-0 flex-col">
             {editing !== undefined ? (

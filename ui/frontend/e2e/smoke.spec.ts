@@ -163,6 +163,8 @@ test("approve at the gate from the gate bar", async ({ page }) => {
   // Approving moves the item on, to the stage the gate names.
   await gateColumn.getByText("Approve me").click();
   await expect(page.locator(".detail").getByRole("button", { name: "Discuss brief" })).toHaveCount(2);
+  // Without a session, the tab row offers to start one.
+  await expect(page.locator(".detail").getByRole("button", { name: "Start agent session", exact: true })).toBeVisible();
   await page.locator(".detail").getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.locator(".column", { hasText: "in development" })).toContainText("Approve me");
   await expect(gateColumn).not.toContainText("Approve me");
@@ -176,6 +178,7 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.getByRole("tab", { name: "Info" }).click();
   await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start agent session", exact: true })).toHaveCount(0);
 
   await page.goBack();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
@@ -408,6 +411,25 @@ test("quick search opens an item by Jira key, PR number or title, on its own boa
   await search.fill("approve");
   await page.getByRole("option", { name: /Approve me/ }).click();
   await expect(page).toHaveURL(/#demo\/T-3-approve$/);
+});
+
+test("the palette runs New plan and New workitem", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board").getByText("Demo blocked item")).toBeVisible();
+  const search = page.getByRole("combobox", { name: "Search workitems" });
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("group", { name: "Actions" }).getByRole("option")).toContainText(["New workitem", "New plan"]);
+  await search.fill("new plan");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New planning session" }).getByRole("textbox")).toBeFocused();
+  await expect(search).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await search.fill("new workitem");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "New workitem in demo" })).toBeVisible();
 });
 
 test("the Files tab lists the workitem folder and previews a file", async ({ page }) => {
