@@ -28,17 +28,38 @@ export function IssueBadge({ item }: { item: Pick<Item, "issue" | "issue_status"
   );
 }
 
+/** The item's parent as a short "parent" badge; `onOpen` (absent when the parent is not loaded) makes it open the parent. */
+function ParentBadge({ parent, onOpen }: { parent: string; onOpen?: () => void }) {
+  const title = `split from ${parent}`;
+  return onOpen ? (
+    <Badge asChild className="cursor-pointer hover:underline">
+      <button
+        type="button"
+        title={title}
+        aria-label={`Open parent ${parent}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
+        <IconArrowUp />
+        parent
+      </button>
+    </Badge>
+  ) : (
+    <Badge title={title}>
+      <IconArrowUp />
+      parent
+    </Badge>
+  );
+}
+
 /** Clickable issue (key and status), parent and, unless `pr` is false, PR badges of an item. */
-export function LinkBadges({ item, pr = true }: { item: Pick<Item, "issue" | "issue_status" | "issue_status_category" | "pr" | "parent">; pr?: boolean }) {
+export function LinkBadges({ item, pr = true, onParent }: { item: Pick<Item, "issue" | "issue_status" | "issue_status_category" | "pr" | "parent">; pr?: boolean; onParent?: () => void }) {
   return (
     <>
       <IssueBadge item={item} />
-      {item.parent && (
-        <Badge className="max-w-full" title={`split from ${item.parent}`}>
-          <IconArrowUp />
-          <span className="truncate">{item.parent}</span>
-        </Badge>
-      )}
+      {item.parent && <ParentBadge parent={item.parent} onOpen={onParent} />}
       {pr && item.pr && (
         <Badge asChild variant="info">
           <a className="no-underline hover:underline" href={item.pr} target="_blank" rel="noreferrer" title={item.pr} onClick={stop}>

@@ -56,6 +56,10 @@ function seed() {
     "---\ntitle: Show the new field\ntype: feature\nstage: backlog\nboard: research\nagent_status: ok\nissue: T-7\ndepends_on: T-1-demo\n---\n\n# UI\n",
   );
   write(
+    join(ws, "T-8-child/workitem.md"),
+    "---\ntitle: Split off part\ntype: feature\nstage: idea\nboard: research\nagent_status: ok\nparent: T-2-gate\n---\n\n# Child\n",
+  );
+  write(
     join(ws, "boards/default/learnings.md"),
     "# Learnings\n\n- Never mock tmux in tests. (source: https://github.com/demo/repo/pull/42#discussion_r1)\n",
   );
@@ -214,7 +218,7 @@ test("a workspace's boards are tabs in the sidebar and the chosen board stays in
 
   // Each board shows how many items it has, and how many of them are blocked.
   await expect(tabs.getByRole("tab", { name: /default/ })).toHaveText("default15");
-  await expect(tabs.getByRole("tab", { name: /research/ })).toHaveText("research2");
+  await expect(tabs.getByRole("tab", { name: /research/ })).toHaveText("research3");
   await expect(page.locator(".top-bar h1")).toHaveText("default");
   await expect(page.locator(".top-bar")).toContainText("repo");
   await tabs.getByRole("tab", { name: /research/ }).click();
@@ -385,6 +389,18 @@ test("a card that waits on an unmerged item opens its Depends on tab, which open
   await deps.getByRole("combobox", { name: "Add a dependency" }).selectOption("T-2-gate");
   await expect(deps.locator("li")).toContainText("Brief waiting");
   expect(readFileSync(join(ws, "T-7-ui/workitem.md"), "utf8")).toContain("depends_on: T-2-gate\n");
+});
+
+test("a card's parent badge opens the parent on its own board", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Demo blocked item");
+  await page.goto(`${base.split("#")[0]}#?workspace=demo&board=research`);
+  const badge = page.locator(".card", { hasText: "Split off part" }).getByRole("button", { name: "Open parent T-2-gate" });
+  await expect(badge).toHaveText("parent");
+  await expect(badge).toHaveAttribute("title", "split from T-2-gate");
+  await badge.click();
+  await expect(page).toHaveURL(/#demo\/T-2-gate\?board=default$/);
+  await expect(page.locator(".detail")).toContainText("Brief waiting");
 });
 
 test("quick search opens an item by Jira key, PR number or title, on its own board", async ({ page }) => {

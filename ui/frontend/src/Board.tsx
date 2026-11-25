@@ -136,7 +136,7 @@ function DependencyBadge({ count, onOpen }: { count: number; onOpen: () => void 
 }
 
 /** `where`: board and stage of a child shown under its parent outside its own column. */
-function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, where, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; where?: string; depth?: number }) {
+function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies, onParent, where, depth = 0 }: { item: Item; selected: boolean; onSelect: () => void; showWorkspace: boolean; waitsOn: Item[]; onDependencies: () => void; onParent?: () => void; where?: string; depth?: number }) {
   const icon = KIND_ICONS[item.kind.trim().toLowerCase()];
   return (
     <div
@@ -175,7 +175,7 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
             <span className="truncate">{where}</span>
           </Badge>
         )}
-        <LinkBadges item={item} pr={false} />
+        <LinkBadges item={item} pr={false} onParent={onParent} />
         {waitsOn.length > 0 && <DependencyBadge count={waitsOn.length} onOpen={onDependencies} />}
         <FollowUpsChip followUps={item.follow_ups} />
         {!!item.unpushed && (
@@ -245,19 +245,23 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
     return found?.error ? [{ workspace: name, pipeline: found.pipeline, error: found.error }] : [];
   });
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
-  const card = (item: Item, depth = 0, where?: string) => (
-    <Card
-      key={itemKey(item)}
-      item={item}
-      depth={depth}
-      where={where}
-      selected={selected === itemKey(item)}
-      onSelect={() => onSelect(item)}
-      showWorkspace={showWorkspace}
-      waitsOn={openDependencies(item, items, pipelines)}
-      onDependencies={() => onSelect(item, "dependencies")}
-    />
-  );
+  const card = (item: Item, depth = 0, where?: string) => {
+    const parent = item.parent ? items.find((p) => p.workspace === item.workspace && p.dir === item.parent) : undefined;
+    return (
+      <Card
+        key={itemKey(item)}
+        item={item}
+        depth={depth}
+        where={where}
+        selected={selected === itemKey(item)}
+        onSelect={() => onSelect(item)}
+        showWorkspace={showWorkspace}
+        waitsOn={openDependencies(item, items, pipelines)}
+        onDependencies={() => onSelect(item, "dependencies")}
+        onParent={parent ? () => onSelect(parent) : undefined}
+      />
+    );
+  };
   return (
     <>
       {broken.map(({ workspace, pipeline, error }) => (
