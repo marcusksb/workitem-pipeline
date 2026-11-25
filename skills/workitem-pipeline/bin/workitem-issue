@@ -14,8 +14,7 @@ Jira or GitHub Issues themselves.
 or an issue URL into the `issue:` value (`<ref> (<url>)`) and the folder prefix. `read` prints the
 issue as markdown, each comment under `## Comment by <author>` with a `Posted <time> · id <id>` line.
 `search` prints the open issues of the board's `issue_project` that match the words, one
-`ref<TAB>status<TAB>labels<TAB>summary` line each, those labelled `jira_escalated` first. `create`
-files a new issue in the board's `issue_project` and sets `issue:`. `comment` posts the file as a
+`ref<TAB>status<TAB>labels<TAB>summary` line each, in the tracker's order. `create` files a new issue in the board's `issue_project` and sets `issue:`. `comment` posts the file as a
 comment on the item's issue. `set-state` moves the issue to the first
 of the states it can reach; it skips an item without an issue, an item another one depends on
 (only the last of a chain moves the shared issue), and an issue already there. `pr-line` prints
@@ -110,7 +109,7 @@ def search(args):
         die("search takes <workitem> <words>..., or --workspace <dir> --board <name> <words>...")
     name = tracker.tracker_of(workspace)
     issues = tracker.client(name, workspace).search(project_of(workspace, name, config), " ".join(args))
-    for ref, status, labels, summary in sorted(issues, key=lambda i: "jira_escalated" not in i[2]):
+    for ref, status, labels, summary in issues:
         print("\t".join([ref, status, ",".join(labels), " ".join(summary.split())]))
 
 

@@ -54,7 +54,7 @@ class Jira(BaseHTTPRequestHandler):
         elif self.path == "/rest/api/3/search/jql" and "summary" in body["fields"]:
             def issue(key, labels, summary):
                 return {"key": key, "fields": {"status": {"name": "To Do"}, "labels": labels, "summary": summary}}
-            self.answer({"issues": [issue("MNT-1", [], "Login\tfails"), issue("MNT-2", ["ui", "jira_escalated"], "Login slow"), issue("MNT-3", [], "Login 500")]})
+            self.answer({"issues": [issue("MNT-1", [], "Login\tfails"), issue("MNT-2", ["ui", "escalated"], "Login slow"), issue("MNT-3", [], "Login 500")]})
         elif self.path == "/rest/api/3/search/jql":
             self.answer({"issues": [{"key": "MNT-1", "fields": {"status": {"name": "Ready", "statusCategory": {"key": "indeterminate"}}}}]})
         elif self.path == "/rest/api/3/issue":
@@ -193,24 +193,24 @@ class WorkitemIssueTest(unittest.TestCase):
 
     # search
 
-    def test_search_jira_sorts_escalated_first(self):
+    def test_search_jira_lists_open_issues(self):
         self.setup("jira", {"issue_project": "SUP"})
         result = self.run_script(ISSUE, "search", "--workspace", self.workspace, "--board", "dev", "login", 'say "hi"\\')
         self.assertEqual(result.returncode, 0, result.stderr)
         jql = Jira.requests[-1][2]["jql"]
         self.assertEqual(jql, 'project = SUP AND statusCategory != Done AND text ~ "login say \\"hi\\"\\\\"')
-        self.assertEqual(result.stdout, "MNT-2\tTo Do\tui,jira_escalated\tLogin slow\nMNT-1\tTo Do\t\tLogin fails\nMNT-3\tTo Do\t\tLogin 500\n")
+        self.assertEqual(result.stdout, "MNT-1\tTo Do\t\tLogin fails\nMNT-2\tTo Do\tui,escalated\tLogin slow\nMNT-3\tTo Do\t\tLogin 500\n")
 
     def test_search_github_lists_open_issues(self):
         self.setup("github", {"issue_project": "acme/web"})
         issues = [{"number": 4, "title": "Crash", "labels": [], "assignees": [{"login": "me"}]},
-                  {"number": 9, "title": "Crash on save", "labels": [{"name": "jira_escalated"}], "assignees": []}]
+                  {"number": 9, "title": "Crash on save", "labels": [{"name": "bug"}], "assignees": []}]
         self.answers([[["issue", "list"], [json.dumps(issues), 0]]])
         result = self.run_script(ISSUE, "search", self.item("x"), "crash", "save")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[0]["args"], ["issue", "list", "-R", "acme/web", "--state", "open", "--search", "crash save",
                                                    "--limit", "100", "--json", "number,title,labels,assignees"])
-        self.assertEqual(result.stdout, "acme/web#9\tOpen\tjira_escalated\tCrash on save\nacme/web#4\tIn progress\t\tCrash\n")
+        self.assertEqual(result.stdout, "acme/web#4\tIn progress\t\tCrash\nacme/web#9\tOpen\tbug\tCrash on save\n")
 
     def test_search_needs_words_and_a_jira_issue_project(self):
         self.setup("jira")
