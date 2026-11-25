@@ -34,6 +34,31 @@ class CiTest(unittest.TestCase):
         failed = pr.failed_checks([run("lint", "COMPLETED", "SUCCESS"), run("RSpec", "COMPLETED", "FAILURE"), run("RSpec", "COMPLETED", "FAILURE")])
         self.assertEqual(failed, ["RSpec"])
 
+    def test_only_the_newest_run_of_a_check_counts(self):
+        old = {**run("RSpec", "COMPLETED", "CANCELLED"), "startedAt": "2026-11-25T11:47:00Z"}
+        new = {**run("RSpec", "COMPLETED", "SUCCESS"), "startedAt": "2026-11-25T11:53:00Z"}
+        old_result = {**run("RSpec result", "COMPLETED", "FAILURE"), "startedAt": "2026-11-25T11:47:30Z"}
+        new_result = {**run("RSpec result", "COMPLETED", "SUCCESS"), "startedAt": "2026-11-25T11:58:00Z"}
+        self.assertEqual(pr.latest_checks([old, new, old_result, new_result]), [new, new_result])
+        self.assertEqual(pr.latest_checks([new_result, old_result, new, old]), [new_result, new], "order does not matter")
+        status_old = {"context": "ci/build", "state": "FAILURE", "createdAt": "2026-11-25T11:00:00Z"}
+        status_new = {"context": "ci/build", "state": "SUCCESS", "createdAt": "2026-11-25T12:00:00Z"}
+        self.assertEqual(pr.latest_checks([status_old, status_new]), [status_new])
+
+    def test_a_queued_rerun_without_a_time_is_the_newest(self):
+        old = {**run("RSpec", "COMPLETED", "CANCELLED"), "startedAt": "2026-11-25T11:47:00Z"}
+        queued = {**run("RSpec", "QUEUED", None), "startedAt": None, "completedAt": None}
+        self.assertEqual(pr.latest_checks([old, queued]), [queued])
+        self.assertEqual(pr.ci_of(pr.latest_checks([old, queued])), "pending")
+
+    def test_the_same_job_in_two_workflows_is_two_checks(self):
+        def in_workflow(check, workflow):
+            return {**check, "checkSuite": {"workflowRun": {"workflow": {"name": workflow}}}}
+        ci = in_workflow({**run("build", "COMPLETED", "SUCCESS"), "startedAt": "2026-11-25T12:00:00Z"}, "CI")
+        release = in_workflow({**run("build", "COMPLETED", "FAILURE"), "startedAt": "2026-11-25T11:00:00Z"}, "Release")
+        self.assertEqual(pr.latest_checks([ci, release]), [ci, release])
+        self.assertEqual(pr.ci_of(pr.latest_checks([ci, release])), "failing")
+
 
 def pull(comments=(), reviews=(), committed="2026-11-02T10:00:00Z", created="2026-11-01T10:00:00Z"):
     return {"createdAt": created, "commits": {"nodes": [{"commit": {"committedDate": committed}}]},
@@ -209,6 +234,18 @@ class ReaderTest(unittest.TestCase):
         self.run_script()
         f = self.fields()
         self.assertEqual((f["pr_ci_required"], f["pr_activity_at"]), ("failing", "2026-11-03T09:00:00Z"))
+
+    def test_a_cancelled_older_run_does_not_fail_a_green_pr(self):
+        def check(name, conclusion, started):
+            return {**run(name, "COMPLETED", conclusion), "startedAt": started, "isRequired": True}
+        checks = [check("RSpec", "CANCELLED", "2026-11-25T11:47:00Z"), check("RSpec result", "FAILURE", "2026-11-25T11:47:30Z"),
+                  check("RSpec", "SUCCESS", "2026-11-25T11:53:00Z"), check("RSpec result", "SUCCESS", "2026-11-25T11:58:00Z")]
+        self.pr({"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": [],
+                 "statusCheckRollup": checks})
+        self.run_script()
+        f = self.fields()
+        self.assertEqual((f["pr_ci"], f["pr_ci_fix"], f["pr_ci_required"], f.get("pr_ci_failed", "")),
+                         ("passing", "passing", "passing", ""))
 
     def test_pr_head_at_is_when_the_current_head_was_first_seen(self):
         view = {"state": "OPEN", "mergeable": "MERGEABLE", "reviewDecision": "", "headRefOid": "h1", "comments": []}

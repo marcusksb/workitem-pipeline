@@ -7,7 +7,8 @@ For each item on stdin with a PR link whose PR is not already recorded as merged
 can be reopened, so it is still read), it writes these frontmatter keys, only when they change:
   pr_url              the link it read; a different `pr:` clears every pr_* key first
   pr_state            open | merged | closed
-  pr_ci               passing | failing | pending | none, over every check (the board's chip)
+  pr_ci               passing | failing | pending | none, over every check (the board's chip); only
+                      the newest run of a check counts, so a cancelled older run is not red
   pr_ci_fix           the same without checks whose name contains an --ignore word (the CI fixer)
   pr_ci_failed        names of the red checks
   pr_ci_required      passing | failing | pending | none, over the required checks only (pr-remind)
@@ -46,8 +47,9 @@ REMIND_MARKER = "<!-- pr-remind -->"
 # NUMBER is the PR's number; isRequired needs it.
 PULL_FIELDS = """number state isDraft mergeable reviewDecision headRefOid createdAt updatedAt
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { contexts(first: 100) { nodes {
-    ... on CheckRun { name status conclusion isRequired(pullRequestNumber: NUMBER) }
-    ... on StatusContext { context state isRequired(pullRequestNumber: NUMBER) }
+    ... on CheckRun { name status conclusion startedAt completedAt isRequired(pullRequestNumber: NUMBER)
+                      checkSuite { workflowRun { workflow { name } } } }
+    ... on StatusContext { context state createdAt isRequired(pullRequestNumber: NUMBER) }
   } } } } } }
   comments(last: 100) { nodes { id createdAt body author { __typename login } } }
   reviews(last: 100) { nodes { id state submittedAt body author { __typename login } } }"""
@@ -68,6 +70,24 @@ def result_of(check):
             return check[key]
     return ""
 
+
+def latest_checks(checks):
+    """The newest result of each check, in rollup order. A re-run, or a second run of a workflow
+    on the same commit, leaves the older results (often CANCELLED) in the rollup. A check is its
+    workflow plus its name, so a job name two workflows share stays two checks. A result without
+    a time (a queued re-run) is the newest."""
+    def key(check):
+        run = (check.get("checkSuite") or {}).get("workflowRun") or {}
+        return (run.get("workflow") or {}).get("name") or "", check_name(check)
+    def time_of(check):
+        at = check.get("startedAt") or check.get("completedAt") or check.get("createdAt")
+        return parse_time(at) if at else datetime.max.replace(tzinfo=timezone.utc)
+    newest = {}
+    for check in checks:
+        if key(check) not in newest or time_of(check) >= time_of(newest[key(check)]):
+            newest[key(check)] = check
+    kept = {id(check) for check in newest.values()}
+    return [check for check in checks if id(check) in kept]
 
 def ci_of(checks, ignore=()):
     """passing, failing, pending or none. Pending wins, so a fixer never races running checks."""
@@ -216,10 +236,10 @@ def read_open_pulls(urls):
 
 
 def view_of(pull):
-    """A PULL_FIELDS node with its connections as plain lists, the checks of the head commit."""
+    """A PULL_FIELDS node with its connections as plain lists, the newest checks of the head commit."""
     commits = pull["commits"]["nodes"]
     rollup = commits[0]["commit"].get("statusCheckRollup") if commits else None
-    return {**pull, "statusCheckRollup": rollup["contexts"]["nodes"] if rollup else [],
+    return {**pull, "statusCheckRollup": latest_checks(rollup["contexts"]["nodes"]) if rollup else [],
             "comments": pull["comments"]["nodes"], "reviews": pull["reviews"]["nodes"]}
 
 
