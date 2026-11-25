@@ -163,6 +163,8 @@ test("approve at the gate from the gate bar", async ({ page }) => {
   // Approving moves the item on, to the stage the gate names.
   await gateColumn.getByText("Approve me").click();
   await expect(page.locator(".detail").getByRole("button", { name: "Discuss brief" })).toHaveCount(2);
+  // Without a session, the tab row offers to start one.
+  await expect(page.locator(".detail").getByRole("button", { name: "Start agent session", exact: true })).toBeVisible();
   await page.locator(".detail").getByRole("button", { name: "Approve", exact: true }).click();
   await expect(page.locator(".column", { hasText: "in development" })).toContainText("Approve me");
   await expect(gateColumn).not.toContainText("Approve me");
@@ -176,6 +178,7 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.getByRole("tab", { name: "Info" }).click();
   await expect(page).toHaveURL(/#demo\/T-1-demo\/info$/);
   await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start agent session", exact: true })).toHaveCount(0);
 
   await page.goBack();
   await expect(page).toHaveURL(/#demo\/T-1-demo$/);
