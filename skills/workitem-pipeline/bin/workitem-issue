@@ -4,19 +4,26 @@ Jira or GitHub Issues themselves.
 
   workitem-issue parse <workitem> <input>                   # or: parse --workspace <dir> --board <name> <input>
   workitem-issue read <workitem>                            # or: read --workspace <dir> --board <name> <input>
+  workitem-issue search <workitem> <words>...               # or: search --workspace <dir> --board <name> <words>...
   workitem-issue create <workitem> --title <title> --body-file <file>
+  workitem-issue comment <workitem> --body-file <file>
   workitem-issue set-state <workitem> <state>...
   workitem-issue pr-line <workitem>
 
 <workitem> is the item's folder or its workitem.md. `parse` turns a key, `#123`, `owner/repo#123`
-or an issue URL into the `issue:` value (`<ref> (<url>)`) and the folder prefix. `create` files a
-new issue in the board's `issue_project` and sets `issue:`. `set-state` moves the issue to the first
+or an issue URL into the `issue:` value (`<ref> (<url>)`) and the folder prefix. `read` prints the
+issue as markdown, each comment under `## Comment by <author>` with a `Posted <time> · id <id>` line.
+`search` prints the open issues of the board's `issue_project` that match the words, one
+`ref<TAB>status<TAB>labels<TAB>summary` line each, in the tracker's order (labels comma-joined,
+commas and whitespace in a label become one space). `create` files a new issue in the board's `issue_project` and sets `issue:`. `comment` posts the file as a
+comment on the item's issue. `set-state` moves the issue to the first
 of the states it can reach; it skips an item without an issue, an item another one depends on
 (only the last of a chain moves the shared issue), and an issue already there. `pr-line` prints
 the line the PR body needs: `Closes owner/repo#123`, the Jira key, or nothing.
 
-Exit 2 is a bad input or setup (unknown ref, missing key). An API error in `set-state` only warns
-(exit 0): a missing transition must not stop the work.
+Exit 2 is a bad input or setup (unknown ref, missing key, no issue linked,
+an unreadable or empty --body-file). An API error exits 1,
+except in `set-state`, where it only warns (exit 0): a missing transition must not stop the work.
 """
 import os, sys
 from pathlib import Path
@@ -91,15 +98,28 @@ def read(args):
             die(f"{path.parent.name} has no issue linked")
     title, status, body, comments = tracker.client(tracker.tracker_of(workspace), workspace).read(key)
     print(f"# {key}: {title}\n\nStatus: {status}\n\n{body.strip() or '(no description)'}")
-    for author, text in comments:
-        print(f"\n## Comment by {author}\n\n{text.strip()}")
+    for author, created, comment_id, text in comments:
+        print(f"\n## Comment by {author}\n\nPosted {created} · id {comment_id}\n\n{text.strip()}")
+
+def search(args):
+    if args and args[0] == "--workspace":
+        workspace, board = flag(args, "--workspace"), flag(args, "--board")
+        config = tracker.board(workspace, board)
+    elif args:
+        _, workspace, _, config = item(args.pop(0))
+    if not args:
+        die("search takes <workitem> <words>..., or --workspace <dir> --board <name> <words>...")
+    name = tracker.tracker_of(workspace)
+    issues = tracker.client(name, workspace).search(project_of(workspace, name, config), " ".join(args))
+    for ref, status, labels, summary in issues:
+        print("\t".join([ref, status, ",".join(" ".join(label.replace(",", " ").split()) for label in labels), " ".join(summary.split())]))
 
 
 def project_of(workspace, name, config):
     if name == "github":
         return tracker.github_project(workspace, config)
     if not config.get("issue_project"):
-        raise tracker.Problem("set issue_project (the Jira project key) on the board to create issues")
+        raise tracker.Problem("set issue_project (the Jira project key) on the board to create or search issues")
     return config["issue_project"]
 
 
@@ -109,12 +129,35 @@ def create(args):
     if tracker.issue_key(fields.get("issue")):
         die(f"{path.parent.name} already has issue {fields['issue']}")
     name = tracker.tracker_of(workspace)
-    body = Path(body_file).read_text()
+    body = body_of(body_file)
     client = tracker.client(name, workspace)
     ref = client.create(project_of(workspace, name, config), title, body)
     value = f"{ref} ({client.url(ref)})"
     set_fields(path, {"issue": value})
     print(f"issue: {value}")
+
+
+def body_of(body_file):
+    try:
+        body = Path(body_file).read_text()
+    except OSError as e:
+        die(f"cannot read --body-file: {e}")
+    if not body.strip():
+        die(f"--body-file {body_file} is empty")
+    return body
+
+
+def comment(args):
+    body_file = flag(args, "--body-file")
+    if len(args) != 1:
+        die("comment takes <workitem> --body-file <file>")
+    path, workspace, fields, _ = item(args[0])
+    name = tracker.tracker_of(workspace)
+    key = tracker.own_key(name, fields.get("issue"))
+    if not key:
+        die(f"{path.parent.name} has no issue linked")
+    tracker.client(name, workspace).comment(key, body_of(body_file))
+    print(f"commented on {key}")
 
 
 def set_state(args):
@@ -146,7 +189,7 @@ def pr_line(args):
         print(f"Closes {key}" if name == "github" else key)
 
 
-COMMANDS = {"parse": parse, "read": read, "create": create, "set-state": set_state, "pr-line": pr_line}
+COMMANDS = {"parse": parse, "read": read, "search": search, "create": create, "comment": comment, "set-state": set_state, "pr-line": pr_line}
 
 if __name__ == "__main__":
     command, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 2 else (None, [])
