@@ -4,6 +4,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { terminalUrl } from "./api";
+import { isBrowserTabShortcut } from "./terminalKeys";
 
 type Scrollback = { history: number; position: number };
 
@@ -74,8 +75,10 @@ export function Terminal({ path }: { path: string }) {
       scrollTo.current(exact - lines);
       return false;
     });
-    // Shift+PageUp/PageDown scroll history; plain keys still go to the agent.
+    // Shift+PageUp/PageDown scroll history; browser tab shortcuts (Ctrl+Tab, Ctrl+PageUp/PageDown)
+    // go to the browser, since xterm would send and cancel them; other keys go to the agent.
     term.attachCustomKeyEventHandler((event) => {
+      if (isBrowserTabShortcut(event)) return false;
       if (event.type !== "keydown" || !event.shiftKey || (event.key !== "PageUp" && event.key !== "PageDown")) return true;
       scrollTo.current(exact + (event.key === "PageUp" ? 1 : -1) * Math.max(1, term.rows - 1));
       return false;
