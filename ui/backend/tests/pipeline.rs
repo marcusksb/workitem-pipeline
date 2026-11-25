@@ -1687,11 +1687,12 @@ async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
     let dir = w.ws.join("T-1-files");
     fs::create_dir_all(dir.join("notes")).unwrap();
     fs::write(dir.join("notes/page.html"), "<script>x</script>").unwrap();
+    fs::write(dir.join("notes/shot.png"), [0x89, b'P', b'N', b'G']).unwrap();
     fs::write(w.ws.join("secret.txt"), "no").unwrap();
 
     let list: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems/app/T-1-files/files").await).unwrap();
     let paths: Vec<_> = list.as_array().unwrap().iter().map(|e| e["path"].as_str().unwrap()).collect();
-    assert_eq!(paths, ["notes/page.html", "workitem.md"]);
+    assert_eq!(paths, ["notes/page.html", "notes/shot.png", "workitem.md"]);
 
     let request = Request::get("/api/workitems/app/T-1-files/files/notes/page.html")
         .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
@@ -1700,8 +1701,8 @@ async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
         .unwrap();
     let response = router(w.state.clone()).oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html");
-    assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], "sandbox");
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html; charset=utf-8");
+    assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], "sandbox allow-scripts");
 
     // Video and audio seek with range requests.
     let request = Request::get("/api/workitems/app/T-1-files/files/notes/page.html")
@@ -1713,8 +1714,18 @@ async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
     let response = router(w.state.clone()).oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
     assert_eq!(response.headers()[header::CONTENT_RANGE], "bytes 8-9/18");
-    assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], "sandbox");
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "text/html; charset=utf-8");
+    assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], "sandbox allow-scripts");
     assert_eq!(response.into_body().collect().await.unwrap().to_bytes(), "x<");
+
+    // Only text gets a charset.
+    let request = Request::get("/api/workitems/app/T-1-files/files/notes/shot.png")
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .body(Body::empty())
+        .unwrap();
+    let response = router(w.state.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
 
     for uri in ["/api/workitems/app/T-1-files/files/..%2Fsecret.txt", "/api/workitems/app/T-1-files/files/notes"] {
         assert!(get(&w, uri).await.contains("file not found"), "{uri}");

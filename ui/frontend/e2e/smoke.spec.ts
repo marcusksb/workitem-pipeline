@@ -30,6 +30,7 @@ function seed() {
   );
   write(join(ws, "T-2-gate/notes/findings.md"), "# Findings\n\n- the cache is stale\n");
   write(join(ws, "T-2-gate/log.txt"), "line one\nline two\n");
+  write(join(ws, "T-2-gate/drafts.html"), "<p>Draft → ä</p><script>document.body.append('scripted')</script>");
   write(
     join(ws, "T-3-approve/workitem.md"),
     "---\ntitle: Approve me\ntype: feature\nstage: ready_for_development\nboard: default\napproved: false\nagent_status: ok\nissue: T-3\n---\n\n# Approve\n",
@@ -462,7 +463,7 @@ test("the Files tab lists the workitem folder and previews a file", async ({ pag
   await expect(page.locator(".board")).toContainText("Brief waiting");
   await page.goto(`${base.split("#")[0]}#demo/T-2-gate/files`);
   const list = page.locator(".file-list");
-  await expect(list.getByRole("button")).toHaveText([/log\.txt/, /notes\/findings\.md/, /workitem\.md/]);
+  await expect(list.getByRole("button")).toHaveText([/drafts\.html/, /log\.txt/, /notes\/findings\.md/, /workitem\.md/]);
   await list.getByRole("button", { name: /log\.txt/ }).click();
   await expect(page.locator(".file-preview pre")).toHaveText("line one\nline two\n");
   await list.getByRole("button", { name: /findings\.md/ }).click();
@@ -473,6 +474,12 @@ test("the Files tab lists the workitem folder and previews a file", async ({ pag
   await page.screenshot({ path: process.env.FILES_SHOT ?? join(tmpdir(), "files-tab.png") });
   const raw = await page.request.get(base.split("#")[0].replace(/\/$/, "") + "/api/workitems/demo/T-2-gate/files/notes/findings.md");
   expect(await raw.text()).toContain("the cache is stale");
+  // Last: the tall frame scrolls the list under the tabs.
+  await list.getByRole("button", { name: /drafts\.html/ }).click();
+  await expect(page.locator(".file-preview iframe")).toHaveAttribute("sandbox", "allow-scripts");
+  const frame = page.frameLocator(".file-preview iframe").locator("body");
+  await expect(frame).toContainText("Draft → ä");
+  await expect(frame).toContainText("scripted");
 });
 
 test("the Learnings button shows and edits the learnings of the board on screen", async ({ page }) => {
