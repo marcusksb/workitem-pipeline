@@ -294,6 +294,15 @@ export function searchItems(items: Item[], query: string): Item[] {
     .map((found) => found.item);
 }
 
+/** Something the palette can run besides opening a workitem. */
+export type Action = { label: string; run: () => void };
+
+/** Actions whose label contains every word of `query`, case-insensitively, in their given order; all of them for an empty query. */
+export function searchActions(actions: Action[], query: string): Action[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return actions.filter((action) => words.every((word) => action.label.toLowerCase().includes(word)));
+}
+
 export const stageLabel = (stage: string) => stage.replaceAll("_", " ");
 
 /** Icon per workitem kind; unknown kinds (including the `-` default) have no entry. */

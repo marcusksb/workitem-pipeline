@@ -28,6 +28,16 @@ function CommandEmpty(props: React.ComponentProps<typeof CommandPrimitive.Empty>
   return <CommandPrimitive.Empty data-slot="command-empty" className="py-6 text-center text-[15px] text-muted-foreground" {...props} />;
 }
 
+function CommandGroup({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Group>) {
+  return (
+    <CommandPrimitive.Group
+      data-slot="command-group"
+      className={cn("[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[13px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground", className)}
+      {...props}
+    />
+  );
+}
+
 function CommandItem({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Item>) {
   return (
     <CommandPrimitive.Item
@@ -41,4 +51,4 @@ function CommandItem({ className, ...props }: React.ComponentProps<typeof Comman
   );
 }
 
-export { Command, CommandInput, CommandList, CommandEmpty, CommandItem };
+export { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem };

@@ -38,13 +38,15 @@ type Props = {
   selected: Plan | null;
   onSelect: (plan: Plan) => void;
   onStarted: (workspace: string, id: string) => void;
+  /** Whether the New plan dialog is open; App owns it so the palette can open it too. */
+  creating: boolean;
+  onCreating: (creating: boolean) => void;
 };
 
 /** The planning sessions of the workspaces in view, in the sidebar (decision 36). */
-export function Plans({ plans, sessions, workspaces, showWorkspace, selected, onSelect, onStarted }: Props) {
+export function Plans({ plans, sessions, workspaces, showWorkspace, selected, onSelect, onStarted, creating, onCreating }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [showDone, setShowDone] = useState(false);
-  const [creating, setCreating] = useState(false);
   const { open, done } = groupPlans(plans, workspaces);
   const shownSessions = sessions.filter((session) => workspaces.includes(session.workspace));
   if (!workspaces.length) return null;
@@ -82,7 +84,7 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
             <IconChevronDown />
           </span>
         </Button>
-        <Button variant="ghost" size="icon" className="size-[22px]" aria-label="New plan" title="Start a planning session" onClick={() => setCreating(true)}>
+        <Button variant="ghost" size="icon" className="size-[22px]" aria-label="New plan" title="Start a planning session" onClick={() => onCreating(true)}>
           <IconPlus />
         </Button>
       </div>
@@ -115,9 +117,9 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
       {creating && (
         <NewPlan
           workspaces={workspaces}
-          onClose={() => setCreating(false)}
+          onClose={() => onCreating(false)}
           onStarted={(workspace, id) => {
-            setCreating(false);
+            onCreating(false);
             onStarted(workspace, id);
           }}
         />

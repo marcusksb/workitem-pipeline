@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "./api";
 import { Board } from "./Board";
-import { boardNames, itemKey, shownBoard } from "./boardState";
+import { Action, boardNames, itemKey, shownBoard } from "./boardState";
 import { DetailPanel } from "./DetailPanel";
 import { ActivityToasts } from "./ActivityToasts";
 import { Login } from "./Login";
@@ -167,6 +167,14 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     setSearching(false);
     open(item);
   };
+  const [creatingItem, setCreatingItem] = useState(false);
+  const [creatingPlan, setCreatingPlan] = useState(false);
+  /** What the palette can run, on the same conditions as the buttons it stands in for. */
+  const actions: Action[] = [
+    ...(workspace && activeBoard ? [{ label: "New workitem", run: () => setCreatingItem(true) }] : []),
+    ...(inView.length ? [{ label: "New plan", run: () => setCreatingPlan(true) }] : []),
+    ...names.filter((name) => name !== workspace).map((name) => ({ label: `Switch to workspace ${name}`, run: () => navigate({ workspace: name, board: undefined }) })),
+  ];
   const onTab = (tab: Tab) =>
     selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
@@ -197,6 +205,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
             void plans.reload();
             navigate({ plan: { workspace: planWorkspace, id } });
           }}
+          creating={creatingPlan}
+          onCreating={setCreatingPlan}
         />
       </Sidebar>
       <div className="content flex min-w-0 flex-1 flex-col">
@@ -208,6 +218,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           onView={chooseView}
           onSearch={() => setSearching(true)}
           error={error}
+          creating={creatingItem}
+          onCreating={setCreatingItem}
           onCreated={() => void sessions.reload()}
         />
         {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
@@ -254,7 +266,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         </main>
       </div>
       <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} />
-      {searching && <QuickSearch items={items.data ?? []} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
+      {searching && <QuickSearch items={items.data ?? []} actions={actions} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );
 }
