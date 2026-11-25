@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, planTerminal } from "./api";
 import { Children } from "./Children";
-import { IconFileText, IconListTree, IconTerminalSquare, IconTrash, IconX } from "./icons";
+import { IconFileText, IconListTree, IconPanelRightClose, IconTerminalSquare, IconTrash } from "./icons";
 import { ErrorText, Muted, prose, scroll, SidePanel } from "./parts";
 import { planLabel, planStatus } from "./planState";
 import { Terminal } from "./Terminal";
@@ -79,7 +79,7 @@ export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, 
               {live.topic || live.id}
             </h2>
             <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
-              <IconX />
+              <IconPanelRightClose />
             </Button>
           </div>
           {live.summary && <Muted>{live.summary}</Muted>}

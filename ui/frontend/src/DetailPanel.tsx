@@ -32,11 +32,11 @@ import {
   IconLink,
   IconListTree,
   IconMessage,
+  IconPanelRightClose,
   IconPencil,
   IconTerminalSquare,
   IconTrash,
   IconUnlock,
-  IconX,
 } from "./icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -206,7 +206,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               {live.title}
             </h2>
             <Button variant="ghost" size="icon" className="-mt-0.5 -mr-2 shrink-0" aria-label="Close" onClick={onClose}>
-              <IconX />
+              <IconPanelRightClose />
             </Button>
           </div>
           <Properties item={live} pipelines={pipelines} onBoard={onBoard}>
