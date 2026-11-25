@@ -208,6 +208,12 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   // A click on the board outside any card closes the item like the Close button.
   await page.locator(".column h2").first().click({ position: { x: 2, y: 2 } });
   await expect(page.locator(".detail")).toHaveCount(0);
+
+  // So does a click on the sidebar outside its controls.
+  await page.locator(".card").first().click();
+  await expect(page.locator(".detail")).toHaveCount(1);
+  await page.locator("nav").first().click({ position: { x: 2, y: 2 } });
+  await expect(page.locator(".detail")).toHaveCount(0);
 });
 
 test("a workspace's boards are tabs in the sidebar and the chosen board stays in the URL", async ({ page }) => {

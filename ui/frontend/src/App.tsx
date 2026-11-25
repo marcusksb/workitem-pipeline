@@ -49,10 +49,10 @@ export function useSession() {
   return { state, error, login, expire: () => setState("out") };
 }
 
-/** A click on the board that hits no card, control or dialog, and selects no text; it closes the open item. */
+/** A click outside the open panel that hits no card, control or dialog, and selects no text; it closes the panel. */
 function isBackground(target: EventTarget): boolean {
   if (!(target instanceof Element)) return false;
-  if (target.closest(".card, button, a, input, select, textarea, label, [role=dialog], [data-slot=dialog-overlay]")) return false;
+  if (target.closest("[data-panel], .card, button, a, input, select, textarea, label, [role=dialog], [data-slot=dialog-overlay]")) return false;
   return window.getSelection()?.isCollapsed ?? true;
 }
 
@@ -71,7 +71,7 @@ function useLeaving<T>(value: T | null) {
 /** Wraps a `.detail` panel so it slides out before it unmounts. */
 function Leaving({ leaving, onDone, children }: { leaving: boolean; onDone: () => void; children: ReactNode }) {
   return (
-    <div className={leaving ? "contents leaving" : "contents"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
+    <div data-panel className={leaving ? "contents leaving" : "contents"} onAnimationEnd={(event) => event.animationName === "detail-out" && onDone()}>
       {children}
     </div>
   );
@@ -178,8 +178,9 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const onTab = (tab: Tab) =>
     selected && navigate({ item: { workspace: selected.workspace, dir: selected.dir }, tab });
 
+  // Portaled menus and dialogs sit outside the root element, so clicks in them never close the panel.
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen" onClick={(event) => detailOpen && event.currentTarget.contains(event.target as Node) && isBackground(event.target) && navigate({})}>
       <Sidebar
         workspaces={workspaces.data ?? []}
         workspace={workspace}
@@ -187,7 +188,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         items={shown}
         board={activeBoard}
         onWorkspace={(name) => navigate({ workspace: name, board: undefined })}
-        onBoard={(board) => navigate({ ...route, board })}
+        onBoard={(board) => navigate({ board })}
         onChanged={() => {
           void workspaces.reload();
           void items.reload();
@@ -227,7 +228,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           <p className="px-6 pt-4 text-[15px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
         <main className="relative flex min-h-0 flex-1">
-          <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4" onClick={(event) => detailOpen && isBackground(event.target) && navigate({})}>
+          <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4">
             <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
               void items.reload();
               void pipelines.reload();
