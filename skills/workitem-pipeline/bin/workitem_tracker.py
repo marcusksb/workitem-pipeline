@@ -173,17 +173,28 @@ class Jira:
         issues = self.call("POST", "/rest/api/3/search/jql", body)["issues"]
         return {i["key"]: (i["fields"]["status"]["name"], i["fields"]["status"]["statusCategory"]["key"]) for i in issues}
 
+    def search(self, project, words):
+        """`[(key, status, labels, summary)]` of up to PAGE open issues of `project` matching `words`."""
+        text = words.replace("\\", "\\\\").replace('"', '\\"')
+        body = {"jql": f'project = {project} AND statusCategory != Done AND text ~ "{text}"',
+                "fields": ["summary", "status", "labels"], "maxResults": PAGE}
+        issues = self.call("POST", "/rest/api/3/search/jql", body)["issues"]
+        return [(i["key"], i["fields"]["status"]["name"], i["fields"].get("labels") or [], i["fields"]["summary"]) for i in issues]
+
     def read(self, key):
+        """Title, status, body and `[(author, created, id, text)]` of the issue."""
         issue = self.call("GET", f"/rest/api/3/issue/{key}?fields=summary,status,description,comment")
         fields = issue["fields"]
-        comments = [(c.get("author", {}).get("displayName", "?"), adf_text(c.get("body"))) for c in fields.get("comment", {}).get("comments", [])]
+        comments = [(c.get("author", {}).get("displayName", "?"), c.get("created", ""), str(c.get("id", "")), adf_text(c.get("body")))
+                    for c in fields.get("comment", {}).get("comments", [])]
         return fields["summary"], fields["status"]["name"], adf_text(fields.get("description")), comments
 
     def create(self, project, title, body):
-        paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": p}]} for p in body.split("\n\n") if p.strip()]
-        fields = {"project": {"key": project}, "summary": title, "issuetype": {"name": "Task"},
-                  "description": {"type": "doc", "version": 1, "content": paragraphs}}
+        fields = {"project": {"key": project}, "summary": title, "issuetype": {"name": "Task"}, "description": adf_doc(body)}
         return self.call("POST", "/rest/api/3/issue", {"fields": fields})["key"]
+
+    def comment(self, key, body):
+        self.call("POST", f"/rest/api/3/issue/{key}/comment", {"body": adf_doc(body)})
 
     def set_state(self, key, states):
         """Moves the issue to the first of `states` it has a transition to; what happened, as text."""
@@ -200,6 +211,11 @@ class Jira:
         available = ", ".join(t["to"]["name"] for t in transitions) or "none"
         raise RuntimeError(f"{key} has no transition to {' or '.join(states)} (available: {available})")
 
+
+def adf_doc(text):
+    """An Atlassian Document Format doc of `text`, one paragraph per blank-line-separated block."""
+    paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": p}]} for p in text.split("\n\n") if p.strip()]
+    return {"type": "doc", "version": 1, "content": paragraphs}
 
 def adf_text(node):
     """Plain text of an Atlassian Document Format node: text joined, blocks on their own lines."""
@@ -261,11 +277,24 @@ class GitHub:
         repo, number = ref.split("#")
         return json.loads(gh(self.workspace, "issue", "view", number, "-R", repo, "--json", fields))
 
+    def search(self, project, words):
+        """`[(ref, status, labels, summary)]` of up to PAGE open issues of `project` matching `words`."""
+        out = gh(self.workspace, "issue", "list", "-R", project, "--state", "open", "--search", words,
+                 "--limit", str(PAGE), "--json", "number,title,labels,assignees")
+        return [(f"{project}#{i['number']}", github_status("OPEN", bool(i["assignees"]))[0], [l["name"] for l in i["labels"]], i["title"])
+                for i in json.loads(out)]
+
     def read(self, ref):
+        """Title, status, body and `[(author, created, id, text)]` of the issue."""
         issue = self.view(ref, "title,state,body,comments,assignees")
         status = github_status(issue["state"], bool(issue["assignees"]))[0]
-        comments = [((c.get("author") or {}).get("login", "?"), c.get("body", "")) for c in issue["comments"]]
+        comments = [((c.get("author") or {}).get("login", "?"), c.get("createdAt", ""), str(c.get("id", "")), c.get("body", ""))
+                    for c in issue["comments"]]
         return issue["title"], status, issue["body"], comments
+
+    def comment(self, ref, body):
+        repo, number = ref.split("#")
+        gh(self.workspace, "issue", "comment", number, "-R", repo, "--body", body)
 
     def create(self, project, title, body):
         url = gh(self.workspace, "issue", "create", "-R", project, "--title", title, "--body", body).strip().splitlines()[-1]

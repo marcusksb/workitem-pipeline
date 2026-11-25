@@ -28,6 +28,8 @@ sys.exit(0)
 class Jira(BaseHTTPRequestHandler):
     requests = []
     status = "To Do"
+    comments = []
+    fail = None
     transitions = [{"id": "31", "to": {"name": "In Progress"}}, {"id": "41", "to": {"name": "In Review"}}]
 
     def answer(self, data, code=200):
@@ -42,12 +44,18 @@ class Jira(BaseHTTPRequestHandler):
         if self.path.endswith("/transitions"):
             self.answer({"transitions": Jira.transitions})
         else:
-            self.answer({"fields": {"status": {"name": Jira.status}, "summary": "Fix it", "description": None, "comment": {"comments": []}}})
+            self.answer({"fields": {"status": {"name": Jira.status}, "summary": "Fix it", "description": None, "comment": {"comments": Jira.comments}}})
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Jira.requests.append(("POST", self.path, body))
-        if self.path == "/rest/api/3/search/jql":
+        if Jira.fail:
+            self.answer({"errorMessages": [Jira.fail]}, 400)
+        elif self.path == "/rest/api/3/search/jql" and "summary" in body["fields"]:
+            def issue(key, labels, summary):
+                return {"key": key, "fields": {"status": {"name": "To Do"}, "labels": labels, "summary": summary}}
+            self.answer({"issues": [issue("MNT-1", [], "Login\tfails"), issue("MNT-2", ["ui", "jira_escalated"], "Login slow"), issue("MNT-3", [], "Login 500")]})
+        elif self.path == "/rest/api/3/search/jql":
             self.answer({"issues": [{"key": "MNT-1", "fields": {"status": {"name": "Ready", "statusCategory": {"key": "indeterminate"}}}}]})
         elif self.path == "/rest/api/3/issue":
             self.answer({"key": "MNT-9"}, 201)
@@ -61,7 +69,7 @@ class Jira(BaseHTTPRequestHandler):
 
 class WorkitemIssueTest(unittest.TestCase):
     def setUp(self):
-        Jira.requests, Jira.status = [], "To Do"
+        Jira.requests, Jira.status, Jira.comments, Jira.fail = [], "To Do", [], None
         self.server = HTTPServer(("127.0.0.1", 0), Jira)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.tmp = tempfile.TemporaryDirectory()
@@ -169,10 +177,87 @@ class WorkitemIssueTest(unittest.TestCase):
 
     def test_read_prints_a_github_issue_before_any_item_exists(self):
         self.setup("github", {"issue_project": "acme/web"})
-        issue = {"title": "Fix it", "state": "OPEN", "body": "Steps", "comments": [{"author": {"login": "ann"}, "body": "Seen too"}], "assignees": []}
+        comment = {"id": "IC_1", "createdAt": "2026-11-20T10:00:00Z", "author": {"login": "ann"}, "body": "Seen too"}
+        issue = {"title": "Fix it", "state": "OPEN", "body": "Steps", "comments": [comment], "assignees": []}
         self.answers([[["issue", "view", "5", "-R", "acme/web"], [json.dumps(issue), 0]]])
         result = self.run_script(ISSUE, "read", "--workspace", self.workspace, "--board", "dev", "#5")
-        self.assertEqual(result.stdout, "# acme/web#5: Fix it\n\nStatus: Open\n\nSteps\n\n## Comment by ann\n\nSeen too\n")
+        self.assertEqual(result.stdout, "# acme/web#5: Fix it\n\nStatus: Open\n\nSteps\n\n## Comment by ann\n\n"
+                                        "Posted 2026-11-20T10:00:00Z · id IC_1\n\nSeen too\n")
+
+    def test_read_prints_jira_comments_with_time_and_id_under_the_same_heading(self):
+        self.setup("jira")
+        body = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Deployed"}]}]}
+        Jira.comments = [{"id": "10001", "created": "2026-11-20T10:00:00.000+0100", "author": {"displayName": "Ann Lee"}, "body": body}]
+        result = self.run_script(ISSUE, "read", self.item("x", "MNT-1"))
+        self.assertIn("\n## Comment by Ann Lee\n\nPosted 2026-11-20T10:00:00.000+0100 · id 10001\n\nDeployed\n", result.stdout)
+
+    # search
+
+    def test_search_jira_sorts_escalated_first(self):
+        self.setup("jira", {"issue_project": "SUP"})
+        result = self.run_script(ISSUE, "search", "--workspace", self.workspace, "--board", "dev", "login", 'say "hi"\\')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        jql = Jira.requests[-1][2]["jql"]
+        self.assertEqual(jql, 'project = SUP AND statusCategory != Done AND text ~ "login say \\"hi\\"\\\\"')
+        self.assertEqual(result.stdout, "MNT-2\tTo Do\tui,jira_escalated\tLogin slow\nMNT-1\tTo Do\t\tLogin fails\nMNT-3\tTo Do\t\tLogin 500\n")
+
+    def test_search_github_lists_open_issues(self):
+        self.setup("github", {"issue_project": "acme/web"})
+        issues = [{"number": 4, "title": "Crash", "labels": [], "assignees": [{"login": "me"}]},
+                  {"number": 9, "title": "Crash on save", "labels": [{"name": "jira_escalated"}], "assignees": []}]
+        self.answers([[["issue", "list"], [json.dumps(issues), 0]]])
+        result = self.run_script(ISSUE, "search", self.item("x"), "crash", "save")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[0]["args"], ["issue", "list", "-R", "acme/web", "--state", "open", "--search", "crash save",
+                                                   "--limit", "100", "--json", "number,title,labels,assignees"])
+        self.assertEqual(result.stdout, "acme/web#9\tOpen\tjira_escalated\tCrash on save\nacme/web#4\tIn progress\t\tCrash\n")
+
+    def test_search_needs_words_and_a_jira_issue_project(self):
+        self.setup("jira")
+        path = self.item("x")
+        self.assertEqual(self.run_script(ISSUE, "search", path).returncode, 2)
+        result = self.run_script(ISSUE, "search", path, "login")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("set issue_project", result.stderr)
+        self.assertEqual(Jira.requests, [])
+
+    # comment
+
+    def comment_file(self, text):
+        path = os.path.join(self.root, "comment.md")
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def test_comment_posts_adf_paragraphs_on_jira(self):
+        self.setup("jira")
+        result = self.run_script(ISSUE, "comment", self.item("x", "MNT-1"), "--body-file", self.comment_file("One\n\nTwo\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        paragraphs = [{"type": "paragraph", "content": [{"type": "text", "text": t}]} for t in ("One", "Two\n")]
+        self.assertEqual(Jira.requests[-1], ("POST", "/rest/api/3/issue/MNT-1/comment", {"body": {"type": "doc", "version": 1, "content": paragraphs}}))
+
+    def test_comment_on_github(self):
+        self.setup("github")
+        result = self.run_script(ISSUE, "comment", self.item("x", "acme/web#7"), "--body-file", self.comment_file("Fixed"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls()[0]["args"], ["issue", "comment", "7", "-R", "acme/web", "--body", "Fixed"])
+
+    def test_comment_without_an_issue_or_with_a_bad_ref_exits_2(self):
+        self.setup("github")
+        body = self.comment_file("x")
+        for name, issue in (("none", "none"), ("jira", "MNT-1")):
+            self.assertEqual(self.run_script(ISSUE, "comment", self.item(name, issue), "--body-file", body).returncode, 2, name)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_failed_comment_exits_nonzero(self):
+        self.setup("jira")
+        Jira.fail = "no permission"
+        result = self.run_script(ISSUE, "comment", self.item("x", "MNT-1"), "--body-file", self.comment_file("x"))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Jira answered 400", result.stderr)
+        self.setup("github")
+        self.answers([[["issue", "comment"], ["", 1]]])
+        self.assertEqual(self.run_script(ISSUE, "comment", self.item("y", "acme/web#7"), "--body-file", self.comment_file("x")).returncode, 1)
 
     # set-state
 
