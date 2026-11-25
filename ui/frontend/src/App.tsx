@@ -160,7 +160,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     const sameView = item.workspace === workspace && (board === activeBoard || underParent);
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
-  useAlerts(items.data, open);
+  const openKey = selected ? itemKey(selected) : undefined;
+  useAlerts(items.data, open, openKey);
   /** The workitems made from a plan that still exist. */
   const planWorkitems = (plan: Plan) => (items.data ?? []).filter((i) => i.workspace === plan.workspace && plan.workitems.includes(i.dir));
   const openFound = (item: Item) => {
@@ -266,7 +267,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           )}
         </main>
       </div>
-      <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} />
+      <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
       {searching && <QuickSearch items={items.data ?? []} actions={actions} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );

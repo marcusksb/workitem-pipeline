@@ -1,6 +1,7 @@
 import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
 import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
+import { alertsFor } from "./boardState";
 import { QUIPS, quipFor } from "./quips";
 import { Item, Pipelines } from "./types";
 
@@ -16,15 +17,20 @@ const tone = (kind: ActivityKind) => (kind === "blocked" ? "tone-bad" : "tone-go
 /**
  * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), top right below the header,
  * newest on top, with confetti when an item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
+ * The item open in the detail panel (`openKey`) gets no blocked toast while the page has focus.
  */
-export function ActivityToasts({ items, pipelines, onOpen }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void }) {
+export function ActivityToasts({ items, pipelines, onOpen, openKey }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void; openKey: string | undefined }) {
   const before = useRef<Item[]>(undefined);
   const nextId = useRef(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Read when a poll arrives, so opening another item does not rerun the effect.
+  const openKeyRef = useRef(openKey);
+  openKeyRef.current = openKey;
 
   useEffect(() => {
     if (!items) return;
-    const events = activityEvents(before.current, items, pipelines);
+    const alerts = alertsFor(openKeyRef.current, document.hasFocus());
+    const events = activityEvents(before.current, items, pipelines).filter((e) => e.kind !== "blocked" || alerts(e.item));
     if (events.some((e) => e.kind === "done")) {
       void confetti({ particleCount: 160, spread: 100, startVelocity: 60, origin: { x: 0.5, y: 1 }, disableForReducedMotion: true });
     }
