@@ -15,6 +15,7 @@ const linkClass = "inline-flex cursor-pointer items-center gap-1 text-[15px] tex
 const IMAGE = /\.(png|jpe?g|gif|webp|svg|avif|ico)$/i;
 const VIDEO = /\.(mp4|webm|mov|m4v|ogv)$/i;
 const MARKDOWN = /\.(md|markdown)$/i;
+const HTML = /\.html?$/i;
 /** Larger files are only offered to open, not previewed. */
 const MAX_PREVIEW = 1024 * 1024;
 
@@ -57,8 +58,9 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
   const url = fileUrl(item, file.path);
   const image = IMAGE.test(file.path);
   const video = VIDEO.test(file.path);
+  const html = HTML.test(file.path);
   const tooBig = file.size > MAX_PREVIEW;
-  const text = useText(image || video || tooBig ? undefined : url, file.size, onUnauthorized);
+  const text = useText(image || video || html || tooBig ? undefined : url, file.size, onUnauthorized);
   const [revealError, setRevealError] = useState<string>();
   useEffect(() => setRevealError(undefined), [url]);
   const reveal = () =>
@@ -89,6 +91,8 @@ function Preview({ item, file, onUnauthorized }: { item: Item; file: FileEntry; 
         <video className="max-w-full rounded border border-border" src={url} controls />
       ) : tooBig ? (
         <Muted>Too large to preview; open it instead.</Muted>
+      ) : html ? (
+        <iframe className="h-[70vh] w-full rounded border border-border bg-white" sandbox="allow-scripts" src={url} title={file.path} />
       ) : !text ? (
         <Muted>Loading…</Muted>
       ) : "error" in text ? (

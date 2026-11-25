@@ -78,20 +78,28 @@ pub async fn list_files(
 }
 
 /// The raw file, with range requests so audio and video can seek. It is served from the UI's
-/// origin, so it is sandboxed: an HTML file an agent wrote must not run script with the session cookie.
+/// origin, so it is sandboxed: an HTML file an agent wrote may run script, but only in an opaque
+/// origin (never `allow-same-origin`), so it cannot use the session cookie or read the API.
+/// Text is served as UTF-8, which is what agents write.
 pub async fn file(
     State(state): State<Shared>,
     UrlPath((workspace, dir, rel)): UrlPath<(String, String, String)>,
     req: Request,
 ) -> Result<Response, ApiError> {
     let path = resolve(&item_dir(&state, &workspace, &dir)?, &rel).ok_or(ApiError::not_found("file"))?;
-    let mut response = ServeFile::new(path)
+    let mime = mime_guess::from_path(&path).first_or_octet_stream();
+    let mime = if mime.type_() == mime_guess::mime::TEXT && mime.get_param("charset").is_none() {
+        format!("{mime}; charset=utf-8").parse().expect("a valid mime type")
+    } else {
+        mime
+    };
+    let mut response = ServeFile::new_with_mime(path, &mime)
         .try_call(req)
         .await
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .into_response();
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox"));
+    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox allow-scripts"));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     Ok(response)
 }
