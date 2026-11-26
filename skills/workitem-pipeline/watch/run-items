@@ -11,23 +11,17 @@ in the item's frontmatter as handler_attempts, and workitem-move clears them whe
 stage, so an item that comes back starts over. With --max-running N it starts nothing while N
 items of the stage are `working` with a live session.
 """
-import json, os, re, subprocess, sys
+import json, os, subprocess, sys
 
-def set_field(path, key, value):
-    with open(path) as f:
-        text = f.read()
-    line = f"{key}: {value}"
-    if re.search(rf"^{key}:.*$", text.split("\n---", 2)[0], re.M):
-        text = re.sub(rf"^{key}:.*$", lambda _: line, text, count=1, flags=re.M)
-    else:
-        head, sep, rest = text.partition("\n---")
-        text = head + "\n" + line + sep + rest if sep else text
-    with open(path, "w") as f:
-        f.write(text)
+sys.dont_write_bytecode = True
+# The helpers sit next to workitem-move, which the backend names.
+sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
+                else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
+from workitem_fields import set_fields  # noqa: E402
 
 
 def set_status(path, value):
-    set_field(path, "agent_status", value)
+    set_fields(path, {"agent_status": value})
 
 
 def frontmatter(path):
@@ -64,7 +58,7 @@ def main(argv):
         if attempts >= max_attempts:
             set_status(path, f"blocked: max attempts reached in stage {stage}")
             continue
-        set_field(path, "handler_attempts", attempts + 1)
+        set_fields(path, {"handler_attempts": attempts + 1})
         result = subprocess.run([run_item, name], capture_output=True, text=True, env=os.environ)
         if result.returncode == 0:
             running += 1

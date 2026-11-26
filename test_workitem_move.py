@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import concurrent_write
+
 MOVE = Path(__file__).parent / "skills/workitem-pipeline/bin/workitem-move"
 MIGRATE = Path(__file__).parent / "skills/workitem-pipeline/bin/workitem-migrate"
 BRIEF = "\n## Review brief\n\n" + "".join(
@@ -61,6 +63,17 @@ class WorkitemMoveTest(unittest.TestCase):
         self.write("analyze", body=BRIEF)
         self.assertEqual(self.run_move(str(self.item), "ready_for_development").returncode, 0)
         self.assertEqual(self.stage(), "stage: ready_for_development")
+
+    def test_a_concurrent_write_is_kept(self):
+        self.named_board("race")
+        self.write(stage="idea", board="race")
+        env = concurrent_write.env(self.tmp.name, self.item / "workitem.md", "pr_state: open")
+        result = subprocess.run(["python3", str(MOVE), str(self.item), "build"], capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (self.item / "workitem.md").read_text()
+        self.assertIn("\npr_state: open\n", text)
+        self.assertEqual(self.stage(), "stage: build")
+        self.assertEqual(sorted(p.name for p in self.item.iterdir()), ["workitem.md"])
 
     def test_move_by_relative_path(self):
         self.write("analyze", body=BRIEF)

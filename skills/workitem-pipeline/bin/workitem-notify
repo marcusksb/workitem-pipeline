@@ -18,7 +18,10 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from workitem_fields import update_file  # noqa: E402
 
 def unquote(value):
     """An agent may quote a value (`"waiting: CI"`) because it holds a colon."""
@@ -28,14 +31,16 @@ def unquote(value):
 
 
 def replace_status(path, key, matches, new):
+    """Sets `key` to `new` while its value matches, checked again on every reread."""
+    def change(text):
+        status = re.search(rf"^{key}:\s*(.*)$", text, re.M)
+        if not status or not matches(unquote(status.group(1).strip())):
+            return None
+        return text[:status.start()] + f"{key}: {new}" + text[status.end():]
     try:
-        text = path.read_text()
-    except OSError:
+        update_file(path, change)
+    except (OSError, RuntimeError):
         return
-    status = re.search(rf"^{key}:\s*(.*)$", text, re.M)
-    if not status or not matches(unquote(status.group(1).strip())):
-        return
-    path.write_text(text[:status.start()] + f"{key}: {new}" + text[status.end():])
 
 
 create = os.environ.get("WORKITEM_CREATE")
@@ -52,7 +57,7 @@ if create:
 
 plan = os.environ.get("WORKITEM_PLAN")
 if plan:
-    replace_status(Path(plan), "status", lambda s: s == "working", "waiting")
+    replace_status(plan, "status", lambda s: s == "working", "waiting")
     sys.exit(0)
 
 name, file = os.environ.get("WORKITEM"), os.environ.get("WORKITEM_FILE")
@@ -64,5 +69,5 @@ try:
 except (ValueError, AttributeError):
     kind = ""
 needs_human = kind in ("permission_prompt", "elicitation_dialog", "elicitation_url_dialog")
-replace_status(Path(file), "agent_status", lambda s: s == "working" or (needs_human and s.startswith("waiting")),
+replace_status(file, "agent_status", lambda s: s == "working" or (needs_human and s.startswith("waiting")),
                f"blocked: waiting for input, tmux attach -t wi-{name}")

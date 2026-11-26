@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import concurrent_write
+
 NOTIFY = Path(__file__).parent / "skills/workitem-pipeline/bin/workitem-notify"
 BLOCKED = "blocked: waiting for input, tmux attach -t wi-T-1-a"
 
@@ -43,6 +45,18 @@ class NotifyTest(unittest.TestCase):
     def test_other_statuses_are_left_alone(self):
         self.assertEqual(self.notify("ok", "permission_prompt"), "ok")
         self.assertEqual(self.notify("blocked: why", "permission_prompt"), "blocked: why")
+
+    def test_a_concurrent_write_is_kept(self):
+        self.file.write_text("---\ntitle: t\nagent_status: working\n---\n")
+        env = {**concurrent_write.env(self.tmp.name, self.file, "pr_state: open"), "WORKITEM": "T-1-a", "WORKITEM_FILE": str(self.file)}
+        stdin = json.dumps({"hook_event_name": "Notification", "notification_type": "idle_prompt"})
+        subprocess.run(["python3", str(NOTIFY)], input=stdin, text=True, env=env, check=True)
+        self.assertEqual(self.file.read_text(), f"---\ntitle: t\nagent_status: {BLOCKED}\npr_state: open\n---\n")
+        self.assertEqual(sorted(p.name for p in self.file.parent.iterdir()), ["workitem.md"])
+
+    def test_a_status_that_does_not_match_leaves_the_file_alone(self):
+        self.assertEqual(self.notify("ok", "idle_prompt"), "ok")
+        self.assertEqual(sorted(p.name for p in self.file.parent.iterdir()), ["workitem.md"])
 
 
 class CreateSessionTest(unittest.TestCase):
