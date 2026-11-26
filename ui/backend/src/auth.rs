@@ -36,10 +36,21 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     header_str(headers, header::AUTHORIZATION)?.strip_prefix("Bearer ")
 }
 
-/// The `Host` header names loopback or an allowed host, with the server's own port (DNS rebinding).
+/// The name in a `Host` header or an allowed-hosts entry: `https://foo.bar.com/`, `foo.bar.com:8443`
+/// and `foo.bar.com` all name `foo.bar.com`. A bare IPv6 `[::1]` keeps its last colon part.
+fn host_name(s: &str) -> &str {
+    let s = s.split_once("://").map_or(s, |(_, rest)| rest).trim_end_matches('/');
+    match s.rsplit_once(':') {
+        Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => name,
+        _ => s,
+    }
+}
+
+/// DNS rebinding guard on the `Host` header (decisions 79 and 81): loopback with the server's own port,
+/// or an allowed host with any port or none, so a reverse proxy that passes `Host: foo.bar.com` gets in.
 fn host_allowed(host: &str, port: u16, allowed: &[String]) -> bool {
-    let Some(name) = host.strip_suffix(&format!(":{port}")) else { return false };
-    name == "127.0.0.1" || name == "localhost" || allowed.iter().any(|a| a == name)
+    let loopback = host.strip_suffix(&format!(":{port}")).is_some_and(|n| n == "127.0.0.1" || n == "localhost");
+    loopback || allowed.iter().any(|a| host_name(a).eq_ignore_ascii_case(host_name(host)))
 }
 
 /// Host check, cookie check for `/api` and `/ws`, Origin check for `/ws`.
@@ -58,7 +69,9 @@ pub async fn guard(State(state): State<Shared>, request: Request, next: Next) ->
         if !authed {
             return StatusCode::UNAUTHORIZED.into_response();
         }
-        if is_ws && header_str(headers, header::ORIGIN) != Some(&format!("http://{host}")) {
+        // Same origin; https when a TLS proxy sits in front.
+        let origin = header_str(headers, header::ORIGIN);
+        if is_ws && origin.and_then(|o| o.strip_prefix("http://").or_else(|| o.strip_prefix("https://"))) != Some(host) {
             return StatusCode::FORBIDDEN.into_response();
         }
     }
@@ -77,16 +90,41 @@ mod tests {
     }
 
     #[test]
-    fn allows_loopback_and_listed_hosts_on_own_port() {
+    fn allows_loopback_on_own_port_and_listed_hosts_on_any_port() {
         let none: &[String] = &[];
         let lan = &["my-mac.local".to_string()];
         assert!(host_allowed("127.0.0.1:7373", 7373, none));
         assert!(host_allowed("localhost:7373", 7373, none));
+        assert!(!host_allowed("localhost:8080", 7373, none));
+        assert!(!host_allowed("localhost", 7373, none));
         assert!(!host_allowed("my-mac.local:7373", 7373, none));
         assert!(host_allowed("my-mac.local:7373", 7373, lan));
-        assert!(!host_allowed("my-mac.local:8080", 7373, lan));
-        assert!(!host_allowed("my-mac.local", 7373, lan));
+        assert!(host_allowed("my-mac.local:8080", 7373, lan));
+        assert!(host_allowed("my-mac.local", 7373, lan));
+        assert!(host_allowed("My-Mac.Local", 7373, lan));
         assert!(!host_allowed("evil.my-mac.local:7373", 7373, lan));
+        assert!(!host_allowed("mac.local:7373", 7373, lan));
+        assert!(!host_allowed("my-mac.local.evil:7373", 7373, lan));
+
+        let proxy = &["https://foo.bar.com/".to_string()];
+        assert!(host_allowed("foo.bar.com", 7373, proxy));
+        assert!(host_allowed("foo.bar.com:443", 7373, proxy));
+        assert!(!host_allowed("https", 7373, proxy));
+
+        let v6 = &["[fd00::1]".to_string()];
+        assert!(host_allowed("[fd00::1]:7373", 7373, v6));
+        assert!(host_allowed("[fd00::1]", 7373, v6));
+        assert!(!host_allowed("[fd00::2]:7373", 7373, v6));
+    }
+
+    #[test]
+    fn reads_the_name_of_a_host_or_entry() {
+        assert_eq!(host_name("foo.bar.com"), "foo.bar.com");
+        assert_eq!(host_name("foo.bar.com:8443"), "foo.bar.com");
+        assert_eq!(host_name("https://foo.bar.com/"), "foo.bar.com");
+        assert_eq!(host_name("http://foo.bar.com:8080"), "foo.bar.com");
+        assert_eq!(host_name("[::1]:7373"), "[::1]");
+        assert_eq!(host_name("[::1]"), "[::1]");
     }
 
     #[test]

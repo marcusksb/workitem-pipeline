@@ -28,7 +28,12 @@ async fn main() {
     // The Host check accepts only loopback and the allowed hosts, so those are the URLs that work.
     let local = if listener.local_addr().unwrap().ip().is_unspecified() { "127.0.0.1" } else { host.as_str() };
     for name in std::iter::once(local).chain(state.allowed_hosts.iter().map(String::as_str)) {
-        println!("workload: http://{name}:{port}/#token={token}");
+        // A URL entry (`https://foo.bar.com`) is a reverse proxy's public address.
+        if name.contains("://") {
+            println!("workload: {}/#token={token}", name.trim_end_matches('/'));
+        } else {
+            println!("workload: http://{name}:{port}/#token={token}");
+        }
     }
 
     let state = Arc::new(state);

@@ -19,7 +19,7 @@ Blocked items raise a browser notification with a beep while the UI tab is open.
 
 The dispatcher only runs while the backend runs. It starts `claude` sessions for `analyze` items as soon as the backend runs. `WORKITEM_UI_DISPATCH=off` disables it.
 
-Everything lives in `~/.workitems-pipeline/` (override with `WORKITEM_UI_HOME`): `config.toml` (token, port), `paused.json`, `watch.json` and `workspaces/<name>/` with the items, boards and plans. Port: `WORKITEM_UI_PORT`. Remote access (trusted network only, plain HTTP): `WORKITEM_UI_HOST=0.0.0.0 WORKITEM_UI_ALLOWED_HOSTS=<this machine's name or IP>`, then open the printed URL for that name. Other tmux server: `WORKITEM_UI_TMUX_SOCKET`.
+Everything lives in `~/.workitems-pipeline/` (override with `WORKITEM_UI_HOME`): `config.toml` (token, port), `paused.json`, `watch.json` and `workspaces/<name>/` with the items, boards and plans. Port: `WORKITEM_UI_PORT`. Remote access (trusted network only, plain HTTP): `WORKITEM_UI_HOST=0.0.0.0 WORKITEM_UI_ALLOWED_HOSTS=<this machine's name or IP>`, then open the printed URL for that name. Behind a reverse proxy (TLS there): `WORKITEM_UI_ALLOWED_HOSTS=https://foo.bar.com`. Other tmux server: `WORKITEM_UI_TMUX_SOCKET`.
 
 ## Test
 

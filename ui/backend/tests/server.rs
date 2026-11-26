@@ -162,3 +162,22 @@ async fn allowed_hosts_pass_the_host_check_for_api_and_ws() {
     request.headers_mut().insert(header::HOST, lan.parse().unwrap());
     assert!(connect_async(request).await.is_ok());
 }
+
+#[tokio::test]
+async fn a_reverse_proxy_url_passes_with_its_host_and_https_origin() {
+    let (mut f, listener) = fixture().await;
+    let port = f.state.port;
+    let cookie = format!("wi_session={}", f.token);
+    Arc::get_mut(&mut f.state).unwrap().allowed_hosts = vec!["https://foo.bar.com/".into()];
+    assert_eq!(get(&f, "/api/workitems", "foo.bar.com", Some(&cookie)).await.0, StatusCode::OK);
+    assert_eq!(get(&f, "/api/workitems", "evil.example", Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+
+    tokio::spawn(axum::serve(listener, router(f.state.clone())).into_future());
+    let ws = |origin: &str| {
+        let mut request = ws_request(port, "/ws/terminal/app/T-1?cols=80&rows=24", Some(&cookie), Some(origin));
+        request.headers_mut().insert(header::HOST, "foo.bar.com".parse().unwrap());
+        connect_async(request)
+    };
+    assert!(ws("https://foo.bar.com").await.is_ok());
+    assert!(ws("https://evil.example").await.is_err());
+}

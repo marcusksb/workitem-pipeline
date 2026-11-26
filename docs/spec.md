@@ -101,7 +101,7 @@ One workspace in view. The sidebar has the workspace switcher, Search ⌘K, boar
 
 ## Backend
 
-Binds `127.0.0.1` (`WORKITEM_UI_HOST`), port 7373 (`WORKITEM_UI_PORT`). The Host header must be `127.0.0.1`, `localhost` or a name in `WORKITEM_UI_ALLOWED_HOSTS` (comma list), with the server's port; remote access binds `0.0.0.0` and lists the machine's name there, and the server prints one `#token=` URL per accepted name. Auth: a random token in `config.toml`; the printed `#token=` URL is posted once to `/api/login` for an `HttpOnly; SameSite=Strict` cookie. Scripts and the MCP server use `Authorization: Bearer <token>`. WebSockets also check `Origin`.
+Binds `127.0.0.1` (`WORKITEM_UI_HOST`), port 7373 (`WORKITEM_UI_PORT`). The Host header must be `127.0.0.1` or `localhost` with the server's port, or a name in `WORKITEM_UI_ALLOWED_HOSTS` (comma list of names, IPs or URLs such as `https://foo.bar.com`; only the name counts) with any port or none; remote access binds `0.0.0.0` and lists the machine's name there, or a reverse proxy's public URL, and the server prints one `#token=` URL per accepted name (a URL entry as given). Auth: a random token in `config.toml`; the printed `#token=` URL is posted once to `/api/login` for an `HttpOnly; SameSite=Strict` cookie. Scripts and the MCP server use `Authorization: Bearer <token>`. WebSockets also check that `Origin` is `http://` or `https://` plus the Host.
 
 The frontend polls; nothing is pushed. Routes (`lib.rs`):
 
