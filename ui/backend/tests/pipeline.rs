@@ -123,9 +123,14 @@ fn world() -> World {
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
 
     let bkt = dir.path().join("bkt");
+    // `bkt pr view` reads bb-view.json for a Bitbucket PR when a test wrote one, else pr.json
+    // (the gh fixture shape); `context list` is the settings probe, contexts.json per test.
     let bkt_script = format!(
-        "#!/bin/bash\necho \"$@\" >> {}/.stub-log\nif [ \"$1 $2\" = 'pr view' ]; then cat {}/pr.json\nelif [ \"$1 $2\" = 'pr comments' ]; then cat {}/comments.json\nfi\n",
+        "#!/bin/bash\necho \"$@\" >> {}/.stub-log\nif [ \"$1 $2\" = 'pr view' ]; then if [ -f {}/bb-view.json ]; then cat {}/bb-view.json; else cat {}/pr.json; fi\nelif [ \"$1 $2\" = 'pr comments' ]; then cat {}/comments.json\nelif [ \"$1 $2\" = 'context list' ]; then cat {}/contexts.json 2>/dev/null || echo '{{\"contexts\":[]}}'\nfi\n",
         repo.display(),
+        d,
+        d,
+        d,
         d,
         d
     );
@@ -990,6 +995,94 @@ async fn rebase_button_only_works_on_in_review_items_with_a_pr() {
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
     let (status, _) = post(&w, "/api/workitems/app/T-26-rebase/rebase", "").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+const BB_PR: &str = "pr: https://bitbucket.org/ws/slug/pull-requests/1\n";
+
+fn git(args: &[&str], cwd: &Path) {
+    let output = std::process::Command::new("git").args(args).current_dir(cwd).output().unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+fn git_text(args: &[&str], cwd: &Path) -> String {
+    let output = std::process::Command::new("git").args(args).current_dir(cwd).output().unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// A board repo with an `origin` (a local bare remote), `main` and a `feature` branch pushed,
+/// `main` one commit ahead: what a Bitbucket rebase rebases onto.
+fn bb_repo(w: &World) {
+    git(&["init", "-q", "-b", "main"], &w.repo);
+    // The rebase the backend runs needs an identity; worktrees share the repo's config.
+    git(&["config", "user.name", "t"], &w.repo);
+    git(&["config", "user.email", "t@t"], &w.repo);
+    let who = ["-c", "user.name=t", "-c", "user.email=t@t"];
+    git(&[who.as_slice(), &["commit", "-q", "--allow-empty", "-m", "base"]].concat(), &w.repo);
+    let remote = w.repo.parent().unwrap().join("bb-remote.git");
+    git(&["init", "-q", "--bare", remote.to_str().unwrap()], &w.repo);
+    git(&["remote", "add", "origin", remote.to_str().unwrap()], &w.repo);
+    git(&["push", "-q", "-u", "origin", "main"], &w.repo);
+    let worktree = w.repo.parent().unwrap().join("bb-feature");
+    git(&["worktree", "add", "-q", "-b", "feature", worktree.to_str().unwrap()], &w.repo);
+    git(&[who.as_slice(), &["commit", "-q", "--allow-empty", "-m", "feature"]].concat(), &worktree);
+    git(&["push", "-q", "-u", "origin", "feature"], &worktree);
+    git(&[who.as_slice(), &["commit", "-q", "--allow-empty", "-m", "later base"]].concat(), &w.repo);
+    git(&["push", "-q", "origin", "main"], &w.repo);
+}
+
+#[tokio::test]
+async fn merge_squashes_a_bitbucket_pr_with_bkt() {
+    let w = world();
+    write_item(&w.ws, "T-27-bbmerge", "in_review", BB_PR);
+    let (status, _) = post(&w, "/api/workitems/app/T-27-bbmerge/merge", "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let log = stub_log(&w.repo);
+    assert!(log.iter().any(|l| l.contains("pr merge 1 --strategy squash --workspace ws --repo slug")), "{log:?}");
+}
+
+#[tokio::test]
+async fn rebase_of_a_bitbucket_pr_runs_in_a_temp_worktree() {
+    let w = world();
+    bb_repo(&w);
+    // The board repo's own checkout is dirty: a rebase there would fail or detach its HEAD.
+    fs::write(w.repo.join("dirty"), "uncommitted").unwrap();
+    fs::write(w.dir.path().join("bb-view.json"),
+              serde_json::json!({"workspace": "ws", "repo": "slug", "pull_request": {
+                  "description": "", "updated_on": "2026-11-01",
+                  "source": {"branch": {"name": "feature"}}, "destination": {"branch": {"name": "main"}}}})
+                  .to_string())
+        .unwrap();
+    write_item(&w.ws, "T-28-bbrebase", "in_review", BB_PR);
+
+    let (status, _) = post(&w, "/api/workitems/app/T-28-bbrebase/rebase", "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(git_text(&["symbolic-ref", "HEAD"], &w.repo).trim(), "refs/heads/main", "the checkout kept its branch");
+    assert_eq!(fs::read_to_string(w.repo.join("dirty")).unwrap(), "uncommitted", "the checkout kept its changes");
+    assert_eq!(git_text(&["merge-base", "--is-ancestor", "origin/main", "origin/feature"], &w.repo), "",
+               "feature was rebased onto main");
+    assert!(!git_text(&["worktree", "list"], &w.repo).contains("wi-rebase"), "no temp worktree left behind");
+    let log = stub_log(&w.repo);
+    assert!(log.iter().any(|l| l.contains("pr view 1 --json")), "{log:?}");
+    assert!(!log.iter().any(|l| l.contains("merge")), "no bkt merge on a rebase: {log:?}");
+
+    // A conflict aborts the rebase, leaves the remote branch alone and no worktree behind.
+    git(&["checkout", "-q", "-b", "clash"], &w.repo);
+    fs::write(w.repo.join("file"), "main\n").unwrap();
+    git(&["add", "file"], &w.repo);
+    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "main side"], &w.repo);
+    git(&["push", "-q", "origin", "clash:main"], &w.repo);
+    let worktree = w.repo.parent().unwrap().join("bb-feature");
+    fs::write(worktree.join("file"), "feature\n").unwrap();
+    git(&["add", "file"], &worktree);
+    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature side"], &worktree);
+    git(&["push", "-q", "--force", "origin", "feature"], &worktree);
+    let before = git_text(&["rev-parse", "origin/feature"], &w.repo);
+    let (status, body) = post(&w, "/api/workitems/app/T-28-bbrebase/rebase", "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(git_text(&["rev-parse", "origin/feature"], &w.repo).trim(), before.trim(), "the remote branch is untouched");
+    assert!(!git_text(&["worktree", "list"], &w.repo).contains("wi-rebase"), "no temp worktree left behind");
+    assert!(w.repo.join("file").exists(), "the checkout was not left mid-rebase");
 }
 
 #[tokio::test]
@@ -2106,6 +2199,24 @@ async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_
     settle(&w).await;
     assert!(!get(&w, "/api/workspaces").await.contains("account_error"));
     assert_eq!(fs::read_to_string(&probe).unwrap().lines().last(), Some("token="), "without an account gh's own applies");
+}
+
+#[tokio::test]
+async fn a_bkt_context_is_checked_against_bkt() {
+    let w = world();
+    fs::write(w.dir.path().join("contexts.json"), r#"{"contexts":[{"name":"work"}]}"#).unwrap();
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"bkt_context":"work"}"#).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains(r#""bkt_context":"work""#), "{body}");
+    // An unknown context is refused before anything is written.
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"bkt_context":"gone"}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("bkt context gone is not set up"), "{body}");
+    assert!(!fs::read_to_string(w.ws.join("workspace.toml")).unwrap().contains("gone"), "nothing was written");
+    // Clearing an already-saved context does not probe.
+    let (status, _) = put(&w, "/api/workspaces/app", r#"{"bkt_context":""}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!get(&w, "/api/workspaces").await.contains("bkt_context"));
 }
 
 fn stub_logs(w: &World) -> Vec<String> {

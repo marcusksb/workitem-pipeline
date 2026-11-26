@@ -17,7 +17,7 @@ The root is `~/.workitems-pipeline/` (`WORKITEM_UI_HOME`). It holds `config.toml
 - `boards/<board>.json`, plus `boards/<board>/{skills/,watch/,learnings.md}`.
 - `skills/`, `watch/`: workspace-level overrides.
 - `plans/<id>.md`: planning session records.
-- `workspace.toml` (optional): `agent`, `issue_tracker`, `github_account`, `[[watch]]`. An invalid file keeps its last valid version and shows an error in the header.
+- `workspace.toml` (optional): `agent`, `issue_tracker`, `github_account`, `bkt_context`, `[[watch]]`. An invalid file keeps its last valid version and shows an error in the header.
 
 Handler skills and watch scripts resolve board first, then workspace, then bundled (`locate.rs`), so the UI's stage view shows the file that runs. Handler names are slugs (`[a-z0-9-]+`) resolved to `<name>/SKILL.md`.
 
@@ -61,6 +61,8 @@ Open follow-ups are unticked `- [ ]` lines under `## Follow-ups`. Agents only ap
 
 `github_account` per workspace: every session, watcher and backend `gh` call gets `GH_TOKEN` from `gh auth token --user <login>`. If that fails the workspace starts nothing and shows an alert; it never falls back to another account (68).
 
+PR hosts: the `pr:` URL's host picks the reader (82). `github.com` goes through `gh`; `bitbucket.org` (`<workspace>/<slug>/pull-requests/<id>`) through the `bkt` CLI, whose credentials `bkt_context` in `workspace.toml` selects — a changed context is probed against `bkt context list` when it is saved, fail-closed like the account. Cloud has no changes-requested verdict, so `pr_approval` is only approved | none, and every build status counts as required. A Bitbucket PR merges with `bkt pr merge --strategy squash`; a rebase runs locally in a temporary detached worktree of the board repo (fetch base, rebase, `git push --force-with-lease`, abort and clean up on failure), never in the board repo's own checkout. Bitbucket Issues are out of scope: `issue_tracker` stays `jira | github`.
+
 ## Sessions
 
 Agents run interactively in tmux. The session is the lock: an item has at most one, `wi-<dir>`. Names are global; each session is tagged `@workitem_workspace` when created. Kinds:
@@ -87,7 +89,7 @@ Questions to the parent (61): the backend serves an MCP server per item at `/api
 
 Implicit watchers: `run-items` on an `auto` stage with a handler or prompt; `pull-queue` on an `auto` stage with neither (a queue); `pr-status` every 1m for a workspace with a board that watches PRs.
 
-Bundled scripts: `run-items` (starts handlers via `bin/workitem-run-item` → `POST .../run`; skips items not `ok`, with a session, or missing `when`; honours `once`; blocks after 3 attempts), `pull-queue` (moves idle items to `next[0]`, oldest first, until refused), `pr-status` (reads PRs with `gh`, writes `pr_*` facts), `pr-review` (on the PR stage, reads only facts: merged → `on_merge`, closed → blocked, then one fixer at a time for conflicts, red CI (3 per red streak) and unseen comments), `pr-remind` (opt-in re-review reminder), `issue-status`, `age-out`.
+Bundled scripts: `run-items` (starts handlers via `bin/workitem-run-item` → `POST .../run`; skips items not `ok`, with a session, or missing `when`; honours `once`; blocks after 3 attempts), `pull-queue` (moves idle items to `next[0]`, oldest first, until refused), `pr-status` (reads PRs with `gh` or `bkt` by the URL's host, writes `pr_*` facts), `pr-review` (on the PR stage, reads only facts: merged → `on_merge`, closed → blocked, then one fixer at a time for conflicts, red CI (3 per red streak) and unseen comments), `pr-remind` (opt-in re-review reminder), `issue-status`, `age-out`.
 
 ## UI
 
@@ -110,8 +112,8 @@ The frontend polls; nothing is pushed. Routes (`lib.rs`):
 - `/api/workspaces/{workspace}/create`, `/api/sessions` (and `DELETE .../{workspace}/{name}`), `/api/plans`, `/api/mcp/{workspace}/{dir}`.
 - `/ws/terminal/{workspace}/{dir}`, `/ws/session/{workspace}/{name}`: `tmux attach` on a PTY; closing the socket keeps the session.
 
-`AppState.busy` serialises launches and dispatcher passes. Env: `WORKITEM_UI_HOME`, `_HOST`, `_ALLOWED_HOSTS`, `_PORT`, `_TMUX_SOCKET`, `_SKILLS` (default `~/.claude/skills`), `_CLAUDE`, `_GH`, `_DISPATCH=off`.
+`AppState.busy` serialises launches and dispatcher passes. Env: `WORKITEM_UI_HOME`, `_HOST`, `_ALLOWED_HOSTS`, `_PORT`, `_TMUX_SOCKET`, `_SKILLS` (default `~/.claude/skills`), `_CLAUDE`, `_GH`, `_BKT`, `_DISPATCH=off`.
 
 ## Non-goals
 
-Remote or multi-user access, drag-and-drop moves, polling issue trackers or Sentry for intake inside the backend (intake is a skill on a loop), a service installer, a desktop shell, a PR provider other than GitHub.
+Remote or multi-user access, drag-and-drop moves, polling issue trackers or Sentry for intake inside the backend (intake is a skill on a loop), a service installer, a desktop shell. Bitbucket Data Center is not a PR host (82 is Cloud only); Bitbucket Issues are out of scope.

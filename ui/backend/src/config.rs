@@ -343,7 +343,7 @@ impl Store {
     /// a bad one changes nothing. An empty value (or `Some(None)` for the agent) removes its key.
     /// Only these keys change; the rest of the file (its watchers) stays, though not its comments.
     /// `None` when there is no such workspace. Whether gh knows a GitHub account is the caller's
-    /// check (`github.rs`); whether bkt knows the context is the caller's too (`github.rs`).
+    /// check (`github.rs`); whether bkt knows the context is the caller's too (`bkt.rs`).
     pub fn update(&self, name: &str, change: SettingsChange) -> Result<Option<Workspace>, String> {
         let (tracker, login) = (change.issue_tracker.map(str::trim), change.github_account.map(str::trim));
         let context = change.bkt_context.map(str::trim);

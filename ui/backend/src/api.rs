@@ -215,6 +215,11 @@ pub async fn update_workspace(
         }
         crate::github::token_for(&state, login).await.map_err(bad)?;
     }
+    // The same fail-closed check for the bkt context (decision 82): only a changed one is probed.
+    let context = body.bkt_context.as_deref().map(str::trim);
+    if let Some(context) = context.filter(|c| !c.is_empty() && Some(*c) != current.bkt_context.as_deref()) {
+        crate::bkt::context_for(&state, context).await.map_err(bad)?;
+    }
     let tracker = body.issue_tracker.as_deref().map(str::trim);
     let new_tracker = tracker.map(|t| if t.is_empty() { crate::config::ISSUE_TRACKERS[0] } else { t });
     if let Some(tracker) = new_tracker.filter(|t| *t != current.issue_tracker) {
@@ -223,7 +228,6 @@ pub async fn update_workspace(
             return Err(bad(format!("these boards do not suit {tracker}; change their issue_project and issue_state first: {}", conflicts.join("; "))));
         }
     }
-    let context = body.bkt_context.as_deref().map(str::trim);
     let change = crate::config::SettingsChange { agent: body.agent, issue_tracker: tracker, github_account: login, bkt_context: context };
     let workspace = state.store.update(&name, change).map_err(bad)?.ok_or(ApiError::not_found("workspace"))?;
     // A fixed account starts the workspace again at once instead of on its next tick.

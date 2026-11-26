@@ -122,25 +122,44 @@ def bkt(args):
 
 
 def bb_parts(pr):
-    """The workspace, slug and number of a bitbucket.org URL."""
-    ws, slug, _, number = pr.rstrip("/").split("/")[-4:]
-    return ws, slug, number
+    """The workspace, slug and number of a bitbucket.org pull-requests link, else None. Any
+    suffix after the number (/diff) is ignored, so a link copied from the browser works."""
+    if urlparse(pr).hostname != "bitbucket.org":
+        return None
+    segments = [s for s in urlparse(pr).path.split("/") if s]
+    try:
+        i = segments.index("pull-requests")
+        return segments[i - 2], segments[i - 1], str(int(segments[i + 1]))
+    except (IndexError, ValueError):
+        return None
+
+
+def bb_mention(user):
+    """A mention the Cloud API notifies: @{account id}, the uuid without its braces as a
+    fallback. A plain @nickname in an API comment notifies nobody."""
+    id = (user or {}).get("account_id") or ((user or {}).get("uuid") or "").strip("{}")
+    return f"@{{{id}}}" if id else ""
 
 
 def bb_mentions(pr):
-    """The pending reviewers of a Cloud PR (bkt pr view --json): reviewers who have not
-    approved. Cloud has no changes-requested verdict, so there is no re-review note."""
-    ws, slug, number = bb_parts(pr)
-    pull = json.loads(bkt(["pr", "view", number, "--workspace", ws, "--repo", slug, "--json"]))
+    """The pending reviewers of a Cloud PR (`bkt pr view --json`, the PR under pull_request):
+    reviewers who have not approved. Cloud has no changes-requested verdict, so there is no
+    re-review note."""
+    parts = bb_parts(pr)
+    if parts is None:
+        raise RuntimeError(f"{pr} is not a bitbucket.org pull-requests link")
+    ws, slug, number = parts
+    pull = json.loads(bkt(["pr", "view", number, "--json", "--workspace", ws, "--repo", slug]))
+    pull = pull.get("pull_request") or {}
     approved = {(p.get("user") or {}).get("uuid") for p in pull.get("participants") or [] if p.get("approved")}
     who = []
     for r in pull.get("reviewers") or []:
         user = r.get("user") or r
         if user.get("uuid") in approved:
             continue
-        name = user.get("nickname") or user.get("display_name")
-        if name and f"@{name}" not in who:
-            who.append(f"@{name}")
+        mention = bb_mention(user)
+        if mention and mention not in who:
+            who.append(mention)
     return who
 
 

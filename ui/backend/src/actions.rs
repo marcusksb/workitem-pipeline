@@ -430,8 +430,10 @@ async fn run_git(repo: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Rebases the PR branch onto its base locally in the board repo and force-pushes it, since
-/// Cloud has no server-side rebase.
+/// Rebases the PR branch onto its base locally and force-pushes it, since Cloud has no
+/// server-side rebase. The rebase runs in a temporary detached worktree, never in the board
+/// repo's own checkout (a rebase there would detach its HEAD and fail on uncommitted
+/// changes); a conflict aborts the rebase and nothing is left behind.
 async fn bb_rebase(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<()> {
     if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
         return Err(conflict("only a workitem in the PR stage with a PR link can be changed on Bitbucket"));
@@ -441,8 +443,21 @@ async fn bb_rebase(state: &AppState, workspace: &Workspace, item: &Workitem) -> 
     let Some(source) = view.source else { return Err(conflict("no source branch")) };
     let Some(destination) = view.destination else { return Err(conflict("no destination branch")) };
     run_git(&repo, &["fetch", "origin", &destination.branch.name, &source.branch.name]).await?;
-    run_git(&repo, &["rebase", &format!("origin/{}", destination.branch.name), &format!("origin/{}", source.branch.name)]).await?;
-    run_git(&repo, &["push", "--force-with-lease", "origin", &format!("HEAD:{}", source.branch.name)]).await?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let worktree = std::env::temp_dir().join(format!("wi-rebase-{}-{nanos}", std::process::id()));
+    run_git(&repo, &["worktree", "add", "--detach", worktree.to_str().unwrap(), &format!("origin/{}", source.branch.name)]).await?;
+    let mut result = run_git(&worktree, &["rebase", &format!("origin/{}", destination.branch.name)]).await;
+    if result.is_err() {
+        let _ = run_git(&worktree, &["rebase", "--abort"]).await;
+    }
+    if result.is_ok() {
+        result = run_git(&worktree, &["push", "--force-with-lease", "origin", &format!("HEAD:{}", source.branch.name)]).await;
+    }
+    if run_git(&repo, &["worktree", "remove", "--force", worktree.to_str().unwrap()]).await.is_err() {
+        let _ = tokio::fs::remove_dir_all(&worktree).await;
+        let _ = run_git(&repo, &["worktree", "prune"]).await;
+    }
+    result?;
     crate::watch::forget_workspace(state, workspace, "pr-status");
     crate::watch::forget(state, workspace, &item.board, &item.stage);
     state.wake.notify_one();

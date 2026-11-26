@@ -335,7 +335,7 @@ def bb_status(name, state, created="2026-11-02T10:00:00Z", updated="2026-11-02T1
 
 
 def bb_comment(id, login, body, created="2026-11-03T09:00:00Z", **kw):
-    return {"id": id, "user": {"nickname": login}, "content": {"raw": body}, "created": created, **kw}
+    return {"id": id, "user": {"nickname": login}, "content": {"raw": body}, "created_on": created, **kw}
 
 
 class BitbucketReaderTest(unittest.TestCase):
@@ -398,7 +398,7 @@ class BitbucketReaderTest(unittest.TestCase):
         self.fixture = {
             "/user": {"nickname": "me"},
             "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
-            "/repositories/ws/slug/commits": {"values": [{"hash": "h1", "date": "2026-11-02T10:00:00Z"}]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
             "/repositories/ws/slug/commit/h1/statuses": {"values": [bb_status("lint", "FAILED")]},
         }
         self.run_script()
@@ -416,7 +416,7 @@ class BitbucketReaderTest(unittest.TestCase):
         self.fixture = {
             "/user": {"nickname": "me"},
             "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
-            "/repositories/ws/slug/commits": {"values": [{"hash": "h1", "date": "2026-11-02T10:00:00Z"}]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
             "/repositories/ws/slug/commit/h1/statuses": {"values": [bb_status("e2e", "FAILED")]},
         }
         self.run_script()
@@ -426,7 +426,7 @@ class BitbucketReaderTest(unittest.TestCase):
         self.fixture = {
             "/user": {"nickname": "me"},
             "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1, merge_state="conflicted")]},
-            "/repositories/ws/slug/commits": {"values": [{"hash": "h1", "date": "2026-11-02T10:00:00Z"}]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
             "/repositories/ws/slug/commit/h1/statuses": {"values": []},
         }
         self.run_script()
@@ -436,7 +436,7 @@ class BitbucketReaderTest(unittest.TestCase):
         self.fixture = {
             "/user": {"nickname": "me"},
             "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
-            "/repositories/ws/slug/commits": {"values": [{"hash": "h1", "date": "2026-11-02T10:00:00Z"}]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
             "/repositories/ws/slug/commit/h1/statuses": {"values": []},
             "/repositories/ws/slug/pullrequests/1/comments": {"values": [
                 bb_comment(10, "bob", "rename this", created="2026-11-03T09:00:00Z"),
@@ -447,8 +447,91 @@ class BitbucketReaderTest(unittest.TestCase):
         f = self.fields()
         self.assertEqual((f["pr_seen_comments"], f["pr_unseen_comments"]), ("inline-12,10", ""),
                          "what is there on the first reading is not new")
+        self.assertEqual(f["pr_activity_at"], "2026-11-03T09:10:00Z", "the newest comment counts as activity")
         self.run_script()
         self.assertEqual(self.fields()["pr_unseen_comments"], "")
+
+    def test_a_deleted_comment_is_not_activity_and_not_unseen(self):
+        self.fixture = {
+            "/user": {"nickname": "me"},
+            "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
+            "/repositories/ws/slug/commit/h1/statuses": {"values": []},
+            "/repositories/ws/slug/pullrequests/1/comments": {"values": [
+                bb_comment(10, "bob", "rename this", created="2026-11-03T09:00:00Z"),
+                bb_comment(11, "bob", "actually never mind", created="2026-11-03T09:30:00Z", deleted=True),
+                bb_comment(12, "bob", "another nit", created="2026-11-03T09:20:00Z", inline={"from": 1, "to": 2}, deleted=True)]},
+        }
+        self.run_script()
+        f = self.fields()
+        self.assertEqual((f["pr_seen_comments"], f["pr_unseen_comments"]), ("10", ""),
+                         "a deleted comment is not there, inline or not")
+        self.assertEqual(f["pr_activity_at"], "2026-11-03T09:00:00Z", "a deleted comment is not activity")
+
+    def test_unseen_comments_survive_a_pass_that_does_not_move_the_pr(self):
+        self.fixture = {
+            "/user": {"nickname": "me"},
+            "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
+            "/repositories/ws/slug/commit/h1/statuses": {"values": []},
+        }
+        self.run_script()
+        self.assertEqual(self.fields()["pr_unseen_comments"], "")
+        # A comment arrives and the PR moves with it: the reading reports it as unseen.
+        self.fixture = {
+            **self.fixture,
+            "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1, updated_on="2026-11-02T11:00:00Z")]},
+            "/repositories/ws/slug/pullrequests/1/comments": {"values": [bb_comment(10, "bob", "rename this")]},
+        }
+        self.run_script()
+        self.assertEqual(self.fields()["pr_unseen_comments"], "10")
+        self.assertEqual(self.fields()["pr_activity_at"], "2026-11-03T09:00:00Z")
+        # The next pass sees the same updated_on, so the comments are not read again; the unseen
+        # comment and the activity time it counted must not be lost.
+        self.run_script()
+        f = self.fields()
+        self.assertEqual(f["pr_unseen_comments"], "10")
+        self.assertEqual(f["pr_activity_at"], "2026-11-03T09:00:00Z")
+
+    def test_a_link_with_a_suffix_still_reads_and_a_bad_one_does_not_stop_the_run(self):
+        other = os.path.join(self.tmp.name, "other", "workitem.md")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w") as f:
+            f.write("---\ntitle: t\nstage: in_review\npr: https://bitbucket.org/ws/slug/pull-requests/1\n---\n")
+        self.fixture = {
+            "/user": {"nickname": "me"},
+            "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
+            "/repositories/ws/slug/commit/h1/statuses": {"values": [bb_status("lint", "SUCCESSFUL")]},
+        }
+        self.run_items([{"dir": "item", "pr": "https://bitbucket.org/ws/slug/pull-requests/1?email=test@example.com"},
+                        {"dir": "other", "pr": "https://bitbucket.org/ws/slug/pull-requests/1/diff"}])
+        f = self.fields()
+        self.assertEqual((f["pr_state"], f["pr_ci"]), ("open", "passing"), "suffixes after the number are ignored")
+        self.assertEqual(pr.read_fields(other)["pr_ci"], "passing")
+        self.run_items([{"dir": "item", "pr": "https://bitbucket.org/ws/slug/branch/nope"},
+                        {"dir": "other", "pr": "https://bitbucket.org/ws/slug/pull-requests/1"}])
+        self.assertEqual(pr.read_fields(other)["pr_ci"], "passing", "a bad link errors alone")
+
+    def test_pagination_follows_the_next_link(self):
+        other = os.path.join(self.tmp.name, "other", "workitem.md")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w") as f:
+            f.write("---\ntitle: t\nstage: in_review\npr: https://bitbucket.org/ws/slug/pull-requests/2\n---\n")
+        self.fixture = {
+            "/user": {"nickname": "me"},
+            "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)],
+                                                   "next": "/2.0/repositories/ws/slug/pullrequests?page=2"},
+            "/2.0/repositories/ws/slug/pullrequests": {"values": [bb_pull(2, source={"commit": {"hash": "h2"}})]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
+            "/repositories/ws/slug/commit/h2": {"hash": "h2", "date": "2026-11-02T11:00:00Z"},
+            "/repositories/ws/slug/commit/h1/statuses": {"values": []},
+            "/repositories/ws/slug/commit/h2/statuses": {"values": []},
+        }
+        self.run_items([{"dir": "item", "pr": "https://bitbucket.org/ws/slug/pull-requests/1"},
+                        {"dir": "other", "pr": "https://bitbucket.org/ws/slug/pull-requests/2"}])
+        self.assertEqual((self.fields()["pr_head"], pr.read_fields(other)["pr_head"]), ("h1", "h2"),
+                         "the PR on page 2 was read too")
 
     def test_a_merged_pr_is_not_read_again_and_a_new_link_starts_over(self):
         self.fixture = {
@@ -480,7 +563,7 @@ class BitbucketReaderTest(unittest.TestCase):
         self.fixture = {
             "/user": {"nickname": "me"},
             "/repositories/ws/slug/pullrequests": {"values": [bb_pull(1)]},
-            "/repositories/ws/slug/commits": {"values": [{"hash": "h1", "date": "2026-11-02T10:00:00Z"}]},
+            "/repositories/ws/slug/commit/h1": {"hash": "h1", "date": "2026-11-02T10:00:00Z"},
             "/repositories/ws/slug/commit/h1/statuses": {"values": [bb_status("lint", "SUCCESSFUL")]},
         }
         self.run_items([{"dir": "item", "pr": "https://bitbucket.org/ws/slug/pull-requests/1"},

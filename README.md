@@ -18,7 +18,8 @@ Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/
 
 - [Claude Code](https://claude.com/claude-code) (`claude` on your `PATH`)
 - `tmux`, `python3`, `git`
-- [`gh`](https://cli.github.com/), logged in (for the PR stage)
+- [`gh`](https://cli.github.com/), logged in (for the PR stage on GitHub)
+- [`bkt`](https://github.com/avivsinai/bitbucket-cli) with a configured context, only for boards whose PRs live on Bitbucket Cloud (`bkt_context` in the workspace's `workspace.toml`)
 - For the UI: Rust (stable) and Node.js, plus `cargo install cargo-watch` for `npm run dev`
 
 ## Quick start

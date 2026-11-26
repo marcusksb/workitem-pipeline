@@ -199,7 +199,7 @@ with open(os.environ["STUB_BKT_CALLS"], "a") as f:
     f.write(json.dumps(args) + "\\n")
 data = json.load(open(os.environ["STUB_BKT"]))
 if args[:2] == ["pr", "view"]:
-    print(json.dumps(data["pull"]))
+    print(json.dumps(data["view"]))
 elif args[:2] == ["pr", "comment"]:
     if data.get("post_fails"):
         print("HTTP 502", file=sys.stderr)
@@ -207,16 +207,18 @@ elif args[:2] == ["pr", "comment"]:
 """
 
 
-def bb_pull(reviewers=(), participants=()):
-    return {"participants": participants, "reviewers": list(reviewers)}
+def bb_view(reviewers=(), participants=()):
+    """`bkt pr view --json`: the PR under pull_request, next to workspace and repo."""
+    return {"workspace": "ws", "repo": "slug", "pull_request": {"participants": list(participants),
+                                                               "reviewers": list(reviewers)}}
 
 
-def bb_user(uuid, nickname):
-    return {"uuid": uuid, "nickname": nickname}
+def bb_user(uuid, nickname, account_id=None):
+    return {"uuid": uuid, "nickname": nickname, "account_id": account_id}
 
 
-def bb_reviewer(uuid, nickname):
-    return {"user": bb_user(uuid, nickname)}
+def bb_reviewer(uuid, nickname, account_id=None):
+    return {"user": bb_user(uuid, nickname, account_id)}
 
 
 class BitbucketReminderTest(unittest.TestCase):
@@ -243,9 +245,9 @@ class BitbucketReminderTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def stub_bkt(self, pull, post_fails=False):
+    def stub_bkt(self, view, post_fails=False):
         with open(self.stub, "w") as f:
-            json.dump({"pull": pull, "post_fails": post_fails}, f)
+            json.dump({"view": view, "post_fails": post_fails}, f)
 
     def run_script(self, *argv, now=NOW):
         env = {"WORKITEM_BKT": self.bkt, "WORKITEM_DIR_ROOT": self.tmp.name, "STUB_BKT": self.stub,
@@ -271,20 +273,20 @@ class BitbucketReminderTest(unittest.TestCase):
             return f.read()
 
     def test_mentions_the_pending_reviewers_and_posts_once(self):
-        self.stub_bkt(bb_pull(reviewers=[bb_reviewer("u1", "alice"), bb_reviewer("u2", "bob")],
-                              participants=[{"user": bb_user("u2", "bob"), "approved": True}]))
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice", account_id="aid-alice"), bb_reviewer("u2", "bob", account_id="aid-bob")],
+                              participants=[{"user": bb_user("u2", "bob", account_id="aid-bob"), "approved": True}]))
         self.run_script()
         self.assertIn("pr view", " ".join(self.calls()[0]), "the reviewers come from bkt pr view")
         posts = [c for c in self.calls() if c[:2] == ["pr", "comment"]]
         self.assertEqual(len(posts), 1)
-        self.assertEqual(posts[0][-1], pr.comment_of(["@alice"]))
+        self.assertEqual(posts[0][-1], pr.comment_of(["@{aid-alice}"]), "the mention carries the account id")
         self.assertEqual(self.fields()["pr_reminded_at"], "2026-11-06T11:00:00.000Z")
         self.run_script(now=at("Mon 2026-11-09 12:00"))
         self.assertEqual(len([c for c in self.calls() if c[:2] == ["pr", "comment"]]), 1,
                          "no second reminder without new activity")
 
     def test_nobody_to_mention_blocks_the_item_once(self):
-        self.stub_bkt(bb_pull(reviewers=[bb_reviewer("u1", "alice")],
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")],
                               participants=[{"user": bb_user("u1", "alice"), "approved": True}]))
         self.run_script()
         f = self.fields()
@@ -293,19 +295,19 @@ class BitbucketReminderTest(unittest.TestCase):
         self.assertFalse(any(c[:2] == ["pr", "comment"] for c in self.calls()))
 
     def test_a_failed_post_is_retried_on_the_next_run(self):
-        self.stub_bkt(bb_pull(reviewers=[bb_reviewer("u1", "alice")]), post_fails=True)
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]), post_fails=True)
         self.run_script()
         self.assertNotIn("pr_reminded_at", self.fields())
-        self.stub_bkt(bb_pull(reviewers=[bb_reviewer("u1", "alice")]))
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]))
         self.run_script()
         self.assertIn("pr_reminded_at", self.fields())
 
     def test_dry_run_prints_and_writes_nothing(self):
-        self.stub_bkt(bb_pull(reviewers=[bb_reviewer("u1", "alice")]))
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice", account_id="aid-alice")]))
         before = self.text()
         out = self.run_script("--dry-run")
         self.assertIn("would post on PR #1", out)
-        self.assertIn("@alice friendly nudge", out)
+        self.assertIn("@{aid-alice} friendly nudge", out)
         self.assertEqual(self.text(), before)
         self.assertFalse(any(c[:2] == ["pr", "comment"] for c in self.calls()))
 

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod api;
 pub mod auth;
+pub mod bkt;
 pub mod config;
 pub mod dispatch;
 pub mod files;
