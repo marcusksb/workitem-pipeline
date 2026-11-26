@@ -692,6 +692,42 @@ async fn create_sessions_report_whether_they_wait_for_input_or_died() {
     assert_eq!((of("wi-new-dead")["waiting"].as_bool(), of("wi-new-dead")["dead"].as_bool()), (Some(false), Some(true)));
 }
 
+async fn kill_session(w: &World, uri: &str) -> StatusCode {
+    let request = Request::delete(uri)
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .body(Body::empty())
+        .unwrap();
+    router(w.state.clone()).oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn only_a_dead_create_session_of_the_workspace_can_be_killed() {
+    let w = world();
+    let ws = w.ws.display().to_string();
+    let other = w.dir.path().join("elsewhere").display().to_string();
+    for (name, command, folder) in [("wi-new-wait", "sleep 60", &ws), ("wi-new-dead", "true", &ws), ("wi-new-other", "true", &other), ("wi-T-1-x", "true", &ws)] {
+        w.tmux.run(&["new-session", "-d", "-s", name, command, ";", "set-option", "-t", name, "@workitem_workspace", folder, ";", "set-option", "-t", name, "remain-on-exit", "on"]);
+    }
+    eventually("the dead panes exited", || {
+        let out = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "list-panes", "-a", "-F", "#{pane_dead}"]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().filter(|l| *l == "1").count() == 3
+    })
+    .await;
+
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-T-1-x").await, StatusCode::BAD_REQUEST);
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-other").await, StatusCode::NOT_FOUND);
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-wait").await, StatusCode::CONFLICT);
+    assert_eq!(kill_session(&w, "/api/sessions/nope/wi-new-dead").await, StatusCode::NOT_FOUND);
+    for name in ["wi-T-1-x", "wi-new-other", "wi-new-wait", "wi-new-dead"] {
+        assert!(w.tmux.has(name), "{name} survives a refused kill");
+    }
+
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-dead").await, StatusCode::NO_CONTENT);
+    assert!(!w.tmux.has("wi-new-dead"));
+    assert!(!get(&w, "/api/sessions").await.contains("wi-new-dead"));
+}
+
 #[tokio::test]
 async fn a_manual_session_starts_in_any_stage_and_survives_the_dispatcher() {
     let w = world();
