@@ -1290,6 +1290,28 @@ async fn project_board_decides_which_stages_the_dispatcher_runs() {
 }
 
 #[tokio::test]
+async fn state_is_the_five_board_endpoints_in_one_response() {
+    let w = world();
+    write_item(&w.ws, "T-1-live", "analyze", "");
+    write_item(&w.ws, "T-2-idle", "ready_for_development", "");
+    fs::create_dir_all(w.ws.join("plans")).unwrap();
+    fs::write(w.ws.join("plans/abc1.md"), "---\ntopic: Split auth\nstatus: working\ncreated: 1\n---\n").unwrap();
+    for name in ["wi-T-1-live", "wi-new-a", "wi-plan-abc1"] {
+        own_session(&w, name);
+    }
+
+    let json = |body: String| serde_json::from_str::<serde_json::Value>(&body).unwrap();
+    let state = json(get(&w, "/api/state").await);
+    for (key, uri) in [("workspaces", "/api/workspaces"), ("pipelines", "/api/pipelines"), ("items", "/api/workitems"), ("sessions", "/api/sessions"), ("plans", "/api/plans")] {
+        assert_eq!(state[key], json(get(&w, uri).await), "{key}");
+    }
+    assert_eq!(state["items"].as_array().unwrap().len(), 2);
+    assert_eq!(state["items"].as_array().unwrap().iter().filter(|i| i["session"] == true).count(), 1);
+    assert_eq!(state["sessions"][0]["name"], "wi-new-a");
+    assert_eq!(state["plans"][0]["live"], true);
+}
+
+#[tokio::test]
 async fn invalid_board_file_keeps_the_last_valid_board_and_is_reported() {
     let w = world();
     let stages = |body: &str| -> serde_json::Value {

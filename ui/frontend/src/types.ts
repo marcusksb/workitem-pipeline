@@ -119,6 +119,9 @@ export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; gi
 /** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
 export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };
 
+/** `GET /api/state`: everything the board polls, read in one go so the parts agree. */
+export type UiState = { workspaces: Workspace[]; pipelines: Pipelines; items: Item[]; sessions: AgentSession[]; plans: Plan[] };
+
 /** A planning session's record (`<workspace>/plans/<id>.md`). `status` is what the record says;
  * see `planStatus` for what to show. */
 export type Plan = {

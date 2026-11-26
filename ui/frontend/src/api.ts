@@ -1,4 +1,4 @@
-import { Agent, AgentSession, AgentSettings, BoardSettings, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, WorkspaceChange, StageSettings, StageSource } from "./types";
+import { Agent, AgentSession, AgentSettings, BoardSettings, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, WorkspaceChange, StageSettings, StageSource, UiState } from "./types";
 
 type Launched = { session: string };
 
@@ -27,6 +27,7 @@ const planUrl = (workspace: string, id: string) => `/api/plans/${segment(workspa
 export const api = {
   login: (token: string) => request<void>("POST", "/api/login", { token }),
   me: () => request<void>("GET", "/api/me"),
+  state: () => request<UiState>("GET", "/api/state"),
   workspaces: () => request<Workspace[]>("GET", "/api/workspaces"),
   addWorkspace: (name: string) => request<Workspace>("POST", "/api/workspaces", { name }),
   updateWorkspace: (name: string, change: WorkspaceChange) => request<Workspace>("PUT", `/api/workspaces/${segment(name)}`, change),

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::{
     extract::{Path, State},
@@ -65,13 +65,17 @@ pub struct WorkspaceInfo {
     account_error: Option<String>,
 }
 
-pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
-    let info = |workspace: Workspace| WorkspaceInfo {
-        watch: crate::watch::workspace_watchers(&state, &workspace),
-        account_error: crate::github::account_error(&state, &workspace),
-        workspace,
+fn workspace_infos(state: &AppState, workspaces: &[Workspace]) -> Vec<WorkspaceInfo> {
+    let info = |workspace: &Workspace| WorkspaceInfo {
+        watch: crate::watch::workspace_watchers(state, workspace),
+        account_error: crate::github::account_error(state, workspace),
+        workspace: workspace.clone(),
     };
-    Json(state.store.workspaces().into_iter().map(info).collect())
+    workspaces.iter().map(info).collect()
+}
+
+pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
+    Json(workspace_infos(&state, &state.store.workspaces()))
 }
 
 #[derive(Deserialize)]
@@ -270,17 +274,21 @@ pub struct BoardInfo {
 }
 
 /// The boards of every workspace, keyed by workspace name, by board name.
-pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
+fn boards(state: &AppState, workspaces: &[Workspace]) -> HashMap<String, Vec<BoardInfo>> {
     let boards = |workspace: &Workspace| {
         let info = |name: String| {
             let resolved = state.pipeline(workspace, &name);
             let stages = resolved.pipeline.iter().flat_map(|p| &p.stages);
             let watched = stages.filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
-            BoardInfo { watched, paused: crate::watch::paused_stages(&state, workspace, &name), resolved, name }
+            BoardInfo { watched, paused: crate::watch::paused_stages(state, workspace, &name), resolved, name }
         };
         state.board_names(workspace).into_iter().map(info).collect()
     };
-    Json(state.store.workspaces().iter().map(|workspace| (workspace.name.clone(), boards(workspace))).collect())
+    workspaces.iter().map(|workspace| (workspace.name.clone(), boards(workspace))).collect()
+}
+
+pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
+    Json(boards(&state, &state.store.workspaces()))
 }
 
 /// What the board lets a human do with an item in its current stage, so the UI never needs to
@@ -336,11 +344,8 @@ async fn worktrees_of(repos: impl IntoIterator<Item = std::path::PathBuf>) -> Wo
     repos.into_iter().zip(lists).collect()
 }
 
-pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let workspaces = state.store.workspaces();
+async fn items(state: &AppState, workspaces: &[Workspace], sessions: &[tmux::Session]) -> Vec<Item> {
     let per_workspace = workspaces.iter().map(|workspace| {
-        let (state, sessions) = (&state, &sessions);
         async move {
             let mut boards: HashMap<String, Option<Pipeline>> = HashMap::new();
             let items: Vec<_> = workitem::list(workspace)
@@ -362,7 +367,12 @@ pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
             .await
         }
     });
-    Json(futures_util::future::join_all(per_workspace).await.into_iter().flatten().collect())
+    futures_util::future::join_all(per_workspace).await.into_iter().flatten().collect()
+}
+
+pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
+    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
+    Json(items(&state, &state.store.workspaces(), &sessions).await)
 }
 
 #[derive(Serialize)]
@@ -419,22 +429,47 @@ pub struct AgentSession {
 }
 
 /// `wi-new-*` sessions of the configured workspaces, running or dead.
-pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    let found = state
-        .store
-        .workspaces()
+fn agent_sessions(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &HashSet<String>) -> Vec<AgentSession> {
+    workspaces
         .iter()
         .flat_map(|workspace| {
             sessions
                 .iter()
-                .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(&sessions, workspace, &s.name).is_some())
+                .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(sessions, workspace, &s.name).is_some())
                 .map(|s| AgentSession { workspace: workspace.name.clone(), name: s.name.clone(), waiting: s.waiting, dead: dead.contains(&s.name) })
                 .collect::<Vec<_>>()
         })
-        .collect();
-    Json(found)
+        .collect()
+}
+
+pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
+    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
+    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
+    Json(agent_sessions(&state.store.workspaces(), &sessions, &dead))
+}
+
+/// Everything the board polls, from one list of workspaces and one look at tmux, so its parts
+/// agree (decision 78).
+#[derive(Serialize)]
+pub struct Snapshot {
+    workspaces: Vec<WorkspaceInfo>,
+    pipelines: HashMap<String, Vec<BoardInfo>>,
+    items: Vec<Item>,
+    sessions: Vec<AgentSession>,
+    plans: Vec<crate::plans::Plan>,
+}
+
+pub async fn snapshot(State(state): State<Shared>) -> Json<Snapshot> {
+    let workspaces = state.store.workspaces();
+    let socket = state.tmux_socket.as_deref();
+    let (sessions, dead) = tokio::join!(tmux::sessions(socket), tmux::dead_sessions(socket));
+    Json(Snapshot {
+        items: items(&state, &workspaces, &sessions).await,
+        workspaces: workspace_infos(&state, &workspaces),
+        pipelines: boards(&state, &workspaces),
+        sessions: agent_sessions(&workspaces, &sessions, &dead),
+        plans: crate::plans::all(&workspaces, &sessions, &dead),
+    })
 }
 
 /// Kills a dead `wi-new-*` session of the workspace, when its *Ended* toast is dismissed. A live

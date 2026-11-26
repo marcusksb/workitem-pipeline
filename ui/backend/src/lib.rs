@@ -37,8 +37,8 @@ pub struct AppState {
     pub claude: String,
     /// Executable that reads PR state; `gh` unless a test swaps in a stub.
     pub gh: String,
-    /// Last valid board per `workspace/board`; see `AppState::pipeline`.
-    pub pipelines: std::sync::Mutex<HashMap<String, pipeline::Pipeline>>,
+    /// Last valid board and last read per `workspace/board`; see `AppState::pipeline`.
+    pub pipelines: std::sync::Mutex<HashMap<String, pipeline::Cached>>,
     /// Serialises session launches and dispatcher passes so an item is never started twice.
     pub busy: tokio::sync::Mutex<()>,
     /// Keys (`workspace/board/stage`) of column watchers whose script is running, so one never overlaps itself.
@@ -85,6 +85,7 @@ pub fn router(state: Shared) -> Router {
     Router::new()
         .route("/api/login", post(api::login))
         .route("/api/me", get(api::me))
+        .route("/api/state", get(api::snapshot))
         .route("/api/workspaces", get(api::list_workspaces).post(api::add_workspace))
         .route("/api/workspaces/{name}", put(api::update_workspace))
         .route("/api/agent", get(api::default_agent).put(api::set_default_agent))
