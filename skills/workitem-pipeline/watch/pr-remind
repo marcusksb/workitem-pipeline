@@ -196,7 +196,10 @@ class Reminder:
         except (RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
             print(f"cannot read the reviewers of {name}: {e}", file=sys.stderr)
             return
-        number = pr.rstrip("/").rsplit("/", 1)[-1]
+        if urlparse(pr).hostname == "bitbucket.org":
+            _, _, number = bb_parts(pr)
+        else:
+            number = pr.rstrip("/").rsplit("/", 1)[-1]
         updates = {"pr_reminded_at": stamp(self.now)}
         if not who:
             if (fields.get("agent_status") or "ok") == "ok":

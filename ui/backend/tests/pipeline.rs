@@ -117,7 +117,7 @@ fn world() -> World {
     let d = dir.path().display();
     fs::write(dir.path().join("gh_graphql.py"), GH_GRAPHQL).unwrap();
     let script = format!(
-        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
+        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ] || [ \"$2\" = /user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
     );
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();

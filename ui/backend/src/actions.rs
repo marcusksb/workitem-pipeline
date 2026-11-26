@@ -418,9 +418,14 @@ async fn bb_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &
 
 /// One `git` command in the board repo; a failed one is a conflict.
 async fn run_git(repo: &Path, args: &[&str]) -> Result<()> {
+    run_git_for(repo, args, 60).await
+}
+
+/// One `git` command with its own timeout in seconds; a failed one is a conflict.
+async fn run_git_for(repo: &Path, args: &[&str], secs: u64) -> Result<()> {
     let mut command = tokio::process::Command::new("git");
     command.args(args).current_dir(repo).kill_on_drop(true);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
+    let output = tokio::time::timeout(std::time::Duration::from_secs(secs), command.output())
         .await
         .map_err(|_| conflict("git timed out"))?
         .map_err(|e| internal(format!("cannot run git: {e}")))?;
@@ -445,7 +450,9 @@ async fn bb_rebase(state: &AppState, workspace: &Workspace, item: &Workitem) -> 
     run_git(&repo, &["fetch", "origin", &destination.branch.name, &source.branch.name]).await?;
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let worktree = std::env::temp_dir().join(format!("wi-rebase-{}-{nanos}", std::process::id()));
-    run_git(&repo, &["worktree", "add", "--detach", worktree.to_str().unwrap(), &format!("origin/{}", source.branch.name)]).await?;
+    // A full fresh checkout can take minutes on a large repo or with LFS filters, so this
+    // step gets its own timeout; the other git calls stay at the 60 s default.
+    run_git_for(&repo, &["worktree", "add", "--detach", worktree.to_str().unwrap(), &format!("origin/{}", source.branch.name)], 600).await?;
     let mut result = run_git(&worktree, &["rebase", &format!("origin/{}", destination.branch.name)]).await;
     if result.is_err() {
         let _ = run_git(&worktree, &["rebase", "--abort"]).await;

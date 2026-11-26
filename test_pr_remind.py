@@ -249,10 +249,10 @@ class BitbucketReminderTest(unittest.TestCase):
         with open(self.stub, "w") as f:
             json.dump({"view": view, "post_fails": post_fails}, f)
 
-    def run_script(self, *argv, now=NOW):
+    def run_script(self, *argv, now=NOW, link="https://bitbucket.org/ws/slug/pull-requests/1"):
         env = {"WORKITEM_BKT": self.bkt, "WORKITEM_DIR_ROOT": self.tmp.name, "STUB_BKT": self.stub,
                "STUB_BKT_CALLS": self.calls_path}
-        items = json.dumps([{"dir": "item", "pr": "https://bitbucket.org/ws/slug/pull-requests/1"},
+        items = json.dumps([{"dir": "item", "pr": link},
                             {"dir": "other", "pr": ""}])
         out = io.StringIO()
         with mock.patch.dict(os.environ, env), mock.patch("sys.stdin", io.StringIO(items)), redirect_stdout(out):
@@ -293,6 +293,13 @@ class BitbucketReminderTest(unittest.TestCase):
         self.assertEqual(f["agent_status"], "blocked: PR #1 is ready but has no reviewer to remind")
         self.assertIn("pr_reminded_at", f)
         self.assertFalse(any(c[:2] == ["pr", "comment"] for c in self.calls()))
+
+    def test_a_suffix_link_reports_the_pr_number(self):
+        self.stub_bkt(bb_view())
+        self.run_script(link="https://bitbucket.org/ws/slug/pull-requests/1/diff")
+        f = self.fields()
+        self.assertEqual(f["agent_status"], "blocked: PR #1 is ready but has no reviewer to remind",
+                         "the number comes from bb_parts, not the last path segment")
 
     def test_a_failed_post_is_retried_on_the_next_run(self):
         self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]), post_fails=True)

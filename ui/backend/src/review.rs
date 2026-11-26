@@ -165,9 +165,9 @@ struct BktParticipant {
     #[serde(default)]
     approved: Option<bool>,
     /// When the participant last acted (approved); the PR's update time would pin an old
-    /// approval to a later push.
+    /// approval to a later push. Null for a reviewer who has not acted yet.
     #[serde(default)]
-    participated_on: String,
+    participated_on: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -244,18 +244,20 @@ async fn bkt_json<T: serde::de::DeserializeOwned>(state: &AppState, workspace: &
 }
 
 /// `bitbucket.org/<ws>/<slug>/pull-requests/<id>`, any suffix after the id ignored (`/diff`,
-/// a query). A link on another host is None, so GitHub keeps the `gh` paths.
+/// a query, a `#fragment`). The host is case-insensitive and a port is ignored. A link on
+/// another host is None, so GitHub keeps the `gh` paths.
 pub fn bb_parts(pr: &str) -> Option<(String, String, String)> {
     let rest = pr.split_once("//")?.1;
     let segments: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.first()?.split('@').next_back()? != "bitbucket.org" {
+    let host = segments.first()?.split('@').next_back()?.split(':').next()?;
+    if !host.eq_ignore_ascii_case("bitbucket.org") {
         return None;
     }
     let i = segments.iter().position(|s| *s == "pull-requests")?;
     if i < 2 || segments.len() <= i + 1 {
         return None;
     }
-    let number = segments[i + 1].split('?').next()?;
+    let number = segments[i + 1].split(['?', '#']).next()?;
     if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
@@ -358,7 +360,7 @@ async fn bb_conversation(state: &AppState, workspace: &Workspace, repo: &Path, p
     let mut notes: Vec<Note> = vec![];
     for p in bb.participants {
         if p.approved == Some(true) {
-            let at = if p.participated_on.is_empty() { bb.updated_on.clone() } else { p.participated_on };
+            let at = p.participated_on.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| bb.updated_on.clone());
             notes.push(Note {
                 kind: "review",
                 author: bb_user(p.user),
@@ -401,6 +403,8 @@ mod tests {
         assert_eq!(parts("https://bitbucket.org/ws/slug/pull-requests/42"), Some(("ws".into(), "slug".into(), "42".into())));
         assert_eq!(parts("https://bitbucket.org/ws/slug/pull-requests/42/diff"), Some(("ws".into(), "slug".into(), "42".into())));
         assert_eq!(parts("https://bitbucket.org/ws/slug/pull-requests/42?email=x"), Some(("ws".into(), "slug".into(), "42".into())));
+        assert_eq!(parts("https://bitbucket.org/ws/slug/pull-requests/42#comment-123"), Some(("ws".into(), "slug".into(), "42".into())));
+        assert_eq!(parts("https://BITBUCKET.ORG:443/ws/slug/pull-requests/42"), Some(("ws".into(), "slug".into(), "42".into())));
         assert_eq!(parts("https://github.com/o/r/pull-requests/42"), None, "another host is not Bitbucket");
         assert_eq!(parts("https://bitbucket.org/ws/slug/branch/nope"), None);
         assert_eq!(parts("not a url"), None);
@@ -416,7 +420,7 @@ mod tests {
             "#!/bin/sh\n\
              echo \"$@\" >> {}/calls\n\
              if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
-             echo '{{\"workspace\": \"ws\", \"repo\": \"repo\", \"pull_request\": {{\"description\": \"The description\", \"updated_on\": \"2026-01-02\", \"participants\": [{{\"user\": {{\"display_name\": \"Me\"}}, \"approved\": true, \"participated_on\": \"2026-01-01\"}}]}}}}'\n\
+             echo '{{\"workspace\": \"ws\", \"repo\": \"repo\", \"pull_request\": {{\"description\": \"The description\", \"updated_on\": \"2026-01-02\", \"participants\": [{{\"user\": {{\"display_name\": \"Me\"}}, \"approved\": true, \"participated_on\": \"2026-01-01\"}}, {{\"user\": {{\"display_name\": \"Null\"}}, \"approved\": true, \"participated_on\": null}}]}}}}'\n\
              else\n\
              echo '{{\"comments\": [{{\"id\": 1, \"content\": {{\"raw\": \"A comment\"}}, \"user\": {{\"display_name\": \"You\"}}, \"created_on\": \"2026-01-02\"}}]}}'\n\
              fi\n",
@@ -429,11 +433,13 @@ mod tests {
         let workspace = state.store.add_workspace("w").unwrap();
         let conversation = conversation(&state, &workspace, &repo, "https://bitbucket.org/ws/repo/pull-requests/42").await.unwrap();
         assert_eq!(conversation.body, "The description");
-        assert_eq!(conversation.notes.len(), 2);
-        assert_eq!(conversation.notes[0].body, "A comment");
-        assert_eq!(conversation.notes[0].kind, "comment");
-        assert_eq!(conversation.notes[1].state, Some("approved".into()));
-        assert_eq!(conversation.notes[1].at, "2026-01-01", "the approval keeps its own time");
+        assert_eq!(conversation.notes.len(), 3);
+        assert_eq!(conversation.notes[0].state, Some("approved".into()));
+        assert_eq!(conversation.notes[0].at, "2026-01-02", "a null participated_on falls back to the PR's update time");
+        assert_eq!(conversation.notes[1].body, "A comment");
+        assert_eq!(conversation.notes[1].kind, "comment");
+        assert_eq!(conversation.notes[2].state, Some("approved".into()));
+        assert_eq!(conversation.notes[2].at, "2026-01-01", "the approval keeps its own time");
         let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
         assert_eq!(calls.lines().count(), 2, "pr view and pr comments run");
     }
