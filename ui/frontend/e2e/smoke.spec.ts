@@ -625,3 +625,24 @@ test("toasts stay clear of the open detail panel", async ({ page }) => {
   const overlaps = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
   expect(overlaps).toBe(false);
 });
+
+test("a create session is a toast: spinner, amber while waiting, then a link to what it created", async ({ page }) => {
+  const tmux = (...args: string[]) => execFileSync("tmux", ["-L", socket, ...args]);
+  tmux("new-session", "-d", "-s", "wi-new-e2e", "sleep 600", ";", "set-option", "@workitem_workspace", ws);
+  await page.goto(base);
+  const toast = page.locator(".toast", { hasText: "Creating workitem…" });
+  await expect(toast.locator(".toast-spinner")).toBeVisible();
+  await expect(toast.getByRole("link", { name: "Open terminal ↗" })).toHaveAttribute("href", /wi-new-e2e/);
+  await expect(toast.getByRole("button", { name: "Dismiss" })).toHaveCount(0);
+
+  tmux("set-option", "-t", "=wi-new-e2e:", "@workitem_waiting", "1");
+  await expect(page.locator(".toast.tone-wait")).toContainText("Needs your answer");
+
+  mkdirSync(join(ws, "T-9-made"), { recursive: true });
+  writeFileSync(join(ws, "T-9-made/workitem.md"), "---\ntitle: Made by the toast test\ntype: feature\nstage: analyze\nboard: default\nagent_status: ok\nissue: T-9\ncreated_by: wi-new-e2e\n---\n\n# Made\n");
+  tmux("kill-session", "-t", "=wi-new-e2e");
+  const created = page.locator(".toast.tone-good", { hasText: "Created: Made by the toast test" });
+  await created.getByRole("button", { name: "Created: Made by the toast test" }).click();
+  await expect(page).toHaveURL(/#demo\/T-9-made/);
+  await expect(created).toHaveCount(0);
+});

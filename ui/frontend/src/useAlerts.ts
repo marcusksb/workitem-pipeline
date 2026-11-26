@@ -30,7 +30,7 @@ function play(notes: number[], step = 0.4) {
   });
 }
 
-const beep = () => play([880]);
+export const beep = () => play([880]);
 /** Rising fourth: a PR waits only for the merge button. */
 const chime = () => play([659, 880], 0.12);
 /** Major arpeggio: the issue is done. */

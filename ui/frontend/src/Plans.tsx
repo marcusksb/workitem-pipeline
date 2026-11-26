@@ -1,14 +1,14 @@
 import { FormEvent, useState } from "react";
-import { agentTerminal, api } from "./api";
+import { api } from "./api";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, Textarea } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogForm, Field } from "./Dialog";
-import { IconChevronDown, IconExternal, IconPlus } from "./icons";
+import { IconChevronDown, IconPlus } from "./icons";
 import { ErrorText, Muted } from "./parts";
 import { navExtra, navHeading, navItem, navLabel } from "./Sidebar";
 import { groupPlans, planCounts, planLabel, planStatus } from "./planState";
-import { AgentSession, Plan } from "./types";
+import { Plan } from "./types";
 
 const COLLAPSED_KEY = "workload.plans.collapsed";
 
@@ -30,8 +30,6 @@ function saveCollapsed(collapsed: boolean) {
 
 type Props = {
   plans: Plan[];
-  /** `wi-new-*` sessions (workitem create), shown as links at the end. */
-  sessions: AgentSession[];
   /** Workspaces in view; new plans go to the first unless the dialog picks another. */
   workspaces: string[];
   showWorkspace: boolean;
@@ -44,11 +42,10 @@ type Props = {
 };
 
 /** The planning sessions of the workspaces in view, in the sidebar (decision 36). */
-export function Plans({ plans, sessions, workspaces, showWorkspace, selected, onSelect, onStarted, creating, onCreating }: Props) {
+export function Plans({ plans, workspaces, showWorkspace, selected, onSelect, onStarted, creating, onCreating }: Props) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const [showDone, setShowDone] = useState(false);
   const { open, done } = groupPlans(plans, workspaces);
-  const shownSessions = sessions.filter((session) => workspaces.includes(session.workspace));
   if (!workspaces.length) return null;
 
   const toggle = () => {
@@ -99,21 +96,6 @@ export function Plans({ plans, sessions, workspaces, showWorkspace, selected, on
           {showDone && done.map(card)}
         </>
       )}
-      {shownSessions.map((session) => (
-        <a
-          key={`${session.workspace}/${session.name}`}
-          className="flex items-center truncate px-2 py-1 text-xs text-primary no-underline hover:underline group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0"
-          href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`}
-          target="_blank"
-          rel="noreferrer"
-          title="A workitem is being created; a blocked one can only be answered here"
-        >
-          <span className={navLabel}>{session.workspace} · {session.name} ↗</span>
-          <span className="hidden group-data-[collapsed=true]/sidebar:inline-flex" aria-hidden="true">
-            <IconExternal />
-          </span>
-        </a>
-      ))}
       {creating && (
         <NewPlan
           workspaces={workspaces}

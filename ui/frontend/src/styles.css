@@ -213,6 +213,11 @@
 }
 .toast.tone-good { --tone: var(--good); }
 .toast.tone-bad { --tone: var(--blocked); }
+.toast.tone-wait { --tone: var(--working); }
+.toast-link { color: var(--primary); font-size: 14px; text-decoration: none; }
+.toast-link:hover { text-decoration: underline; }
+.toast-spinner { flex: none; width: 20px; height: 20px; margin: 1px; border: 2px solid var(--border); border-top-color: var(--tone); border-radius: 50%; animation: toast-spin 0.8s linear infinite; }
+@keyframes toast-spin { to { transform: rotate(360deg); } }
 .toast-inner { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 12px 12px; }
 .toast-body { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; font: inherit; }
 button.toast-body { cursor: pointer; }

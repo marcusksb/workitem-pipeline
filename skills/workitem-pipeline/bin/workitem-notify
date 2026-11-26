@@ -9,10 +9,14 @@ nothing outside such a session or when the agent set another status itself.
 Needs WORKITEM and WORKITEM_FILE in the env.
 In a planning session (WORKITEM_PLAN, the plan record) it sets the
 record's `status: working` to `waiting` instead.
+In a create session (WORKITEM_CREATE, its tmux session name) it sets the
+session option `@workitem_waiting`, which the UI shows on the session's toast;
+`--resume` (run when the agent goes on) unsets it.
 """
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -33,6 +37,18 @@ def replace_status(path, key, matches, new):
         return
     path.write_text(text[:status.start()] + f"{key}: {new}" + text[status.end():])
 
+
+create = os.environ.get("WORKITEM_CREATE")
+if create:
+    # tmux finds the UI's server through the inherited $TMUX, also with a custom socket.
+    unset = ["-u"] if "--resume" in sys.argv[1:] else []
+    value = [] if unset else ["1"]
+    try:
+        subprocess.run(["tmux", "set-option", *unset, "-t", f"={create}:", "@workitem_waiting", *value],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except OSError:
+        pass
+    sys.exit(0)
 
 plan = os.environ.get("WORKITEM_PLAN")
 if plan:

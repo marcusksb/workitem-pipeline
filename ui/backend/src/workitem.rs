@@ -27,6 +27,8 @@ pub struct Workitem {
     pub pr: String,
     /// Directory name of the workitem this one was split from, or empty.
     pub parent: String,
+    /// The `wi-new-*` session that wrote this item (decision 75), or empty.
+    pub created_by: String,
     /// Directory names of the items that must be merged before this one may enter a stage that
     /// requires it (decision 47).
     pub depends_on: Vec<String>,
@@ -86,6 +88,7 @@ fn parse(workspace: &Workspace, dir: &str, text: &str) -> Workitem {
         issue_status_category: field("issue_status_category", ""),
         pr: field("pr", ""),
         parent: field("parent", ""),
+        created_by: field("created_by", ""),
         depends_on: field("depends_on", "").split(',').map(str::trim).filter(|d| !d.is_empty()).map(String::from).collect(),
         created: field("created", ""),
         follow_ups: follow_ups(text),
@@ -222,7 +225,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("workitem.md"), "---\ntitle: Foo\nstage: analyze\nagent_status: blocked: why\napproved: true\npr: https://github.com/app/pull/9\n---\nbody").unwrap();
         fs::create_dir_all(repo.path().join("SHAPE-2-bar")).unwrap();
-        fs::write(repo.path().join("SHAPE-2-bar/workitem.md"), "---\ntitle: Bar\nstage: analyze\nparent: SHAPE-1-foo\nboard: web\ndepends_on: SHAPE-1-foo, X-9\n---\nbody").unwrap();
+        fs::write(repo.path().join("SHAPE-2-bar/workitem.md"), "---\ntitle: Bar\nstage: analyze\nparent: SHAPE-1-foo\ncreated_by: wi-new-7\nboard: web\ndepends_on: SHAPE-1-foo, X-9\n---\nbody").unwrap();
         fs::create_dir_all(repo.path().join("no-file")).unwrap();
         let items = list(&workspace(repo.path()));
         assert_eq!(items.len(), 2);
@@ -234,6 +237,7 @@ mod tests {
         assert_eq!(items[1].pr, "");
         assert_eq!(items[1].parent, "SHAPE-1-foo");
         assert_eq!(items[0].parent, "");
+        assert_eq!((items[0].created_by.as_str(), items[1].created_by.as_str()), ("", "wi-new-7"));
         assert_eq!((items[0].board.as_str(), items[1].board.as_str()), ("", "web"));
         assert_eq!((items[0].depends_on.len(), &items[1].depends_on[..]), (0, &["SHAPE-1-foo".to_string(), "X-9".to_string()][..]));
     }

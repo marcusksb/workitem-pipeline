@@ -15,6 +15,7 @@ export const item = (over: Partial<Item>): Item => ({
   issue_status_category: "",
   pr: "",
   parent: "",
+  created_by: "",
   depends_on: [],
   created: "",
   session: false,
