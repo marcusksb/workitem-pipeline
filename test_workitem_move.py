@@ -29,7 +29,7 @@ class WorkitemMoveTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write(self, stage="backlog", approved="false", body="", issue="X-1 (https://example.atlassian.net/browse/X-1)", board="dev", extra=""):
+    def write(self, stage="analyze", approved="false", body="", issue="X-1 (https://example.atlassian.net/browse/X-1)", board="dev", extra=""):
         line = f"board: {board}\n" if board else ""
         (self.item / "workitem.md").write_text(f"---\ntitle: t\nstage: {stage}\n{line}approved: {approved}\nissue: {issue}\n{extra}---\n\n# t\n{body}")
 
@@ -58,20 +58,25 @@ class WorkitemMoveTest(unittest.TestCase):
         (folder / "workitem.md").write_text("---\ntitle: o\n" + "".join(f"{k}: {v}\n" for k, v in fields.items()) + "---\n")
 
     def test_allowed_move(self):
-        self.write("backlog")
-        self.assertEqual(self.run_move(str(self.item), "analyze").returncode, 0)
-        self.assertEqual(self.stage(), "stage: analyze")
+        self.write("analyze", body=BRIEF)
+        self.assertEqual(self.run_move(str(self.item), "ready_for_development").returncode, 0)
+        self.assertEqual(self.stage(), "stage: ready_for_development")
 
     def test_move_by_relative_path(self):
-        self.write("backlog")
-        self.assertEqual(self.run_move("ws/X-1-test", "analyze").returncode, 0)
-        self.assertEqual(self.stage(), "stage: analyze")
+        self.write("analyze", body=BRIEF)
+        self.assertEqual(self.run_move("ws/X-1-test", "ready_for_development").returncode, 0)
+        self.assertEqual(self.stage(), "stage: ready_for_development")
 
     def test_disallowed_move(self):
-        self.write("backlog")
-        result = self.run_move(str(self.item), "in_development")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(self.stage(), "stage: backlog")
+        self.write("analyze", body=BRIEF)
+        for target in ("in_development", "backlog"):
+            result = self.run_move(str(self.item), target)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(self.stage(), "stage: analyze")
+
+    def test_the_bundled_board_starts_in_analyze(self):
+        self.assertEqual(BUNDLED["entry"], "analyze")
+        self.assertNotIn("backlog", [stage["name"] for stage in BUNDLED["stages"]])
 
     def test_ready_without_brief_is_refused(self):
         self.write("analyze")
@@ -97,26 +102,26 @@ class WorkitemMoveTest(unittest.TestCase):
         self.assertEqual(self.run_move(str(self.item), "in_development").returncode, 0)
 
     def test_item_without_a_board_is_refused(self):
-        self.write("backlog", board="")
-        result = self.run_move(str(self.item), "analyze")
+        self.write("analyze", body=BRIEF, board="")
+        result = self.run_move(str(self.item), "ready_for_development")
         self.assertEqual(result.returncode, 1)
         self.assertIn("board", result.stderr)
 
     def test_board_without_a_repo_is_valid(self):
-        self.write("backlog")
+        self.write("analyze", body=BRIEF)
         self.named_board("dev", **{k: v for k, v in BUNDLED.items() if k in ("entry", "stages", "brief_sections")})
         board = self.workspace / "boards/dev.json"
         config = json.loads(board.read_text())
         del config["repo"]
         board.write_text(json.dumps(config))
-        result = self.run_move(str(self.item), "analyze")
+        result = self.run_move(str(self.item), "ready_for_development")
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_board_with_a_bad_repo_is_invalid(self):
-        self.write("backlog")
+        self.write("analyze", body=BRIEF)
         for repo in (None, "relative", str(self.repo / "gone")):
             self.named_board("dev", **{k: v for k, v in BUNDLED.items() if k in ("entry", "stages", "brief_sections")}, repo=repo)
-            result = self.run_move(str(self.item), "analyze")
+            result = self.run_move(str(self.item), "ready_for_development")
             self.assertEqual(result.returncode, 1)
             self.assertIn("repo", result.stderr)
 
@@ -238,7 +243,7 @@ class WorkitemMoveTest(unittest.TestCase):
         self.assertIn("stage: idea", text)
         self.assertIn("board: research", text)
         self.assertEqual(self.run_move(str(self.item), "--board", "dev").returncode, 0)
-        self.assertIn("stage: backlog", (self.item / "workitem.md").read_text())
+        self.assertIn("stage: analyze", (self.item / "workitem.md").read_text())
 
     def test_switching_works_from_no_board_or_a_board_that_has_no_file(self):
         self.named_board("research")
@@ -279,7 +284,7 @@ class MigrateTest(unittest.TestCase):
         for name, board in (("A-1", None), ("B-2", "review")):
             (self.source / name).mkdir()
             line = f"board: {board}\n" if board else ""
-            (self.source / name / "workitem.md").write_text(f"---\ntitle: t\nstage: backlog\n{line}---\n\nbody\n")
+            (self.source / name / "workitem.md").write_text(f"---\ntitle: t\nstage: analyze\nissue: X-1\n{line}---\n\nbody\n{BRIEF}")
         (self.source / "plans").mkdir()
         (self.source / "plans/p1.md").write_text("---\ntopic: t\n---\n")
         self.workspace = self.home / "workspaces/main"
@@ -296,7 +301,7 @@ class MigrateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         api = json.loads((self.workspace / "boards/api.json").read_text())
         self.assertEqual(api["repo"], str(self.repo))
-        self.assertEqual(api["entry"], "backlog", "no default board file: the bundled one")
+        self.assertEqual(api["entry"], "analyze", "no default board file: the bundled one")
         self.assertEqual(json.loads((self.workspace / "boards/api-review.json").read_text())["repo"], str(self.repo))
         self.assertIn("board: api\n", (self.workspace / "A-1/workitem.md").read_text())
         self.assertIn("board: api-review\n", (self.workspace / "B-2/workitem.md").read_text())
@@ -307,7 +312,7 @@ class MigrateTest(unittest.TestCase):
         self.assertTrue((self.workspace / "plans/p1.md").exists())
         self.assertEqual(sorted(p.name for p in self.source.iterdir()), ["notes.txt"])
         self.assertIn("notes.txt", result.stdout)
-        moved = subprocess.run(["python3", str(MOVE), str(self.workspace / "A-1"), "analyze"], capture_output=True, text=True)
+        moved = subprocess.run(["python3", str(MOVE), str(self.workspace / "A-1"), "ready_for_development"], capture_output=True, text=True)
         self.assertEqual(moved.returncode, 0, moved.stderr)
 
     def test_refuses_without_touching_anything_when_a_target_exists(self):

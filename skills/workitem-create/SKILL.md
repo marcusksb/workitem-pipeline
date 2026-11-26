@@ -40,7 +40,7 @@ Other optional flags: `--issue <ref>` links an issue, `--parent <dir>` marks the
 
 If no argument was given, end your turn with the question "Give me an issue, a Sentry issue URL, or describe the task." as the final message and write no file.
 
-A new workitem always starts in the `entry` stage of its board (`entry` in `<workspace>/boards/<name>.json`). The UI's dispatcher triages it from there.
+A new workitem always starts in the `entry` stage of its board (`entry` in `<workspace>/boards/<name>.json`). The UI's dispatcher starts its handler from there.
 
 ### Step 2 — Resolve title, summary, and description
 

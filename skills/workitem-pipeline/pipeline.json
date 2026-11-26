@@ -1,21 +1,14 @@
 {
   "brief_sections": ["Findings", "Plan", "Risk", "Size", "Test plan", "Assumptions", "Links"],
-  "entry": "backlog",
+  "entry": "analyze",
   "order": ["issue_status_category", "title"],
   "stages": [
-    {
-      "name": "backlog",
-      "handler": "workitem-triage",
-      "auto": true,
-      "watch": { "every": "5s", "command": "run-items" },
-      "next": ["analyze"]
-    },
     {
       "name": "analyze",
       "handler": "workitem-analyze",
       "auto": true,
       "watch": { "every": "5s", "command": "run-items" },
-      "next": ["ready_for_development", "backlog"],
+      "next": ["ready_for_development"],
       "on_enter": { "approved": "false" }
     },
     {
