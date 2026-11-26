@@ -36,12 +36,17 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     header_str(headers, header::AUTHORIZATION)?.strip_prefix("Bearer ")
 }
 
-/// Host check (DNS rebinding), cookie check for `/api` and `/ws`, Origin check for `/ws`.
+/// The `Host` header names loopback or an allowed host, with the server's own port (DNS rebinding).
+fn host_allowed(host: &str, port: u16, allowed: &[String]) -> bool {
+    let Some(name) = host.strip_suffix(&format!(":{port}")) else { return false };
+    name == "127.0.0.1" || name == "localhost" || allowed.iter().any(|a| a == name)
+}
+
+/// Host check, cookie check for `/api` and `/ws`, Origin check for `/ws`.
 pub async fn guard(State(state): State<Shared>, request: Request, next: Next) -> Response {
     let headers = request.headers();
-    let port = state.port;
     let host = header_str(headers, header::HOST).unwrap_or_default();
-    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+    if !host_allowed(host, state.port, &state.allowed_hosts) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let path = request.uri().path();
@@ -69,6 +74,19 @@ mod tests {
         assert!(token_matches("abc", "abc"));
         assert!(!token_matches("abc", "abd"));
         assert!(!token_matches("abc", "ab"));
+    }
+
+    #[test]
+    fn allows_loopback_and_listed_hosts_on_own_port() {
+        let none: &[String] = &[];
+        let lan = &["my-mac.local".to_string()];
+        assert!(host_allowed("127.0.0.1:7373", 7373, none));
+        assert!(host_allowed("localhost:7373", 7373, none));
+        assert!(!host_allowed("my-mac.local:7373", 7373, none));
+        assert!(host_allowed("my-mac.local:7373", 7373, lan));
+        assert!(!host_allowed("my-mac.local:8080", 7373, lan));
+        assert!(!host_allowed("my-mac.local", 7373, lan));
+        assert!(!host_allowed("evil.my-mac.local:7373", 7373, lan));
     }
 
     #[test]

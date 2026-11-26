@@ -145,3 +145,20 @@ async fn terminal_bridges_input_and_detaches_without_killing_session() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(f.tmux.has("wi-T-1"), "closing the browser must not kill the agent session");
 }
+
+#[tokio::test]
+async fn allowed_hosts_pass_the_host_check_for_api_and_ws() {
+    let (mut f, listener) = fixture().await;
+    let port = f.state.port;
+    let lan = format!("my-mac.local:{port}");
+    let cookie = format!("wi_session={}", f.token);
+    assert_eq!(get(&f, "/api/workitems", &lan, Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+
+    Arc::get_mut(&mut f.state).unwrap().allowed_hosts = vec!["my-mac.local".into()];
+    assert_eq!(get(&f, "/api/workitems", &lan, Some(&cookie)).await.0, StatusCode::OK);
+
+    tokio::spawn(axum::serve(listener, router(f.state.clone())).into_future());
+    let mut request = ws_request(port, "/ws/terminal/app/T-1?cols=80&rows=24", Some(&cookie), Some(&format!("http://{lan}")));
+    request.headers_mut().insert(header::HOST, lan.parse().unwrap());
+    assert!(connect_async(request).await.is_ok());
+}

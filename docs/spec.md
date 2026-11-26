@@ -101,7 +101,7 @@ One workspace in view. The sidebar has the workspace switcher, Search ⌘K, boar
 
 ## Backend
 
-Binds `127.0.0.1`, port 7373 (`WORKITEM_UI_PORT`). Auth: a random token in `config.toml`; the printed `#token=` URL is posted once to `/api/login` for an `HttpOnly; SameSite=Strict` cookie. Scripts and the MCP server use `Authorization: Bearer <token>`. WebSockets also check `Origin`.
+Binds `127.0.0.1` (`WORKITEM_UI_HOST`), port 7373 (`WORKITEM_UI_PORT`). The Host header must be `127.0.0.1`, `localhost` or a name in `WORKITEM_UI_ALLOWED_HOSTS` (comma list), with the server's port; remote access binds `0.0.0.0` and lists the machine's name there, and the server prints one `#token=` URL per accepted name. Auth: a random token in `config.toml`; the printed `#token=` URL is posted once to `/api/login` for an `HttpOnly; SameSite=Strict` cookie. Scripts and the MCP server use `Authorization: Bearer <token>`. WebSockets also check `Origin`.
 
 The frontend polls; nothing is pushed. Routes (`lib.rs`):
 
@@ -110,7 +110,7 @@ The frontend polls; nothing is pushed. Routes (`lib.rs`):
 - `/api/workspaces/{workspace}/create`, `/api/sessions` (and `DELETE .../{workspace}/{name}`), `/api/plans`, `/api/mcp/{workspace}/{dir}`.
 - `/ws/terminal/{workspace}/{dir}`, `/ws/session/{workspace}/{name}`: `tmux attach` on a PTY; closing the socket keeps the session.
 
-`AppState.busy` serialises launches and dispatcher passes. Env: `WORKITEM_UI_HOME`, `_PORT`, `_TMUX_SOCKET`, `_SKILLS` (default `~/.claude/skills`), `_CLAUDE`, `_GH`, `_DISPATCH=off`.
+`AppState.busy` serialises launches and dispatcher passes. Env: `WORKITEM_UI_HOME`, `_HOST`, `_ALLOWED_HOSTS`, `_PORT`, `_TMUX_SOCKET`, `_SKILLS` (default `~/.claude/skills`), `_CLAUDE`, `_GH`, `_DISPATCH=off`.
 
 ## Non-goals
 
