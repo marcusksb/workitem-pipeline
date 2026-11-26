@@ -124,6 +124,9 @@ test("opencode planning: records its session, marks working, refuses code edits"
     await assert.rejects(edit("edit", { filePath: join(repo, "app.py") }), /planning session/);
     await edit("write", { filePath: join(ws, "X-1", "workitem.md") });
     await edit("read", { filePath: join(repo, "app.py") });
+    const patch = (path) => `*** Begin Patch\n*** Update File: ${path}\n@@\n-a\n+b\n*** End Patch`;
+    await assert.rejects(edit("apply_patch", { patchText: patch(join(repo, "app.py")) }), /planning session/);
+    await edit("apply_patch", { patchText: patch(join(ws, "X-1", "workitem.md")) });
   }));
 
 test("pi and omp planning: mark working, refuse code edits; omp records its session file", () =>

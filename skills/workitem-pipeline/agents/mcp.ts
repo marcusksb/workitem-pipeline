@@ -28,7 +28,7 @@ export async function registerMcpTools(pi) {
   };
   let tools;
   try {
-    ({ tools } = await call("tools/list", {}));
+    ({ tools } = await call("tools/list", {}, AbortSignal.timeout(5000)));
   } catch {
     return; // The backend is down: the session runs without them, as Claude's would.
   }

@@ -63,10 +63,18 @@ export async function planNote(...args) {
  */
 export async function refusedEdit(tool, input, cwd) {
   if (!process.env.WORKITEM_PLAN || !/edit|write|patch/i.test(tool ?? "")) return null;
-  const target = input?.file_path ?? input?.filePath ?? input?.path;
-  if (!target) return null;
-  const { code, stderr } = await run("workitem-plan-guard", [], JSON.stringify({ tool_name: tool, cwd, tool_input: { file_path: target } }));
-  return code === 2 ? stderr.trim() : null;
+  const targets = [input?.file_path ?? input?.filePath ?? input?.path, ...patchedFiles(input?.patchText ?? input?.patch ?? input?.input)].filter(Boolean);
+  for (const target of targets) {
+    const { code, stderr } = await run("workitem-plan-guard", [], JSON.stringify({ tool_name: tool, cwd, tool_input: { file_path: target } }));
+    if (code === 2) return stderr.trim();
+  }
+  return null;
+}
+
+/** The files a patch (`*** Update File: <path>` and the like) adds, changes, moves or deletes. */
+function patchedFiles(patch) {
+  if (typeof patch !== "string") return [];
+  return [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)].map((m) => m[1].trim());
 }
 
 /**

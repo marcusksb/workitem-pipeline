@@ -169,7 +169,7 @@ fn opencode_config(state: &AppState, launch: &Launch) -> Result<String, String> 
     }
     let rules: serde_json::Map<String, serde_json::Value> = allowed.iter().map(|dir| (format!("{}/**", dir.display()), json!("allow"))).collect();
     let mut config = json!({
-        "plugin": [format!("file://{}", plugin.display().to_string().replace('%', "%25").replace(' ', "%20"))],
+        "plugin": [format!("file://{}", plugin.display().to_string().replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F"))],
         "permission": { "external_directory": rules },
     });
     if let Some(mcp) = launch.mcp {

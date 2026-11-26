@@ -59,7 +59,15 @@ function AgentFields(props: {
   return (
     <>
       <Field label="Agent">
-        <NativeSelect value={props.kind} onChange={(e) => props.onKind(e.target.value as AgentKind | "")} autoFocus>
+        <NativeSelect
+          value={props.kind}
+          onChange={(e) => {
+            // An executable belongs to its kind; another kind starts with its own CLI.
+            props.onCommand("");
+            props.onKind(e.target.value as AgentKind | "");
+          }}
+          autoFocus
+        >
           {props.fallback !== undefined && <option value="">Default ({props.fallback})</option>}
           {AGENT_KINDS.map((kind) => (
             <option key={kind} value={kind}>
