@@ -12,6 +12,10 @@ pub struct Tmux(pub String);
 
 impl Tmux {
     pub fn new() -> Tmux {
+        // A test tmux server inherits this process's env, which holds the real item's when run from an agent session.
+        for var in ["WORKITEM", "WORKITEM_FILE", "WORKITEM_REPO", "WORKITEM_WORKSPACE"] {
+            std::env::remove_var(var);
+        }
         Tmux(format!("wi-test-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst)))
     }
     pub fn run(&self, args: &[&str]) {
