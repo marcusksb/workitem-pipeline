@@ -200,9 +200,9 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
 
   // A dialog opened from the board renders outside it, but a click in it does not close the item.
-  await page.getByRole("button", { name: "What analyze runs" }).click();
-  const source = page.getByRole("dialog", { name: "analyze: what runs" });
-  await source.getByRole("heading", { name: "analyze: what runs" }).click();
+  await page.getByRole("button", { name: "analyze settings" }).click();
+  const source = page.getByRole("dialog", { name: "analyze: stage" });
+  await source.getByRole("heading", { name: "analyze: stage" }).click();
   await page.keyboard.press("Escape");
   await expect(source).toHaveCount(0);
   await expect(page.locator(".detail")).toHaveCount(1);

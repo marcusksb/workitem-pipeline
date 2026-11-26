@@ -90,6 +90,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workspaces/{workspace}/boards", post(api::add_board))
         .route("/api/workspaces/{workspace}/boards/{board}", put(api::update_board))
         .route("/api/pipelines", get(api::pipelines))
+        .route("/api/workspaces/{workspace}/boards/{board}/stages/{stage}", put(api::update_stage))
         .route("/api/workspaces/{workspace}/boards/{board}/stages/{stage}/source", get(api::stage_source))
         .route("/api/workspaces/{workspace}/boards/{board}/stages/{stage}/paused", put(api::pause_stage))
         .route("/api/workspaces/{workspace}/boards/{board}/learnings", get(api::learnings).put(api::save_learnings))

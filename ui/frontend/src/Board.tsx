@@ -7,7 +7,7 @@ import { Choice, Dialog, DialogForm } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { PrStatus } from "./PrStatus";
-import { IconInfo, IconPause, IconPlay, IconTrash } from "./icons";
+import { IconPause, IconPlay, IconSettings, IconTrash } from "./icons";
 import { ErrorText, Muted } from "./parts";
 import { StageSource } from "./StageSource";
 import { STAGE_DOT } from "./tone";
@@ -214,8 +214,8 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
         <span className="text-xs font-normal text-muted-foreground">{items.length}</span>
         <span className="ml-auto flex items-center">
           {name !== UNKNOWN_STAGE && (
-            <Button variant="ghost" size="icon" className="size-6" title="What this stage runs" aria-label={`What ${label} runs`} onClick={onInspect}>
-              <IconInfo />
+            <Button variant="ghost" size="icon" className="size-6" title="Stage settings" aria-label={`${label} settings`} onClick={onInspect}>
+              <IconSettings />
             </Button>
           )}
           {pause.workspaces.length > 0 && <PauseColumn workspaces={pause.workspaces} board={board} stage={name} label={label} paused={pause.paused} runner={pauser} />}

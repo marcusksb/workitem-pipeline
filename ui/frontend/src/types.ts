@@ -141,7 +141,10 @@ export type Source = {
 };
 
 /** `model`: the `--model` of the stage's item sessions; `null` means the agent's default. */
-export type StageSource = { scripts: Source[]; prose: Source | null; model: string | null };
+export type StageSource = { scripts: Source[]; prose: Source | null; model: string | null; require_issue: boolean };
+
+/** What the stage settings dialog saves (decision 76); an empty `model` removes it. */
+export type StageSettings = { model: string; require_issue: boolean };
 
 /** A workspace's `learnings.md`; `content` is empty while the file does not exist. */
 export type Learnings = { path: string; content: string };

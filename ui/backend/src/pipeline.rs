@@ -134,9 +134,17 @@ pub struct Stage {
     /// states the issue can reach.
     #[serde(default, skip_serializing)]
     pub issue_state: Vec<String>,
+    /// What `workitem-move` checks before an item may enter; only `issue` is read here.
+    #[serde(default, skip_serializing)]
+    pub require: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Stage {
+    /// Entering needs a linked issue (`require: {"issue": "linked"}`, the rule `workitem-move` applies).
+    pub fn requires_issue(&self) -> bool {
+        self.require.get("issue").and_then(|v| v.as_str()) == Some("linked")
+    }
+
     /// The stage whose PRs are watched, and acted on, by the `pr-review` script.
     pub fn watches_prs(&self) -> bool {
         self.handler.as_deref() == Some(PR_REVIEW) || self.watch.iter().any(|w| w.command == "pr-review")
@@ -377,6 +385,13 @@ pub struct BoardSettings<'a> {
     pub reviewers: &'a str,
 }
 
+/// What the stage settings dialog changes (decision 76): the stage's `model` and whether entering
+/// needs a linked issue. Every other key of the stage stays file-only.
+pub struct StageSettings<'a> {
+    pub model: &'a str,
+    pub require_issue: bool,
+}
+
 impl AppState {
     /// Reads a board of the workspace. When its file is invalid the last valid one stays in use, so
     /// a typo never stops the dispatcher or empties the board.
@@ -465,11 +480,62 @@ impl AppState {
         let path = workspace.dir.join("boards").join(format!("{name}.json"));
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let text = board_with_settings(&text, settings).map_err(|e| format!("{}: {e}", path.display()))?;
-        check_tracker(&Pipeline::parse(&text)?, &workspace.issue_tracker)?;
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, text).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+        write_board(workspace, &path, text)
     }
+
+    /// Sets `settings` on `stage` of `boards/<name>.json`, checked and kept like `update_board`.
+    pub fn update_stage(&self, workspace: &Workspace, name: &str, stage: &str, settings: &StageSettings) -> Result<(), String> {
+        if !valid_board_name(name) {
+            return Err(format!("'{name}' is not a board name"));
+        }
+        let path = workspace.dir.join("boards").join(format!("{name}.json"));
+        let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let text = stage_with_settings(&text, stage, settings).map_err(|e| format!("{}: {e}", path.display()))?;
+        write_board(workspace, &path, text)
+    }
+}
+
+/// Writes `text` to the board file `path` only if it is a valid board for the workspace's tracker.
+fn write_board(workspace: &Workspace, path: &Path, text: String) -> Result<(), String> {
+    check_tracker(&Pipeline::parse(&text)?, &workspace.issue_tracker)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// The board file `text` with `settings` on the stage named `stage`: a trimmed empty `model` is
+/// removed, `require_issue` sets or removes `require.issue` (and drops a `require` left empty).
+fn stage_with_settings(text: &str, stage: &str, settings: &StageSettings) -> Result<String, String> {
+    use serde_json::{json, Map, Value};
+    let Value::Object(mut board) = serde_json::from_str::<Value>(text).map_err(|e| e.to_string())? else {
+        return Err("the board file is not a JSON object".into());
+    };
+    let found = board
+        .get_mut("stages")
+        .and_then(Value::as_array_mut)
+        .and_then(|stages| stages.iter_mut().filter_map(Value::as_object_mut).find(|s| s.get("name").and_then(Value::as_str) == Some(stage)))
+        .ok_or_else(|| format!("no stage '{stage}'"))?;
+    match settings.model.trim() {
+        "" => {
+            found.shift_remove("model");
+        }
+        model => {
+            found.insert("model".into(), json!(model));
+        }
+    }
+    if settings.require_issue {
+        let require = found.entry("require").or_insert_with(|| Value::Object(Map::new()));
+        let Value::Object(require) = require else {
+            return Err(format!("stage '{stage}': require is not an object"));
+        };
+        require.insert("issue".into(), json!("linked"));
+    } else if let Some(Value::Object(require)) = found.get_mut("require") {
+        require.shift_remove("issue");
+        if require.is_empty() {
+            found.shift_remove("require");
+        }
+    }
+    serde_json::to_string_pretty(&board).map(|text| text + "\n").map_err(|e| e.to_string())
 }
 
 /// The board file `text` with the keys of `settings` set, each trimmed; an empty optional one
@@ -763,6 +829,45 @@ mod tests {
         assert_eq!(value["entry"], "a");
         assert!(board_with_settings("[]", &cleared).unwrap_err().contains("not a JSON object"));
         assert!(board_with_settings("{", &cleared).is_err());
+    }
+
+    #[test]
+    fn stage_settings_set_model_and_issue_requirement_and_keep_every_other_key_in_its_order() {
+        let file = r#"{"repo": "/", "brief_sections": [], "entry": "a", "stages": [{"name": "a", "handler": "h", "next": ["b"], "x-own": 1}, {"name": "b", "require": {"brief": "complete"}, "next": []}]}"#;
+        let on = StageSettings { model: " opus ", require_issue: true };
+        let text = stage_with_settings(file, "a", &on).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let keys: Vec<&str> = value["stages"][0].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["name", "handler", "next", "x-own", "model", "require"]);
+        assert_eq!((&value["stages"][0]["model"], &value["stages"][0]["require"]), (&serde_json::json!("opus"), &serde_json::json!({"issue": "linked"})));
+        assert_eq!(value["stages"][1], serde_json::from_str::<serde_json::Value>(file).unwrap()["stages"][1], "other stages are untouched");
+        assert!(Pipeline::parse(&text).unwrap().stage("a").unwrap().requires_issue());
+        assert!(text.ends_with("}\n"));
+
+        let changed: serde_json::Value = serde_json::from_str(&stage_with_settings(&text, "a", &StageSettings { model: "sonnet", require_issue: true }).unwrap()).unwrap();
+        assert_eq!(changed["stages"][0]["model"], "sonnet");
+
+        let off = StageSettings { model: "  ", require_issue: false };
+        let cleared: serde_json::Value = serde_json::from_str(&stage_with_settings(&text, "a", &off).unwrap()).unwrap();
+        assert!(cleared["stages"][0].get("model").is_none() && cleared["stages"][0].get("require").is_none(), "{cleared}");
+
+        let kept = stage_with_settings(file, "b", &StageSettings { model: "", require_issue: true }).unwrap();
+        let kept: serde_json::Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(kept["stages"][1]["require"], serde_json::json!({"brief": "complete", "issue": "linked"}));
+        let dropped: serde_json::Value = serde_json::from_str(&stage_with_settings(&kept.to_string(), "b", &off).unwrap()).unwrap();
+        assert_eq!(dropped["stages"][1]["require"], serde_json::json!({"brief": "complete"}), "only issue is removed");
+
+        assert!(stage_with_settings(file, "nope", &off).unwrap_err().contains("no stage 'nope'"));
+        assert!(stage_with_settings("[]", "a", &off).unwrap_err().contains("not a JSON object"));
+    }
+
+    #[test]
+    fn a_stage_requires_an_issue_only_when_require_issue_is_linked() {
+        let stage = |require: &str| Pipeline::parse(&format!(r#"{{ {BRIEF}, "entry": "a", "stages": [{{"name": "a" {require}}}] }}"#)).unwrap().stages[0].requires_issue();
+        assert!(stage(r#", "require": {"issue": "linked"}"#));
+        assert!(!stage(r#", "require": {"issue": "other"}"#));
+        assert!(!stage(r#", "require": {"approved": "true"}"#));
+        assert!(!stage(""));
     }
 
     #[test]

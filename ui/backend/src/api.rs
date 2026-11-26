@@ -145,6 +145,33 @@ pub async fn update_board(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What the stage settings dialog sends (decision 76).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StageChange {
+    #[serde(default)]
+    model: String,
+    require_issue: bool,
+}
+
+/// Changes a stage's `model` and whether entering it needs a linked issue.
+pub async fn update_stage(
+    State(state): State<Shared>,
+    Path((workspace, board, stage)): Path<(String, String, String)>,
+    Json(body): Json<StageChange>,
+) -> Result<StatusCode, ApiError> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    if !state.board_names(&workspace).contains(&board) {
+        return Err(ApiError::not_found("board"));
+    }
+    let pipeline = state.pipeline(&workspace, &board).pipeline.ok_or(ApiError::not_found("board"))?;
+    pipeline.stage(&stage).ok_or(ApiError::not_found("stage"))?;
+    let settings = crate::pipeline::StageSettings { model: &body.model, require_issue: body.require_issue };
+    state.update_stage(&workspace, &board, &stage, &settings).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    state.wake.notify_one();
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct WorkspaceChange {
     agent: Option<String>,
@@ -432,6 +459,8 @@ pub struct StageSource {
     prose: Option<Source>,
     /// The stage's `model` (decision 60); `None` means the agent's default.
     model: Option<String>,
+    /// Entering the stage needs a linked issue (`require: {"issue": "linked"}`).
+    require_issue: bool,
 }
 
 fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static str>) -> Source {
@@ -473,7 +502,7 @@ pub async fn stage_source(
         }),
         (None, None) => None,
     };
-    Ok(Json(StageSource { scripts, prose, model: stage.model.clone() }))
+    Ok(Json(StageSource { scripts, prose, model: stage.model.clone(), require_issue: stage.requires_issue() }))
 }
 
 #[derive(Deserialize)]
