@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CreateToast, nextCreateToasts } from "./createToasts";
+import { CreateToast, killsOnClose, nextCreateToasts } from "./createToasts";
 import { item } from "./testFixtures";
 import { AgentSession } from "./types";
 
@@ -43,5 +43,15 @@ describe("nextCreateToasts", () => {
   it("keeps a session of another workspace apart", () => {
     const toasts = nextCreateToasts([], [session(), session({ workspace: "web", waiting: true })], [], true);
     expect(toasts.map((t) => [t.session.workspace, t.state])).toEqual([["app", "running"], ["web", "waiting"]]);
+  });
+});
+
+describe("killsOnClose", () => {
+  const toast = (state: CreateToast["state"], dead: boolean): CreateToast => ({ session: session({ dead }), state, items: [], misses: 0 });
+
+  it("kills only an ended toast whose session died", () => {
+    expect(killsOnClose(toast("ended", true))).toBe(true);
+    expect(killsOnClose(toast("ended", false))).toBe(false);
+    for (const state of ["running", "waiting", "created"] as const) expect(killsOnClose(toast(state, false))).toBe(false);
   });
 });

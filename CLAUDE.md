@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Two parts live here: the workitem pipeline itself (Claude skills plus one Python script) and `ui/`, Workload, a local web UI for it (Rust backend, React frontend). Design docs: `workitem-pipeline.md` (pipeline) and `workitem-pipeline-ui.md` (UI, with the numbered decisions). Read the matching doc before changing behavior.
+Two parts live here: the workitem pipeline itself (Claude skills plus one Python script) and `ui/`, Workload, a local web UI for it (Rust backend, React frontend). `docs/spec.md` describes how both work today; read it before changing behavior. `docs/decisions.md` is the numbered decision log (history, append-only; code comments cite its numbers). A behavior change appends the next decision there and updates `docs/spec.md` to match.
 
 ## Commands
 

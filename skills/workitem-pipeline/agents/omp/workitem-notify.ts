@@ -17,7 +17,7 @@ export default async function (pi) {
     return Promise.all([resume(), planNote("--status", "working")]);
   });
   // An approved tool ran: the agent goes on.
-  pi.on("tool_result", () => resume());
+  pi.on("tool_result", () => Promise.all([resume(), planNote("--status", "working")]));
   pi.on("agent_end", () => reporter.idle());
   pi.on("tool_approval_requested", () => notify("permission_prompt"));
   pi.on("plan_review_requested", () => notify("elicitation_dialog"));
