@@ -1,6 +1,6 @@
 # ui/CLAUDE.md
 
-Workload, the local web UI. The pipeline rules in the root `CLAUDE.md` still apply.
+Workload, the local web UI. The pipeline rules in the root `CLAUDE.md` still apply. Spec: `../docs/spec.md`; "decision N" means `../docs/decisions.md`, where new decisions are appended (and folded into the spec).
 
 ## Architecture
 

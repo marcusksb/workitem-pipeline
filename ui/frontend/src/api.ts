@@ -56,6 +56,7 @@ export const api = {
   reveal: (item: Item, path: string) => request<void>("POST", `${itemUrl(item)}/reveal`, { path }),
   prConversation: (item: Item) => request<PrConversation>("GET", `${itemUrl(item)}/pr`),
   sessions: () => request<AgentSession[]>("GET", "/api/sessions"),
+  killAgentSession: (session: AgentSession) => request<void>("DELETE", `/api/sessions/${segment(session.workspace)}/${segment(session.name)}`),
   approve: (item: Item) => request<void>("POST", `${itemUrl(item)}/approve`),
   editBrief: (item: Item, base: string, body: string) => request<void>("POST", `${itemUrl(item)}/brief`, { base, body }),
   editFrontmatter: (item: Item, fields: Record<string, string>) =>

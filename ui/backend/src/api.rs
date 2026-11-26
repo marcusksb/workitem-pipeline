@@ -437,6 +437,24 @@ pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession
     Json(found)
 }
 
+/// Kills a dead `wi-new-*` session of the workspace, when its *Ended* toast is dismissed. A live
+/// one is refused, so a stale toast never kills a running create agent.
+pub async fn kill_agent_session(State(state): State<Shared>, Path((workspace, name)): Path<(String, String)>) -> Result<StatusCode, ApiError> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    if !tmux::is_agent_session(&name) {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "not a create session".into()));
+    }
+    let _busy = state.busy.lock().await;
+    let socket = state.tmux_socket.as_deref();
+    let sessions = tmux::sessions(socket).await;
+    tmux::named(&sessions, &workspace, &name).ok_or(ApiError::not_found("session"))?;
+    if !tmux::dead_sessions(socket).await.contains(&name) {
+        return Err(ApiError(StatusCode::CONFLICT, "the session is still running".into()));
+    }
+    tmux::kill(socket, &name).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// A file a stage runs, or the inline prompt that stands in for one.
 #[derive(Serialize)]
 pub struct Source {

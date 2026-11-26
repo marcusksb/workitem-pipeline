@@ -1,9 +1,9 @@
 import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
 import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
-import { agentTerminal } from "./api";
+import { agentTerminal, api } from "./api";
 import { alertsFor } from "./boardState";
-import { CreateToast, nextCreateToasts } from "./createToasts";
+import { CreateToast, killsOnClose, nextCreateToasts } from "./createToasts";
 import { QUIPS, quipFor } from "./quips";
 import { AgentSession, Item, Pipelines } from "./types";
 import { beep } from "./useAlerts";
@@ -23,7 +23,7 @@ const sessionKey = (session: AgentSession) => `${session.workspace}/${session.na
  * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), bottom left of the board, clear of the detail panel,
  * newest on top, with confetti when an item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  * The item open in the detail panel (`openKey`) gets no blocked toast while the page has focus.
- * Above them, outside the "+N more" count, one toast per `wi-new-*` create session (decision 75, see `nextCreateToasts`).
+ * Above them, outside the "+N more" count, one toast per `wi-new-*` create session (decision 75, see `nextCreateToasts`); × on the toast of a dead one kills it (`killsOnClose`).
  */
 export function ActivityToasts({ items, sessions, pipelines, onOpen, openKey }: { items: Item[] | undefined; sessions: AgentSession[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void; openKey: string | undefined }) {
   const before = useRef<Item[]>(undefined);
@@ -72,6 +72,10 @@ export function ActivityToasts({ items, sessions, pipelines, onOpen, openKey }: 
   }, [sessions, items]);
 
   const dismissCreate = (key: string) => setLeavingCreates((leaving) => (leaving.includes(key) ? leaving : [...leaving, key]));
+  const closeCreate = (toast: CreateToast) => {
+    dismissCreate(sessionKey(toast.session));
+    if (killsOnClose(toast)) api.killAgentSession(toast.session).catch((e) => console.error("killing the create session failed", e));
+  };
   const createEnded = (key: string) => (e: AnimationEvent) => {
     if (e.animationName === "toast-countdown") dismissCreate(key);
     if (e.animationName !== "toast-out") return;
@@ -99,7 +103,7 @@ export function ActivityToasts({ items, sessions, pipelines, onOpen, openKey }: 
         const key = sessionKey(toast.session);
         return (
           <div key={key} className={`toast-wrap${leavingCreates.includes(key) ? " leaving" : ""}`} onAnimationEnd={createEnded(key)}>
-            <CreateToastView toast={toast} leaving={leavingCreates.includes(key)} onDismiss={() => dismissCreate(key)} onOpen={(item) => {
+            <CreateToastView toast={toast} leaving={leavingCreates.includes(key)} onDismiss={() => closeCreate(toast)} onOpen={(item) => {
               dismissCreate(key);
               onOpen(item);
             }} />

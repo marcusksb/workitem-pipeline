@@ -313,7 +313,9 @@ pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, 
 }
 
 /// Inline `--settings` of a planning session: the helper and file edits run without asking, and
-/// the guard hook refuses every edit outside the workspace folder.
+/// the guard hook refuses every edit outside the workspace folder. `workitem-notify` sets the
+/// record `waiting` on a prompt; a typed prompt or a tool run (an approved permission prompt
+/// submits nothing) sets it back to `working`.
 fn plan_settings(state: &AppState) -> String {
     let script = |name: &str| bin_script(state, name);
     json!({
@@ -322,6 +324,7 @@ fn plan_settings(state: &AppState) -> String {
             "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": format!("python3 {}", shell_quote(&script("workitem-plan-guard"))) }] }],
             "Notification": hook(state, "workitem-notify", ""),
             "UserPromptSubmit": hook(state, "workitem-plan-note", " --status working"),
+            "PostToolUse": hook(state, "workitem-plan-note", " --status working"),
         }
     })
     .to_string()

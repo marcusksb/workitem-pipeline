@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; [ "${a[$i]}" = --settings ] && echo "settings=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
 [ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
@@ -690,6 +690,42 @@ async fn create_sessions_report_whether_they_wait_for_input_or_died() {
     let of = |name: &str| sessions.as_array().unwrap().iter().find(|s| s["name"] == name).cloned().unwrap();
     assert_eq!((of("wi-new-wait")["waiting"].as_bool(), of("wi-new-wait")["dead"].as_bool()), (Some(true), Some(false)));
     assert_eq!((of("wi-new-dead")["waiting"].as_bool(), of("wi-new-dead")["dead"].as_bool()), (Some(false), Some(true)));
+}
+
+async fn kill_session(w: &World, uri: &str) -> StatusCode {
+    let request = Request::delete(uri)
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .body(Body::empty())
+        .unwrap();
+    router(w.state.clone()).oneshot(request).await.unwrap().status()
+}
+
+#[tokio::test]
+async fn only_a_dead_create_session_of_the_workspace_can_be_killed() {
+    let w = world();
+    let ws = w.ws.display().to_string();
+    let other = w.dir.path().join("elsewhere").display().to_string();
+    for (name, command, folder) in [("wi-new-wait", "sleep 60", &ws), ("wi-new-dead", "true", &ws), ("wi-new-other", "true", &other), ("wi-T-1-x", "true", &ws)] {
+        w.tmux.run(&["new-session", "-d", "-s", name, command, ";", "set-option", "-t", name, "@workitem_workspace", folder, ";", "set-option", "-t", name, "remain-on-exit", "on"]);
+    }
+    eventually("the dead panes exited", || {
+        let out = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "list-panes", "-a", "-F", "#{pane_dead}"]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).lines().filter(|l| *l == "1").count() == 3
+    })
+    .await;
+
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-T-1-x").await, StatusCode::BAD_REQUEST);
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-other").await, StatusCode::NOT_FOUND);
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-wait").await, StatusCode::CONFLICT);
+    assert_eq!(kill_session(&w, "/api/sessions/nope/wi-new-dead").await, StatusCode::NOT_FOUND);
+    for name in ["wi-T-1-x", "wi-new-other", "wi-new-wait", "wi-new-dead"] {
+        assert!(w.tmux.has(name), "{name} survives a refused kill");
+    }
+
+    assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-dead").await, StatusCode::NO_CONTENT);
+    assert!(!w.tmux.has("wi-new-dead"));
+    assert!(!get(&w, "/api/sessions").await.contains("wi-new-dead"));
 }
 
 #[tokio::test]
@@ -2067,6 +2103,11 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
     assert!(log.contains(&format!("- default: repo {}", w.repo.display())), "the prompt lists the boards and their repos: {log}");
     assert!(log.contains(&input), "prompt keeps the text verbatim");
     assert!(!pwn.exists(), "text must never reach a shell");
+    let settings: serde_json::Value = serde_json::from_str(log.lines().find_map(|l| l.strip_prefix("settings=")).unwrap()).unwrap();
+    for event in ["UserPromptSubmit", "PostToolUse"] {
+        let command = settings["hooks"][event][0]["hooks"][0]["command"].as_str().unwrap_or_default();
+        assert!(command.contains("workitem-plan-note' --status working"), "{event} sets the record back to working, also after an approved permission prompt: {settings}");
+    }
 
     let plans = get(&w, "/api/plans").await;
     assert!(plans.contains(r#""status":"working""#) && plans.contains(r#""live":true"#), "{plans}");
@@ -2110,7 +2151,9 @@ async fn a_prompt_over_the_tmux_command_limit_reaches_the_agent_unchanged() {
     let prompt = format!("{}\n'quotes' \"and\" $(no expansion) `here`\n\n", "x".repeat(20_000));
     workitem_ui::launch::spawn(&w.state, "wi-big", &project, workitem_ui::launch::Scope::Workspace, &prompt).await.unwrap();
     eventually("the agent ran", || !args_log(&w).is_empty()).await;
-    assert_eq!(args_log(&w), format!("argc=5\nclaude_md=1\nlast={prompt}\n"), "a workspace session reads the repos' CLAUDE.md");
+    let log = args_log(&w);
+    let (args, _settings) = log.split_once("\nsettings=").unwrap();
+    assert_eq!(args, format!("argc=5\nclaude_md=1\nlast={prompt}"), "a workspace session reads the repos' CLAUDE.md");
     assert!(w.tmux.has("wi-big"));
 }
 
