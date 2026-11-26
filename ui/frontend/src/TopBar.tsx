@@ -25,12 +25,16 @@ type Props = {
   onCreating: (creating: boolean) => void;
   /** Called once a workitem session was started. */
   onCreated: () => void;
+  /** How many workitems are on the board on screen. */
+  boardItems: number;
   /** Called once the board's settings were saved. */
   onBoardChanged: () => void;
+  /** Called once the board on screen was deleted. */
+  onBoardDeleted: () => void;
 };
 
 /** The bar above the board: which board and repo, Search, Board or List, New workitem, and Board settings. */
-export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, creating, onCreating, onCreated, onBoardChanged }: Props) {
+export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, creating, onCreating, onCreated, boardItems, onBoardChanged, onBoardDeleted }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const pipeline = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline : undefined;
@@ -77,14 +81,22 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
           variant="secondary"
           className="size-[30px] p-0 text-muted-foreground"
           aria-label="Board settings"
-          title="Board settings: label, entry stage, sort order, issue project and reviewers"
+          title="Board settings: label, entry stage, sort order, issue project and reviewers; delete the board"
           onClick={() => setEditing(true)}
         >
           <IconSettings />
         </Button>
       )}
       {editing && workspace && board && pipeline && (
-        <BoardSettings workspace={workspace.name} board={board} pipeline={pipeline} onClose={() => setEditing(false)} onChanged={onBoardChanged} />
+        <BoardSettings
+          workspace={workspace.name}
+          board={board}
+          pipeline={pipeline}
+          items={boardItems}
+          onClose={() => setEditing(false)}
+          onChanged={onBoardChanged}
+          onDeleted={onBoardDeleted}
+        />
       )}
       {creating && workspace && board && (
         <NewWorkitemDialog

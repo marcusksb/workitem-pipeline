@@ -76,6 +76,19 @@ pub fn forget(state: &AppState, workspace: &Workspace, board: &str, stage: &str)
     }
 }
 
+/// Drops what is kept by a deleted board: its watchers' last start times and its paused stages.
+pub fn forget_board(state: &AppState, workspace: &Workspace, board: &str) -> io::Result<()> {
+    let prefix = paused_key(workspace, board, "");
+    let mut runs = last_runs(state);
+    runs.retain(|key, _| !key.starts_with(&prefix));
+    fs::write(runs_file(state), serde_json::to_string_pretty(&runs)?)?;
+    let mut stages = state.paused.lock().unwrap();
+    stages.retain(|key| !key.starts_with(&prefix));
+    let mut sorted: Vec<&String> = stages.iter().collect();
+    sorted.sort();
+    fs::write(state.store.sibling("paused.json"), serde_json::to_string_pretty(&sorted)?)
+}
+
 /// Makes the workspace watchers running `command` due now, so the next pass runs them.
 pub fn forget_workspace(state: &AppState, workspace: &Workspace, command: &str) {
     let keys: HashSet<String> = workspace_watchers(state, workspace)

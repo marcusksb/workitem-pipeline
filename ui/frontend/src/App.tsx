@@ -222,7 +222,13 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           creating={creatingItem}
           onCreating={setCreatingItem}
           onCreated={() => void sessions.reload()}
+          boardItems={shown.filter((item) => item.board === activeBoard).length}
           onBoardChanged={() => void pipelines.reload()}
+          onBoardDeleted={() => {
+            navigate({ workspace, board: undefined });
+            void pipelines.reload();
+            void items.reload();
+          }}
         />
         {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
         {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
