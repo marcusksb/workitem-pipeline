@@ -66,7 +66,7 @@ Open follow-ups are unticked `- [ ]` lines under `## Follow-ups`. Agents only ap
 Agents run interactively in tmux. The session is the lock: an item has at most one, `wi-<dir>`. Names are global; each session is tagged `@workitem_workspace` when created. Kinds:
 
 - **Item sessions** (`wi-<dir>`): stage handlers, PR fixers, Start session, Discuss brief. They start in the item's worktree (`../<repo>-<dir>`) when git has one, else in the repo (in the item folder on a board without repo), with `--add-dir` for the workspace (and the repo in a worktree). Env: `WORKITEM`, `WORKITEM_FILE`, `WORKITEM_WORKSPACE`, `WORKITEM_REPO`. A stage's `model` becomes `--model`.
-- **Create sessions** (`wi-new-<id>`): run `workitem-create` in the workspace folder with every board's repo added. Shown as toasts (75); items they write carry `created_by:`.
+- **Create sessions** (`wi-new-<id>`): run `workitem-create` in the workspace folder with every board's repo added. Shown as toasts (75); items they write carry `created_by:`. A dead one is not reaped (its pane keeps the crash output); × on its *Ended* toast kills it (`DELETE /api/sessions/{workspace}/{name}`).
 - **Planning sessions** (`wi-plan-<id>`): a conversation with no item, in the workspace folder. The record `plans/<id>.md` (written only through `bin/workitem-plan-note`) is the source of truth; `bin/workitem-plan-guard` refuses edits outside the workspace folder. Resume continues the recorded agent session (36, 49).
 
 Prompts: the launcher reads the handler's `SKILL.md` (front matter stripped) or the inline `prompt`, appends the stage block (item path, current stage, allowed next stages) and, for `develops` stages, `learnings: true` stages and fixers, the board's `learnings.md`. The prompt is one argv element, passed through a private temp file because tmux caps command length; never through a shell.
@@ -107,7 +107,7 @@ The frontend polls; nothing is pushed. Routes (`lib.rs`):
 
 - `/api/workspaces`, `/api/agent`, `/api/pipelines`, boards (`POST`, `PUT`, `DELETE`), stages (`PUT`, `.../source`, `.../paused`), `.../learnings`.
 - `/api/workitems` and `/api/workitems/{workspace}/{dir}` with actions `approve`, `reject`, `brief`, `frontmatter`, `clear-blocked`, `kill-session`, `start`, `run`, `fix`, `session`, `discuss`, `merge`, `rebase`, `remove`, plus `pr`, `files`, `reveal`.
-- `/api/workspaces/{workspace}/create`, `/api/sessions`, `/api/plans`, `/api/mcp/{workspace}/{dir}`.
+- `/api/workspaces/{workspace}/create`, `/api/sessions` (and `DELETE .../{workspace}/{name}`), `/api/plans`, `/api/mcp/{workspace}/{dir}`.
 - `/ws/terminal/{workspace}/{dir}`, `/ws/session/{workspace}/{name}`: `tmux attach` on a PTY; closing the socket keeps the session.
 
 `AppState.busy` serialises launches and dispatcher passes. Env: `WORKITEM_UI_HOME`, `_PORT`, `_TMUX_SOCKET`, `_SKILLS` (default `~/.claude/skills`), `_CLAUDE`, `_GH`, `_DISPATCH=off`.

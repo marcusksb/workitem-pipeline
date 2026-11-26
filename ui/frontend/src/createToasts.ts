@@ -36,3 +36,6 @@ export function nextCreateToasts(previous: CreateToast[], sessions: AgentSession
     .map((session): CreateToast => ({ session, state: session.dead ? "ended" : session.waiting ? "waiting" : "running", items: [], misses: 0 }));
   return [...next, ...fresh];
 }
+
+/** Closing a toast with × kills its session only when it ended dead: the countdown never kills, so the terminal link to the crash output survives it. */
+export const killsOnClose = (toast: CreateToast) => toast.state === "ended" && toast.session.dead;

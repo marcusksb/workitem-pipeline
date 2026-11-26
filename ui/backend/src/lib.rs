@@ -22,7 +22,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
     middleware,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 
@@ -118,6 +118,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/{workspace}/{dir}", post(questions::mcp).get(questions::mcp_stream))
         .route("/api/workspaces/{workspace}/create", post(actions::create))
         .route("/api/sessions", get(api::list_sessions))
+        .route("/api/sessions/{workspace}/{name}", delete(api::kill_agent_session))
         .route("/api/plans", get(plans::list_plans))
         .route("/api/plans/{workspace}/{id}", get(plans::plan).delete(plans::delete))
         .route("/api/plans/{workspace}/{id}/resume", post(plans::resume))
