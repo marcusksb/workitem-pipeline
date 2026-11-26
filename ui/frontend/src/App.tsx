@@ -89,15 +89,14 @@ function storedView(): View {
 
 function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   const [route, setRoute] = useState<Route>(readRoute);
-  const workspaces = usePolling(api.workspaces, 3000, "workspaces", onUnauthorized);
-  const names = (workspaces.data ?? []).map((w) => w.name);
+  // One snapshot of everything the board shows, so its parts never disagree.
+  const state = usePolling(api.state, 3000, "state", onUnauthorized);
+  const { workspaces, pipelines, items, sessions, plans } = state.data ?? {};
+  const reload = () => void state.reload();
+  const names = (workspaces ?? []).map((w) => w.name);
   // Exactly one workspace is on screen: the one asked for, else the open item's or plan's, else the first.
   const wanted = route.workspace ?? route.item?.workspace ?? route.plan?.workspace;
   const workspace: string | undefined = wanted && names.includes(wanted) ? wanted : names[0];
-  const pipelines = usePolling(api.pipelines, 3000, "pipelines", onUnauthorized);
-  const items = usePolling(api.items, 3000, "items", onUnauthorized);
-  const sessions = usePolling(api.sessions, 3000, "sessions", onUnauthorized);
-  const plans = usePolling(api.plans, 3000, "plans", onUnauthorized);
 
   useEffect(() => {
     const onHash = () => setRoute(readRoute());
@@ -139,31 +138,31 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   };
 
   const selected = route.item
-    ? (items.data ?? []).find((i) => i.workspace === route.item!.workspace && i.dir === route.item!.dir) ?? null
+    ? (items ?? []).find((i) => i.workspace === route.item!.workspace && i.dir === route.item!.dir) ?? null
     : null;
   const selectedPlan = route.plan
-    ? (plans.data ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
+    ? (plans ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
     : null;
   const detailOpen = !!(selected || selectedPlan);
   const itemPanel = useLeaving(selected);
   const planPanel = useLeaving(selectedPlan);
-  const shown = (items.data ?? []).filter((item) => item.workspace === workspace);
-  const error = workspaces.error ?? items.error ?? pipelines.error;
+  const shown = (items ?? []).filter((item) => item.workspace === workspace);
+  const error = state.error;
   const inView = workspace ? [workspace] : [];
-  const boardsInView = boardNames(pipelines.data, inView);
+  const boardsInView = boardNames(pipelines, inView);
   const activeBoard = route.board && boardsInView.includes(route.board) ? route.board : boardsInView[0];
   /** Opens an item in its workspace, switching to its board only when another one is on screen
    * and its parent is not on this one (children are shown under their parent too). */
   const open = (item: Item, tab?: Tab) => {
-    const board = shownBoard(item, pipelines.data);
-    const underParent = shown.some((p) => p.dir === item.parent && shownBoard(p, pipelines.data) === activeBoard);
+    const board = shownBoard(item, pipelines);
+    const underParent = shown.some((p) => p.dir === item.parent && shownBoard(p, pipelines) === activeBoard);
     const sameView = item.workspace === workspace && (board === activeBoard || underParent);
     navigate({ workspace: item.workspace, board: sameView ? route.board : board, item: { workspace: item.workspace, dir: item.dir }, tab });
   };
   const openKey = selected ? itemKey(selected) : undefined;
-  useAlerts(items.data, open, openKey);
+  useAlerts(items, open, openKey);
   /** The workitems made from a plan that still exist. */
-  const planWorkitems = (plan: Plan) => (items.data ?? []).filter((i) => i.workspace === plan.workspace && plan.workitems.includes(i.dir));
+  const planWorkitems = (plan: Plan) => (items ?? []).filter((i) => i.workspace === plan.workspace && plan.workitems.includes(i.dir));
   const openFound = (item: Item) => {
     setSearching(false);
     open(item);
@@ -183,27 +182,23 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
   return (
     <div className="flex h-screen" onClick={(event) => detailOpen && event.currentTarget.contains(event.target as Node) && isBackground(event.target) && navigate({})}>
       <Sidebar
-        workspaces={workspaces.data ?? []}
+        workspaces={workspaces ?? []}
         workspace={workspace}
-        pipelines={pipelines.data}
+        pipelines={pipelines}
         items={shown}
         board={activeBoard}
         onWorkspace={(name) => navigate({ workspace: name, board: undefined })}
         onBoard={(board) => navigate({ board })}
-        onChanged={() => {
-          void workspaces.reload();
-          void items.reload();
-          void pipelines.reload();
-        }}
+        onChanged={reload}
       >
         <Plans
-          plans={plans.data ?? []}
+          plans={plans ?? []}
           workspaces={inView}
           showWorkspace={false}
           selected={selectedPlan}
           onSelect={(plan) => navigate({ plan: { workspace: plan.workspace, id: plan.id } })}
           onStarted={(planWorkspace, id) => {
-            void plans.reload();
+            reload();
             navigate({ plan: { workspace: planWorkspace, id } });
           }}
           creating={creatingPlan}
@@ -212,8 +207,8 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
       </Sidebar>
       <div className="content flex min-w-0 flex-1 flex-col">
         <TopBar
-          workspace={workspaces.data?.find((w) => w.name === workspace)}
-          pipelines={pipelines.data}
+          workspace={workspaces?.find((w) => w.name === workspace)}
+          pipelines={pipelines}
           board={activeBoard}
           view={view}
           onView={chooseView}
@@ -221,25 +216,21 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
           error={error}
           creating={creatingItem}
           onCreating={setCreatingItem}
-          onCreated={() => void sessions.reload()}
+          onCreated={reload}
           boardItems={shown.filter((item) => item.board === activeBoard).length}
-          onBoardChanged={() => void pipelines.reload()}
+          onBoardChanged={reload}
           onBoardDeleted={() => {
             navigate({ workspace, board: undefined });
-            void pipelines.reload();
-            void items.reload();
+            reload();
           }}
         />
-        {workspaces.data?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
-        {workspace && pipelines.data && (pipelines.data[workspace] ?? []).length === 0 && (
+        {workspaces?.length === 0 && <p className="px-6 pt-4 text-[15px] text-muted-foreground">No workspaces yet. Add a workspace, then a board for each repository.</p>}
+        {workspace && pipelines && (pipelines[workspace] ?? []).length === 0 && (
           <p className="px-6 pt-4 text-[15px] text-muted-foreground">No boards in {workspace} yet. Add one for a repository with New board.</p>
         )}
         <main className="relative flex min-h-0 flex-1">
           <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4">
-            <Board items={shown} pipelines={pipelines.data} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={() => {
-              void items.reload();
-              void pipelines.reload();
-            }} />
+            <Board items={shown} pipelines={pipelines} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={reload} />
           </div>
           {itemPanel.shown && (
             <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
@@ -247,7 +238,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
                 key={`${itemPanel.shown.workspace}/${itemPanel.shown.dir}`}
                 item={itemPanel.shown}
                 items={shown}
-                pipelines={pipelines.data}
+                pipelines={pipelines}
                 onSelect={open}
                 tab={route.tab}
                 onTab={onTab}
@@ -264,17 +255,17 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
                 plan={planPanel.shown}
                 workitems={planWorkitems(planPanel.shown)}
                 onSelect={open}
-                onItemsChanged={() => void items.reload()}
+                onItemsChanged={reload}
                 onClose={() => navigate({})}
-                onChanged={() => void plans.reload()}
+                onChanged={reload}
                 onUnauthorized={onUnauthorized}
               />
             </Leaving>
           )}
-          <ActivityToasts items={items.data} sessions={sessions.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
+          <ActivityToasts items={items} sessions={sessions} pipelines={pipelines} onOpen={open} openKey={openKey} />
         </main>
       </div>
-      {searching && <QuickSearch items={items.data ?? []} actions={actions} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
+      {searching && <QuickSearch items={items ?? []} actions={actions} showWorkspace={(workspaces?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}
     </div>
   );
 }

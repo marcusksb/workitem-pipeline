@@ -356,11 +356,38 @@ fn check_tracker(pipeline: &Pipeline, tracker: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// When a board file was last read: its modification time and length, and the tracker it was
+/// checked against (`check_tracker`), so a change to either reads it again.
+#[derive(PartialEq)]
+struct Stamp {
+    modified: std::time::SystemTime,
+    len: u64,
+    tracker: String,
+}
+
+/// What `AppState::pipeline` knows of one board: the last valid file and the last read.
+#[derive(Default)]
+pub struct Cached {
+    stamp: Option<Stamp>,
+    pipeline: Option<Pipeline>,
+    error: Option<String>,
+}
+
+fn board_path(workspace: &Workspace, board: &str) -> PathBuf {
+    workspace.dir.join("boards").join(format!("{board}.json"))
+}
+
+/// `None` when the file cannot be looked at; it is then read on every call.
+fn stamp(workspace: &Workspace, board: &str) -> Option<Stamp> {
+    let meta = fs::metadata(board_path(workspace, board)).ok()?;
+    Some(Stamp { modified: meta.modified().ok()?, len: meta.len(), tracker: workspace.issue_tracker.clone() })
+}
+
 fn read(workspace: &Workspace, board: &str) -> Result<Pipeline, String> {
     if !valid_board_name(board) {
         return Err(format!("'{board}' is not a board name"));
     }
-    let path = workspace.dir.join("boards").join(format!("{board}.json"));
+    let path = board_path(workspace, board);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let pipeline = Pipeline::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     check_tracker(&pipeline, &workspace.issue_tracker).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -394,20 +421,27 @@ pub struct StageSettings<'a> {
 
 impl AppState {
     /// Reads a board of the workspace. When its file is invalid the last valid one stays in use, so
-    /// a typo never stops the dispatcher or empties the board.
+    /// a typo never stops the dispatcher or empties the board. The file is read again only when
+    /// its modification time, its length or the workspace's tracker changed.
     pub fn pipeline(&self, workspace: &Workspace, board: &str) -> Resolved {
         let key = format!("{}/{board}", workspace.name);
+        let stamp = valid_board_name(board).then(|| stamp(workspace, board)).flatten();
         let mut known = self.pipelines.lock().unwrap();
-        match read(workspace, board) {
-            Ok(pipeline) => {
-                known.insert(key, pipeline.clone());
-                Resolved { pipeline: Some(pipeline), error: None }
+        let cached = known.entry(key.clone()).or_default();
+        if stamp.is_none() || cached.stamp != stamp {
+            match read(workspace, board) {
+                Ok(pipeline) => {
+                    cached.pipeline = Some(pipeline);
+                    cached.error = None;
+                }
+                Err(error) => {
+                    eprintln!("workitem-ui: {key}: {error}");
+                    cached.error = Some(error);
+                }
             }
-            Err(error) => {
-                eprintln!("workitem-ui: {key}: {error}");
-                Resolved { pipeline: known.get(&key).cloned(), error: Some(error) }
-            }
+            cached.stamp = stamp;
         }
+        Resolved { pipeline: cached.pipeline.clone(), error: cached.error.clone() }
     }
 
     /// Boards of the workspace, one per `boards/<name>.json`, by name.
@@ -895,5 +929,48 @@ mod tests {
         let github = Pipeline::parse(&format!(r#"{{ {BRIEF}, "issue_project": "acme/web", "entry": "a", "stages": [{{"name": "a", "issue_state": ["assigned"]}}] }}"#)).unwrap();
         assert!(check_tracker(&github, "github").is_ok());
         assert!(Pipeline::parse(&format!(r#"{{ {BRIEF}, "reviewers": "backend", "entry": "a", "stages": [{{"name": "a"}}] }}"#)).unwrap_err().contains("org/team"));
+    }
+
+    #[test]
+    fn a_board_file_is_read_again_only_when_it_or_the_tracker_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(crate::config::Store::open(dir.path().to_path_buf(), None).unwrap(), 0);
+        let workspace = state.store.add_workspace("w").unwrap();
+        let file = workspace.dir.join("boards/b.json");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let board = |stage: &str| format!(r#"{{ {BRIEF}, "entry": "{stage}", "stages": [{{"name": "{stage}", "issue_state": ["In Progress"]}}] }}"#);
+        let write = |text: &str, modified: std::time::SystemTime| {
+            fs::write(&file, text).unwrap();
+            fs::File::options().write(true).open(&file).unwrap().set_modified(modified).unwrap();
+        };
+        let first = |resolved: &Resolved| resolved.pipeline.as_ref().unwrap().stages[0].name.clone();
+        let start = std::time::SystemTime::now() - Duration::from_secs(60);
+
+        write(&board("a"), start);
+        assert_eq!(first(&state.pipeline(&workspace, "b")), "a");
+
+        // Same time and length: the file is not read again.
+        write(&board("a").replace('}', " "), start);
+        let cached = state.pipeline(&workspace, "b");
+        assert_eq!((first(&cached), cached.error), ("a".into(), None));
+
+        // A new time reads it; invalid, it keeps the last valid board and says why on every call.
+        write(&board("a").replace('}', " "), start + Duration::from_secs(1));
+        for _ in 0..2 {
+            let broken = state.pipeline(&workspace, "b");
+            assert_eq!(first(&broken), "a");
+            assert!(broken.error.unwrap().contains("b.json"));
+        }
+
+        write(&board("c"), start + Duration::from_secs(2));
+        let fixed = state.pipeline(&workspace, "b");
+        assert_eq!((first(&fixed), fixed.error), ("c".into(), None));
+
+        // A tracker switch checks the unchanged file again.
+        let github = Workspace { issue_tracker: "github".into(), ..workspace.clone() };
+        let refused = state.pipeline(&github, "b");
+        assert_eq!(first(&refused), "c");
+        assert!(refused.error.unwrap().contains("GitHub issue"));
+        assert_eq!(state.pipeline(&workspace, "b").error, None);
     }
 }

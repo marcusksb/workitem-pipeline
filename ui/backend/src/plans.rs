@@ -156,16 +156,15 @@ fn conflict(message: impl Into<String>) -> ApiError {
 }
 
 /// Plans of every configured workspace, newest first per workspace.
+/// The plans of every workspace.
+pub fn all(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &HashSet<String>) -> Vec<Plan> {
+    workspaces.iter().flat_map(|workspace| list(workspace, &live_sessions(sessions, dead, workspace))).collect()
+}
+
 pub async fn list_plans(State(state): State<Shared>) -> Json<Vec<Plan>> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    let plans = state
-        .store
-        .workspaces()
-        .iter()
-        .flat_map(|workspace| list(workspace, &live_sessions(&sessions, &dead, workspace)))
-        .collect();
-    Json(plans)
+    Json(all(&state.store.workspaces(), &sessions, &dead))
 }
 
 #[derive(Serialize)]

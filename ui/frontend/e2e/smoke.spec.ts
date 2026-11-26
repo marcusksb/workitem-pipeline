@@ -222,11 +222,12 @@ test("a workspace's boards are tabs in the sidebar and the chosen board stays in
   await page.goto(base);
   const tabs = page.getByRole("tablist", { name: "Boards" });
   await expect(tabs.getByRole("tab", { name: /default/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".column", { hasText: "idea" })).toHaveCount(0);
 
   // Each board shows how many items it has, and how many of them are blocked.
   await expect(tabs.getByRole("tab", { name: /default/ })).toHaveText("default15");
   await expect(tabs.getByRole("tab", { name: /research/ })).toHaveText("research3");
+  // Loaded, the default board has no research column (its child of T-2-gate still shows under the parent).
+  await expect(page.locator('.column[data-stage="idea"]')).toHaveCount(0);
   await expect(page.locator(".top-bar h1")).toHaveText("default");
   await expect(page.locator(".top-bar")).toContainText("repo");
   await tabs.getByRole("tab", { name: /research/ }).click();
