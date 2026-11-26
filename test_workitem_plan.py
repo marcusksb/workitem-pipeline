@@ -73,7 +73,8 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(self.guard("Edit", str(self.record)).returncode, 0)
 
     def test_guard_refuses_code_and_escapes(self):
-        for target in (str(self.repo.parent / "app.py"), "../src/a.rs", "plans/../../app.py", "/etc/hosts"):
+        worktree = self.repo / ".worktrees/app-X-1"
+        for target in (str(self.repo.parent / "app.py"), "../src/a.rs", "plans/../../app.py", "/etc/hosts", str(worktree / "src/a.rs"), ".worktrees/app-X-1/a.rs"):
             result = self.guard("Edit", target)
             self.assertEqual(result.returncode, 2, target)
             self.assertIn("planning session", result.stderr)

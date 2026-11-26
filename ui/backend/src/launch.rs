@@ -50,7 +50,8 @@ impl Place<'_> {
 /// mark a session that waits for input as blocked. The prompt goes to the agent as one argv
 /// element (see `start`), never interpreted by a shell. A
 /// workitem's session starts in its worktree when it has one, else in the repo, with the workspace
-/// folder added so the agent can edit `workitem.md` (decision 46); on a board without a repo it
+/// folder added so the agent can edit `workitem.md` (decision 46), and gets the worktree's path,
+/// existing or to create, in `WORKITEM_WORKTREE` (decision 80); on a board without a repo it
 /// starts in the item folder with the workspace and every board's repo added. A workspace session
 /// starts in the workspace folder with every board's repo added.
 pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope: Scope<'_>, prompt: &str) -> Result<(), String> {
@@ -67,6 +68,8 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
                 Some(repo) => {
                     let worktree = git::worktree_for(&git::worktrees(repo).await, repo, place.dir).cloned();
                     env.push(format!("WORKITEM_REPO={}", repo.display()));
+                    let path = worktree.clone().unwrap_or_else(|| git::worktree_path(place.workspace, repo, place.dir));
+                    env.push(format!("WORKITEM_WORKTREE={}", path.display()));
                     if worktree.is_some() {
                         dirs.push(repo.to_path_buf());
                     }
@@ -563,7 +566,7 @@ When you are done, make sure agent_status is ok (a stage move does this).{kill}"
 pub fn session_prompt(place: &Place) -> String {
     let session = format!("wi-{}", place.dir);
     let worktree = match place.repo {
-        Some(repo) => format!("If the workitem has a worktree {}, work there (the session starts in it when it exists).\n", git::worktree_path(repo, place.dir).display()),
+        Some(repo) => format!("If the workitem has a worktree {}, work there (the session starts in it when it exists).\n", git::worktree_path(place.workspace, repo, place.dir).display()),
         None => String::new(),
     };
     format!(
@@ -630,7 +633,7 @@ impl Fixer {
 /// the board's learnings (and for review comments, where to record new ones).
 pub fn fix_prompt(place: &Place, repo: &Path, pr: &str, fixer: Fixer, instructions: &str) -> String {
     let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(repo, place.dir);
+    let worktree = git::worktree_path(place.workspace, repo, place.dir);
     let (dir, repo) = (place.dir, repo.display());
     let situation = match fixer {
         Fixer::Ci => format!("CI is failing on {pr}, the PR of workitem {dir} in repo {repo}."),

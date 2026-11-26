@@ -20,7 +20,7 @@ const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
 { echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; [ "${a[$i]}" = --settings ] && echo "settings=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
-[ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
+[ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO|$WORKITEM_WORKTREE" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
   echo "$WORKITEM $stage" >> "$repo/.stub-log"
@@ -787,13 +787,19 @@ async fn a_session_starts_in_the_worktree_and_still_belongs_to_the_workspace() {
     };
     git(&["init", "-q"], &w.repo);
     git(&["commit", "-q", "--allow-empty", "-m", "i"], &w.repo);
-    let worktree = w.repo.parent().unwrap().join("repo-T-15-wt");
+    let worktree = w.ws.join(".worktrees/repo-T-15-wt");
     git(&["worktree", "add", "-q", "-b", "wt", worktree.to_str().unwrap()], &w.repo);
+    let worktree = worktree.canonicalize().unwrap();
+    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    assert_eq!(items.as_array().unwrap().len(), 1, ".worktrees is not an item");
 
     let (status, _) = post(&w, "/api/workitems/app/T-15-wt/session", "").await;
     assert_eq!(status, StatusCode::ACCEPTED);
     let out = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "list-sessions", "-F", "#{session_path}"]).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), worktree.to_str().unwrap());
+    let cwd = w.dir.path().join("cwd-T-15-wt");
+    eventually("the agent ran", || cwd.exists()).await;
+    assert!(fs::read_to_string(&cwd).unwrap().trim_end().ends_with(&format!("|{}", worktree.display())), "WORKITEM_WORKTREE names it");
 
     let logs = w.dir.path().join("logs");
     eventually("stub ran with the workspace and the repo added", || {
@@ -1817,7 +1823,9 @@ async fn an_item_on_a_board_without_a_repo_runs_in_its_folder_with_every_repo_ad
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
     let cwd = w.dir.path().join("cwd-T-60-idea");
     eventually("the handler ran", || cwd.exists()).await;
-    let (pwd, repo) = fs::read_to_string(&cwd).unwrap().trim_end().split_once('|').map(|(a, b)| (a.to_string(), b.to_string())).unwrap();
+    let line = fs::read_to_string(&cwd).unwrap();
+    let [pwd, repo, worktree]: [&str; 3] = line.trim_end().split('|').collect::<Vec<_>>().try_into().unwrap();
+    assert_eq!(worktree, "", "no WORKITEM_WORKTREE");
     assert_eq!(Path::new(&pwd).canonicalize().unwrap(), w.ws.join("T-60-idea").canonicalize().unwrap(), "starts in the item folder");
     assert_eq!(repo, "", "no WORKITEM_REPO");
     let log = args_log(&w);

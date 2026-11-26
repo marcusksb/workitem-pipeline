@@ -10,16 +10,29 @@ pub async fn worktrees(repo: &Path) -> Vec<PathBuf> {
     String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.strip_prefix("worktree ")).map(PathBuf::from).collect()
 }
 
-/// Where the workitem's worktree goes: `../<repo-name>-<dir>`.
-pub fn worktree_path(repo: &Path, dir: &str) -> PathBuf {
+/// Folder name of the workitem's worktree: `<repo-name>-<dir>`.
+fn worktree_name(repo: &Path, dir: &str) -> String {
     let name = repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    repo.with_file_name(format!("{name}-{dir}"))
+    format!("{name}-{dir}")
 }
 
-/// Path of the workitem's worktree among `worktrees`.
+/// Where the workitem's worktree goes: `<workspace>/.worktrees/<repo-name>-<dir>` (decision 80),
+/// outside the item folder, so removing an item never deletes a worktree git refused to remove.
+/// A worktree made before that, next to the repo, stays where it is and is used while it exists.
+pub fn worktree_path(workspace: &Path, repo: &Path, dir: &str) -> PathBuf {
+    let name = worktree_name(repo, dir);
+    let sibling = repo.with_file_name(&name);
+    if sibling.is_dir() {
+        return sibling;
+    }
+    workspace.join(".worktrees").join(name)
+}
+
+/// Path of the workitem's worktree among `worktrees`, matched by folder name, so a worktree
+/// in either place is found.
 pub fn worktree_for<'a>(worktrees: &'a [PathBuf], repo: &Path, dir: &str) -> Option<&'a PathBuf> {
-    let name = worktree_path(repo, dir).file_name()?.to_owned();
-    worktrees.iter().find(|p| p.file_name() == Some(name.as_os_str()))
+    let name = worktree_name(repo, dir);
+    worktrees.iter().find(|p| p.file_name().is_some_and(|n| n == name.as_str()))
 }
 
 async fn git_out(cwd: &Path, args: &[&str]) -> Option<String> {
@@ -58,4 +71,27 @@ async fn unpushed(worktree: &Path, branch: &str) -> Option<u32> {
         None => git_out(worktree, &["rev-list", "--count", "HEAD", "--not", "--remotes"]).await?,
     };
     count.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_worktree_goes_to_the_workspace_and_is_found_in_either_place() {
+        let tmp = std::env::temp_dir().join(format!("wt-test-{}", std::process::id()));
+        let (workspace, repo) = (tmp.join("ws"), tmp.join("code/app"));
+        std::fs::create_dir_all(&repo).unwrap();
+        assert_eq!(worktree_path(&workspace, &repo, "T-1-x"), workspace.join(".worktrees/app-T-1-x"));
+
+        let old = tmp.join("code/app-T-1-x");
+        std::fs::create_dir_all(&old).unwrap();
+        assert_eq!(worktree_path(&workspace, &repo, "T-1-x"), old, "an existing worktree next to the repo stays in use");
+
+        let found = [repo.clone(), old.clone(), workspace.join(".worktrees/app-T-2-y")];
+        assert_eq!(worktree_for(&found, &repo, "T-1-x"), Some(&old));
+        assert_eq!(worktree_for(&found, &repo, "T-2-y"), Some(&found[2]));
+        assert_eq!(worktree_for(&found, &repo, "T-3-z"), None);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
 }
