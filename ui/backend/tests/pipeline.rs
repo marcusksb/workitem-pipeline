@@ -495,7 +495,27 @@ async fn agent_sessions_start_from_the_ui_and_pass_text_as_one_argument() {
     let create_log = fs::read_dir(&logs).unwrap().filter_map(Result::ok).map(|e| fs::read_to_string(e.path()).unwrap()).find(|t| t.contains("Create a workitem with the arguments")).unwrap();
     assert!(create_log.starts_with("argc=5\n"), "--add-dir with the repo, settings flag, path and prompt: {create_log}");
     assert!(create_log.contains(&input), "prompt keeps the text verbatim");
+    assert!(create_log.contains(&format!("created_by: {session}")), "the agent links what it writes to its session: {create_log}");
     assert!(!pwn.exists(), "text must never reach a shell");
+}
+
+#[tokio::test]
+async fn create_sessions_report_whether_they_wait_for_input_or_died() {
+    let w = world();
+    let ws = w.ws.display().to_string();
+    for (name, command) in [("wi-new-wait", "sleep 60"), ("wi-new-dead", "true")] {
+        w.tmux.run(&["new-session", "-d", "-s", name, command, ";", "set-option", "-t", name, "@workitem_workspace", &ws, ";", "set-option", "-t", name, "remain-on-exit", "on"]);
+    }
+    w.tmux.run(&["set-option", "-t", "=wi-new-wait:", "@workitem_waiting", "1"]);
+    eventually("the dead pane exited", || {
+        let out = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "list-panes", "-t", "=wi-new-dead", "-F", "#{pane_dead}"]).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim() == "1"
+    })
+    .await;
+    let sessions: serde_json::Value = serde_json::from_str(&get(&w, "/api/sessions").await).unwrap();
+    let of = |name: &str| sessions.as_array().unwrap().iter().find(|s| s["name"] == name).cloned().unwrap();
+    assert_eq!((of("wi-new-wait")["waiting"].as_bool(), of("wi-new-wait")["dead"].as_bool()), (Some(true), Some(false)));
+    assert_eq!((of("wi-new-dead")["waiting"].as_bool(), of("wi-new-dead")["dead"].as_bool()), (Some(false), Some(true)));
 }
 
 #[tokio::test]

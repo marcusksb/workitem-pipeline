@@ -56,6 +56,8 @@ export type Item = {
   issue_status_category: string;
   pr: string;
   parent: string;
+  /** The `wi-new-*` session that wrote the item (decision 75), or empty. */
+  created_by: string;
   /** Items that must be merged before this one may enter a stage that requires it. */
   depends_on: string[];
   created: string;
@@ -107,7 +109,8 @@ export type Workspace = {
 /** What the workspace settings dialog changes; an empty value clears it. */
 export type WorkspaceChange = { agent?: string; issue_tracker?: string; github_account?: string };
 
-export type AgentSession = { workspace: string; name: string };
+/** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
+export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };
 
 /** A planning session's record (`<workspace>/plans/<id>.md`). `status` is what the record says;
  * see `planStatus` for what to show. */

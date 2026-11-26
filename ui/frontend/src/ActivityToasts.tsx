@@ -1,9 +1,12 @@
 import confetti from "canvas-confetti";
 import { AnimationEvent, useEffect, useRef, useState } from "react";
 import { ActivityEvent, ActivityKind, activityEvents } from "./activity";
+import { agentTerminal } from "./api";
 import { alertsFor } from "./boardState";
+import { CreateToast, nextCreateToasts } from "./createToasts";
 import { QUIPS, quipFor } from "./quips";
-import { Item, Pipelines } from "./types";
+import { AgentSession, Item, Pipelines } from "./types";
+import { beep } from "./useAlerts";
 
 /** Toasts on screen at once; older ones wait behind "+N more". */
 const SHOWN = 4;
@@ -14,12 +17,15 @@ type Toast = { id: number; events: ActivityEvent[]; quip: string; sticky: boolea
 
 const tone = (kind: ActivityKind) => (kind === "blocked" ? "tone-bad" : "tone-good");
 
+const sessionKey = (session: AgentSession) => `${session.workspace}/${session.name}`;
+
 /**
  * A toast for each item done, PR approved or item newly blocked between two polls (see `activityEvents`), bottom left of the board, clear of the detail panel,
  * newest on top, with confetti when an item is done. Toasts leave when their countdown bar runs out (paused while hovered); blocked ones stay. Clicking one calls `onOpen`.
  * The item open in the detail panel (`openKey`) gets no blocked toast while the page has focus.
+ * Above them, outside the "+N more" count, one toast per `wi-new-*` create session (decision 75, see `nextCreateToasts`).
  */
-export function ActivityToasts({ items, pipelines, onOpen, openKey }: { items: Item[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void; openKey: string | undefined }) {
+export function ActivityToasts({ items, sessions, pipelines, onOpen, openKey }: { items: Item[] | undefined; sessions: AgentSession[] | undefined; pipelines: Pipelines | undefined; onOpen: (item: Item) => void; openKey: string | undefined }) {
   const before = useRef<Item[]>(undefined);
   const nextId = useRef(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -47,6 +53,34 @@ export function ActivityToasts({ items, pipelines, onOpen, openKey }: { items: I
     setToasts((shown) => [...shown, ...fresh]);
   }, [items, pipelines]);
 
+  const [creates, setCreates] = useState<CreateToast[]>([]);
+  const createsRef = useRef<CreateToast[]>([]);
+  const leftCreates = useRef(new Set<string>());
+  const [leavingCreates, setLeavingCreates] = useState<string[]>([]);
+  const polledItems = useRef<Item[]>(undefined);
+
+  useEffect(() => {
+    if (!sessions) return;
+    const itemsPolled = items !== polledItems.current;
+    polledItems.current = items;
+    const previous = createsRef.current;
+    const next = nextCreateToasts(previous, sessions.filter((s) => !leftCreates.current.has(sessionKey(s))), items, itemsPolled);
+    const startsWaiting = (toast: CreateToast) => toast.state === "waiting" && previous.find((p) => sessionKey(p.session) === sessionKey(toast.session))?.state !== "waiting";
+    if (next.some(startsWaiting)) beep();
+    createsRef.current = next;
+    setCreates(next);
+  }, [sessions, items]);
+
+  const dismissCreate = (key: string) => setLeavingCreates((leaving) => (leaving.includes(key) ? leaving : [...leaving, key]));
+  const createEnded = (key: string) => (e: AnimationEvent) => {
+    if (e.animationName === "toast-countdown") dismissCreate(key);
+    if (e.animationName !== "toast-out") return;
+    leftCreates.current.add(key);
+    createsRef.current = createsRef.current.filter((t) => sessionKey(t.session) !== key);
+    setCreates(createsRef.current);
+    setLeavingCreates((leaving) => leaving.filter((k) => k !== key));
+  };
+
   const dismiss = (id: number) => setToasts((shown) => shown.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
   const ended = (id: number) => (e: AnimationEvent) => {
     if (e.animationName === "toast-countdown") dismiss(id);
@@ -57,10 +91,21 @@ export function ActivityToasts({ items, pipelines, onOpen, openKey }: { items: I
     onOpen(item);
   };
 
-  if (toasts.length === 0) return null;
+  if (toasts.length === 0 && creates.length === 0) return null;
   const hidden = toasts.length - SHOWN;
   return (
     <div className="activity-toasts" aria-live="polite">
+      {creates.map((toast) => {
+        const key = sessionKey(toast.session);
+        return (
+          <div key={key} className={`toast-wrap${leavingCreates.includes(key) ? " leaving" : ""}`} onAnimationEnd={createEnded(key)}>
+            <CreateToastView toast={toast} leaving={leavingCreates.includes(key)} onDismiss={() => dismissCreate(key)} onOpen={(item) => {
+              dismissCreate(key);
+              onOpen(item);
+            }} />
+          </div>
+        );
+      })}
       {toasts.slice(-SHOWN).reverse().map((toast) => {
         const [first] = toast.events;
         const single = toast.events.length === 1;
@@ -98,6 +143,54 @@ export function ActivityToasts({ items, pipelines, onOpen, openKey }: { items: I
         );
       })}
       {hidden > 0 && <div className="toast-more">+{hidden} more</div>}
+    </div>
+  );
+}
+
+const CREATE_TONES = { running: "", waiting: "tone-wait", created: "tone-good", ended: "" };
+
+/** A create session's toast: running and waiting ones stay (they are the only way to its terminal), created and ended ones count down. */
+function CreateToastView({ toast, leaving, onDismiss, onOpen }: { toast: CreateToast; leaving: boolean; onDismiss: () => void; onOpen: (item: Item) => void }) {
+  const { session, state, items } = toast;
+  const live = state === "running" || state === "waiting";
+  const terminal = (
+    <a className="toast-link" href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`} target="_blank" rel="noreferrer">
+      Open terminal ↗
+    </a>
+  );
+  return (
+    <div className={`toast ${CREATE_TONES[state]}`} role="status">
+      <div className="toast-inner">
+        {state === "running" ? <span className="toast-spinner" aria-hidden /> : <span className="toast-icon" aria-hidden>{state === "waiting" ? "✋" : state === "created" ? "✨" : "💤"}</span>}
+        <div className="toast-body">
+          {state === "running" && <span className="toast-text">Creating workitem…</span>}
+          {state === "waiting" && <span className="toast-text">Needs your answer</span>}
+          {state === "ended" && <span className="toast-text">Ended without a workitem</span>}
+          {state === "created" ? (
+            <ul className="toast-list">
+              {items.map((item) => (
+                <li key={item.dir}>
+                  <button type="button" onClick={() => onOpen(item)}>
+                    Created: {item.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="toast-item">
+              <span className="toast-workspace">{session.workspace}</span>
+            </span>
+          )}
+          {state === "ended" && <span className="toast-quip">Check the board{session.dead ? " or the terminal" : ""}.</span>}
+          {(live || session.dead) && terminal}
+        </div>
+        {!live && (
+          <button type="button" className="toast-close" aria-label="Dismiss" onClick={onDismiss}>
+            ×
+          </button>
+        )}
+      </div>
+      {!live && !leaving && <span className="toast-countdown" />}
     </div>
   );
 }

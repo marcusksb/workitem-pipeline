@@ -341,11 +341,16 @@ pub async fn pr_conversation(
 pub struct AgentSession {
     workspace: String,
     name: String,
+    /// The agent waits for input (decision 75).
+    waiting: bool,
+    /// The agent exited and `remain-on-exit` keeps the pane: it ended without killing its session.
+    dead: bool,
 }
 
-/// Running `wi-new-*` sessions of the configured workspaces.
+/// `wi-new-*` sessions of the configured workspaces, running or dead.
 pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
+    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
     let found = state
         .store
         .workspaces()
@@ -354,7 +359,7 @@ pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession
             sessions
                 .iter()
                 .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(&sessions, workspace, &s.name).is_some())
-                .map(|s| AgentSession { workspace: workspace.name.clone(), name: s.name.clone() })
+                .map(|s| AgentSession { workspace: workspace.name.clone(), name: s.name.clone(), waiting: s.waiting, dead: dead.contains(&s.name) })
                 .collect::<Vec<_>>()
         })
         .collect();

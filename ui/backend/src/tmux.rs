@@ -12,10 +12,15 @@ pub struct Session {
     /// The folder of the workspace the session belongs to: its `@workitem_workspace` option,
     /// empty for sessions the UI did not start.
     pub workspace: PathBuf,
+    /// The agent waits for input: `workitem-notify` set `@workitem_waiting` (create sessions only).
+    pub waiting: bool,
 }
 
 /// Session option `launch::start` sets to the workspace folder.
 pub const WORKSPACE_OPTION: &str = "@workitem_workspace";
+
+/// Session option `workitem-notify` sets while a create session waits for input.
+const WAITING_OPTION: &str = "@workitem_waiting";
 
 pub fn command(socket: Option<&str>) -> Command {
     let mut command = Command::new("tmux");
@@ -28,7 +33,7 @@ pub fn command(socket: Option<&str>) -> Command {
 /// All tmux sessions; empty when no server is running.
 pub async fn sessions(socket: Option<&str>) -> Vec<Session> {
     let output = command(socket)
-        .args(["list-sessions", "-F", &format!("#{{session_name}}\t#{{{WORKSPACE_OPTION}}}")])
+        .args(["list-sessions", "-F", &format!("#{{session_name}}\t#{{{WORKSPACE_OPTION}}}\t#{{{WAITING_OPTION}}}")])
         .output()
         .await;
     let Ok(output) = output else {
@@ -37,13 +42,16 @@ pub async fn sessions(socket: Option<&str>) -> Vec<Session> {
     if !output.status.success() {
         return vec![];
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let (name, workspace) = line.split_once('\t').unwrap_or((line, ""));
-            Some(Session { name: name.to_string(), workspace: workspace.into() })
-        })
-        .collect()
+    String::from_utf8_lossy(&output.stdout).lines().map(parse_session).collect()
+}
+
+/// One `list-sessions` line: name, workspace option, waiting option (both may be empty).
+fn parse_session(line: &str) -> Session {
+    let mut fields = line.splitn(3, '\t');
+    let name = fields.next().unwrap_or_default().to_string();
+    let workspace = fields.next().unwrap_or_default().into();
+    let waiting = !fields.next().unwrap_or_default().is_empty();
+    Session { name, workspace, waiting }
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -91,4 +99,19 @@ pub async fn dead_sessions(socket: Option<&str>) -> HashSet<String> {
 
 pub async fn kill(socket: Option<&str>, name: &str) {
     let _ = command(socket).args(["kill-session", "-t", &format!("={name}")]).output().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_line_carries_workspace_and_waiting() {
+        let s = parse_session("wi-new-1\t/w/app\t1");
+        assert_eq!((s.name.as_str(), s.workspace.as_path(), s.waiting), ("wi-new-1", Path::new("/w/app"), true));
+        let s = parse_session("wi-new-2\t/w/app\t");
+        assert!(!s.waiting);
+        let s = parse_session("other");
+        assert_eq!((s.name.as_str(), s.workspace.as_os_str().is_empty(), s.waiting), ("other", true, false));
+    }
 }

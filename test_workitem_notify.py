@@ -45,5 +45,36 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(self.notify("blocked: why", "permission_prompt"), "blocked: why")
 
 
+class CreateSessionTest(unittest.TestCase):
+    """A create session has no workitem; the hook flags its tmux session instead."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        bin_dir = Path(self.tmp.name)
+        self.log = bin_dir / "tmux.log"
+        fake = bin_dir / "tmux"
+        fake.write_text(f'#!/bin/sh\necho "$@" >> {self.log}\n')
+        fake.chmod(0o755)
+        self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "WORKITEM_CREATE": "wi-new-abc"}
+        self.env.pop("WORKITEM", None)
+        self.env.pop("WORKITEM_PLAN", None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_notify(self, *args, env=None):
+        stdin = json.dumps({"hook_event_name": "Notification", "notification_type": "idle_prompt"})
+        subprocess.run(["python3", str(NOTIFY), *args], input=stdin, text=True, env=env or self.env, check=True)
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_notification_sets_the_waiting_option(self):
+        self.assertEqual(self.run_notify(), ["set-option -t =wi-new-abc: @workitem_waiting 1"])
+
+    def test_resume_unsets_it(self):
+        self.assertEqual(self.run_notify("--resume"), ["set-option -u -t =wi-new-abc: @workitem_waiting"])
+
+    def test_other_sessions_do_not_touch_tmux(self):
+        env = {k: v for k, v in self.env.items() if k != "WORKITEM_CREATE"}
+        self.assertEqual(self.run_notify(env=env), [])
+
 if __name__ == "__main__":
     unittest.main()

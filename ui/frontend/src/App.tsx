@@ -198,7 +198,6 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
       >
         <Plans
           plans={plans.data ?? []}
-          sessions={sessions.data ?? []}
           workspaces={inView}
           showWorkspace={false}
           selected={selectedPlan}
@@ -266,7 +265,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
               />
             </Leaving>
           )}
-          <ActivityToasts items={items.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
+          <ActivityToasts items={items.data} sessions={sessions.data} pipelines={pipelines.data} onOpen={open} openKey={openKey} />
         </main>
       </div>
       {searching && <QuickSearch items={items.data ?? []} actions={actions} showWorkspace={(workspaces.data?.length ?? 0) > 1} onOpen={openFound} onClose={() => setSearching(false)} />}

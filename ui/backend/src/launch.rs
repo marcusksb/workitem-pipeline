@@ -79,6 +79,7 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
             }
         }
         Scope::Workspace => {
+            env.push(format!("WORKITEM_CREATE={session}"));
             env.push(CLAUDE_MD_OF_ADDED_DIRS.into());
             dirs.extend(state.repos(workspace));
             workspace.dir.clone()
@@ -88,8 +89,11 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
     if let Scope::Item(place) = &scope {
         args.extend(["--mcp-config".into(), mcp_config(state, workspace, place.dir)?.into()]);
     }
-    let hooks = state.skills_dir.join("workitem-pipeline/hooks.json");
-    args.extend(["--settings".into(), hooks.into()]);
+    let settings: OsString = match scope {
+        Scope::Item(_) => state.skills_dir.join("workitem-pipeline/hooks.json").into(),
+        Scope::Workspace => create_settings(state).into(),
+    };
+    args.extend(["--settings".into(), settings]);
     if let Some(model) = model {
         args.extend(["--model".into(), model.into()]);
     }
@@ -149,18 +153,38 @@ pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, 
 /// Inline `--settings` of a planning session: the helper and file edits run without asking, and
 /// the guard hook refuses every edit outside the workspace folder.
 fn plan_settings(state: &AppState) -> String {
-    let bin = state.skills_dir.join("workitem-pipeline/bin");
-    let script = |name: &str| bin.join(name).display().to_string();
-    let hook = |name: &str, args: &str| json!([{ "hooks": [{ "type": "command", "command": format!("python3 {}{args}", shell_quote(&script(name))) }] }]);
+    let script = |name: &str| bin_script(state, name);
     json!({
         "permissions": { "allow": [format!("Bash(python3 {}:*)", script("workitem-plan-note")), "Edit", "Write"] },
         "hooks": {
             "PreToolUse": [{ "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": format!("python3 {}", shell_quote(&script("workitem-plan-guard"))) }] }],
-            "Notification": hook("workitem-notify", ""),
-            "UserPromptSubmit": hook("workitem-plan-note", " --status working"),
+            "Notification": hook(state, "workitem-notify", ""),
+            "UserPromptSubmit": hook(state, "workitem-plan-note", " --status working"),
         }
     })
     .to_string()
+}
+
+/// Inline `--settings` of a create session (decision 75): `workitem-notify` sets the session's
+/// `@workitem_waiting` while the agent waits for input and unsets it once it goes on.
+fn create_settings(state: &AppState) -> String {
+    json!({
+        "hooks": {
+            "Notification": hook(state, "workitem-notify", ""),
+            "UserPromptSubmit": hook(state, "workitem-notify", " --resume"),
+            "PostToolUse": hook(state, "workitem-notify", " --resume"),
+        }
+    })
+    .to_string()
+}
+
+fn bin_script(state: &AppState, name: &str) -> String {
+    state.skills_dir.join("workitem-pipeline/bin").join(name).display().to_string()
+}
+
+/// A hook entry that runs bundled script `name` with `args`.
+fn hook(state: &AppState, name: &str, args: &str) -> serde_json::Value {
+    json!([{ "hooks": [{ "type": "command", "command": format!("python3 {}{args}", shell_quote(&bin_script(state, name))) }] }])
 }
 
 /// Hook commands run through a shell.
@@ -218,7 +242,7 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
         return Err(e);
     }
     let _ = tmux::command(state.tmux_socket.as_deref())
-        .args(["set-option", "-t", &format!("={session}"), "remain-on-exit", "on"])
+        .args(["set-option", "-t", &format!("={session}:"), "remain-on-exit", "on"])
         .output()
         .await;
     Ok(())
@@ -518,6 +542,7 @@ Follow these instructions:\n\
 --- instructions ---\n{instructions}\n--- end of instructions ---\n\
 The task, as typed in the web UI:\n\n{input}\n\n\
 {protocol}\
+Write created_by: {session} into the frontmatter of every workitem you write, so the web UI can link it.\n\
 When the workitem files are written, your last action is tmux kill-session -t {session}.",
         dir = workspace.dir.display(),
         boards = board_list(state, workspace),
