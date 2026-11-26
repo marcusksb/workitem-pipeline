@@ -11,7 +11,7 @@ use serde_json::json;
 
 use crate::{
     auth,
-    config::Workspace,
+    config::{self, Agent, AgentKind, Workspace},
     git,
     launch,
     locate::{Found, Origin},
@@ -174,15 +174,27 @@ pub async fn update_stage(
 
 #[derive(Deserialize)]
 pub struct WorkspaceChange {
-    agent: Option<String>,
+    /// Absent keeps the agent, `null` clears it so the default one applies.
+    #[serde(default, deserialize_with = "present")]
+    agent: Option<Option<Agent>>,
     issue_tracker: Option<String>,
     github_account: Option<String>,
 }
 
-/// Sets the workspace's agent (decision 39), issue tracker (62) and GitHub account (67), each
-/// only when given; an empty one clears it. Everything is checked before anything is written: a
-/// new GitHub account must be one gh is logged in to, and a new tracker must suit every board's
-/// `issue_project` and `issue_state`.
+/// A key that is present, even as `null`, is `Some`.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AgentChange {
+    agent: Option<Agent>,
+}
+
+/// Sets the workspace's agent (decisions 39, 52, 56), issue tracker (62) and GitHub account (67),
+/// each only when given; an empty one (a `null` agent) clears it. Everything is checked before
+/// anything is written: a new GitHub account must be one gh is logged in to, and a new tracker
+/// must suit every board's `issue_project` and `issue_state`.
 pub async fn update_workspace(
     State(state): State<Shared>,
     Path(name): Path<String>,
@@ -206,12 +218,44 @@ pub async fn update_workspace(
             return Err(bad(format!("these boards do not suit {tracker}; change their issue_project and issue_state first: {}", conflicts.join("; "))));
         }
     }
-    let change = crate::config::SettingsChange { agent: body.agent.as_deref(), issue_tracker: tracker, github_account: login };
-    let workspace = state.store.update(&name, &change).map_err(bad)?.ok_or(ApiError::not_found("workspace"))?;
+    let change = crate::config::SettingsChange { agent: body.agent, issue_tracker: tracker, github_account: login };
+    let workspace = state.store.update(&name, change).map_err(bad)?.ok_or(ApiError::not_found("workspace"))?;
     // A fixed account starts the workspace again at once instead of on its next tick.
     let _ = crate::github::token(&state, &workspace).await;
     state.wake.notify_one();
     Ok(Json(workspace))
+}
+
+#[derive(Serialize)]
+pub struct AgentKindInfo {
+    kind: AgentKind,
+    /// Whether the kind's own CLI (for Claude, `AppState::claude`) is found on `PATH`. A kind that
+    /// is not can still run through a command naming its executable.
+    installed: bool,
+}
+
+#[derive(Serialize)]
+pub struct AgentSettings {
+    agent: Option<Agent>,
+    kinds: Vec<AgentKindInfo>,
+}
+
+/// The agent of every workspace without its own (decision 56; `null` means Claude), and which
+/// kinds are installed.
+pub async fn default_agent(State(state): State<Shared>) -> Json<AgentSettings> {
+    let kinds = AgentKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let name = if kind == AgentKind::Claude { state.claude.as_str() } else { kind.name() };
+            AgentKindInfo { kind, installed: config::resolve_executable(name).is_some() }
+        })
+        .collect();
+    Json(AgentSettings { agent: state.store.default_agent(), kinds })
+}
+
+pub async fn set_default_agent(State(state): State<Shared>, Json(body): Json<AgentChange>) -> Result<Json<AgentChange>, ApiError> {
+    let agent = state.store.set_default_agent(body.agent).map_err(|e| ApiError(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(AgentChange { agent }))
 }
 
 #[derive(Serialize)]

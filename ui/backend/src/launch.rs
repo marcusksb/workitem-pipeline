@@ -7,7 +7,7 @@ use std::{
 use serde_json::json;
 
 use crate::{
-    config::{self, Workspace},
+    config::{self, Agent, AgentKind, Workspace},
     git,
     locate::{self, Found},
     pipeline::{valid_board_name, Stage},
@@ -45,9 +45,10 @@ impl Place<'_> {
     }
 }
 
-/// Starts `claude` with a prompt in a detached tmux session: `remain-on-exit` keeps a crashed
-/// session visible, and the pipeline hooks mark a session that waits for input as blocked. The
-/// prompt goes to `claude` as one argv element (see `start`), never interpreted by a shell. A
+/// Starts the workspace's agent (decisions 52, 56) with a prompt in a detached tmux session:
+/// `remain-on-exit` keeps a crashed session visible, and the pipeline hooks (or the kind's glue)
+/// mark a session that waits for input as blocked. The prompt goes to the agent as one argv
+/// element (see `start`), never interpreted by a shell. A
 /// workitem's session starts in its worktree when it has one, else in the repo, with the workspace
 /// folder added so the agent can edit `workitem.md` (decision 46); on a board without a repo it
 /// starts in the item folder with the workspace and every board's repo added. A workspace session
@@ -85,19 +86,132 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
             workspace.dir.clone()
         }
     };
-    let mut args = add_dirs(&dirs);
-    if let Scope::Item(place) = &scope {
-        args.extend(["--mcp-config".into(), mcp_config(state, workspace, place.dir)?.into()]);
-    }
-    let settings: OsString = match scope {
-        Scope::Item(_) => state.skills_dir.join("workitem-pipeline/hooks.json").into(),
-        Scope::Workspace => create_settings(state).into(),
+    let agent = state.store.agent_for(workspace);
+    let program = program(state, &agent)?;
+    let (claude_settings, mcp): (OsString, _) = match &scope {
+        Scope::Item(place) => (state.skills_dir.join("workitem-pipeline/hooks.json").into(), Some(Mcp::new(state, workspace, place.dir))),
+        Scope::Workspace => (create_settings(state).into(), None),
     };
-    args.extend(["--settings".into(), settings]);
-    if let Some(model) = model {
-        args.extend(["--model".into(), model.into()]);
+    let launch = Launch { dirs: &dirs, claude_settings, model: model.as_deref(), mcp: mcp.as_ref(), plan: false };
+    let mut args = agent_args(state, agent.kind, &launch, &mut env)?;
+    if agent.kind == AgentKind::Opencode {
+        // The prompt follows as the flag's value.
+        args.push("--prompt".into());
     }
-    start(state, session, workspace, &cwd, &env, &args, Some(prompt)).await
+    start(state, session, workspace, &cwd, &env, &program, &args, Some(prompt)).await
+}
+
+/// What a session gets besides the prompt, in each kind's own flags (decision 56).
+struct Launch<'a> {
+    /// Folders the agent may reach besides its start folder (46, 49, 54).
+    dirs: &'a [PathBuf],
+    /// Claude's `--settings` (hooks, permissions); the other kinds get the same from their glue.
+    claude_settings: OsString,
+    /// The stage's model (decision 60), passed through unchanged.
+    model: Option<&'a str>,
+    /// The item's `workitem` MCP server (decision 61); item sessions only.
+    mcp: Option<&'a Mcp>,
+    /// A planning session: opencode asks before shell commands, as Claude does there.
+    plan: bool,
+}
+
+/// Maps a session's folders, settings, model and MCP server to `kind`'s arguments, before the
+/// conversation flags and the prompt; opencode takes its part as `OPENCODE_CONFIG_CONTENT` in `env`.
+fn agent_args(state: &AppState, kind: AgentKind, launch: &Launch, env: &mut Vec<String>) -> Result<Vec<OsString>, String> {
+    let mut args: Vec<OsString> = vec![];
+    match kind {
+        AgentKind::Claude => {
+            args.extend(add_dirs(launch.dirs));
+            if let Some(mcp) = launch.mcp {
+                args.extend(["--mcp-config".into(), mcp.claude_config(state)?.into()]);
+            }
+            args.extend(["--settings".into(), launch.claude_settings.clone()]);
+        }
+        AgentKind::Opencode => env.push(format!("OPENCODE_CONFIG_CONTENT={}", opencode_config(state, launch)?)),
+        AgentKind::Pi | AgentKind::Omp => {
+            // pi has no permission prompts, so it reaches the folders without being told.
+            if kind == AgentKind::Omp {
+                args.extend(launch.dirs.iter().map(|d| prefixed("--add-dir=", d)));
+            }
+            args.extend(["-e".into(), glue(state, kind).into()]);
+            // Neither reads MCP servers from a flag; the glue offers the server's tools instead.
+            if let Some(mcp) = launch.mcp {
+                env.push(format!("WORKITEM_MCP={}", mcp.claude_config(state)?.display()));
+            }
+        }
+    }
+    if let Some(model) = launch.model {
+        args.extend(model_args(kind, model));
+    }
+    Ok(args)
+}
+
+/// The stage's model (decision 60) in `kind`'s flag. opencode wants `provider/model` and refuses
+/// a Claude alias like `opus`, so it gets none and uses its own default.
+fn model_args(kind: AgentKind, model: &str) -> Vec<OsString> {
+    match kind {
+        AgentKind::Opencode if !model.contains('/') => vec![],
+        AgentKind::Opencode => vec!["-m".into(), model.into()],
+        AgentKind::Omp => vec![format!("--model={model}").into()],
+        AgentKind::Claude | AgentKind::Pi => vec!["--model".into(), model.into()],
+    }
+}
+
+/// The plugin or extension of `kind` that reports waiting and runs the planning guards.
+fn glue(state: &AppState, kind: AgentKind) -> PathBuf {
+    state.skills_dir.join("workitem-pipeline/agents").join(kind.name()).join("workitem-notify.ts")
+}
+
+/// Config that opencode merges over the user's own: the glue plugin, the item's MCP server, and
+/// access outside the session's folder to exactly the session's folders (what Claude gets with
+/// `--add-dir`) and the pipeline's own scripts. Everything else keeps the user's setting, so a
+/// prompt for it shows as blocked. The env reaches tmux in argv, so the MCP token is only named:
+/// opencode reads it from its 0600 file (`{file:...}`).
+fn opencode_config(state: &AppState, launch: &Launch) -> Result<String, String> {
+    let pipeline = state.skills_dir.join("workitem-pipeline");
+    let plugin = pipeline.join("agents/opencode/workitem-notify.ts");
+    let mut allowed: Vec<PathBuf> = launch.dirs.to_vec();
+    allowed.push(pipeline.clone());
+    // The skills folder holds symlinks (`install.sh`); a tool may see either path.
+    if let Ok(real) = pipeline.canonicalize() {
+        allowed.push(real);
+    }
+    let rules: serde_json::Map<String, serde_json::Value> = allowed.iter().map(|dir| (format!("{}/**", dir.display()), json!("allow"))).collect();
+    let mut config = json!({
+        "plugin": [format!("file://{}", plugin.display().to_string().replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F"))],
+        "permission": { "external_directory": rules },
+    });
+    if launch.plan {
+        // The guard covers edit tools only, so a shell command asks first, as in Claude's
+        // planning sessions; the record's own helper runs without asking.
+        let note = state.skills_dir.join("workitem-pipeline/bin/workitem-plan-note");
+        config["permission"]["bash"] = json!({ "*": "ask", format!("python3 {}*", note.display()): "allow" });
+    }
+    if let Some(mcp) = launch.mcp {
+        let token = mcp.token_file(state)?;
+        config["mcp"] = json!({ crate::questions::SERVER: {
+            "type": "remote", "url": mcp.url, "oauth": false,
+            "headers": { "Authorization": format!("Bearer {{file:{}}}", token.display()) },
+        } });
+    }
+    Ok(config.to_string())
+}
+
+fn prefixed(flag: &str, path: &Path) -> OsString {
+    let mut arg = OsString::from(flag);
+    arg.push(path);
+    arg
+}
+
+/// The agent's executable, resolved here because tmux's `PATH` may differ from ours: its command,
+/// else the kind's name, else for Claude `state.claude`.
+fn program(state: &AppState, agent: &Agent) -> Result<OsString, String> {
+    let name = match (&agent.command, agent.kind) {
+        (Some(command), _) => command.as_str(),
+        (None, AgentKind::Claude) => return Ok(state.claude.clone().into()),
+        (None, kind) => kind.name(),
+    };
+    config::resolve_executable(name).map(OsString::from).ok_or_else(|| format!("agent '{name}' not found"))
 }
 
 /// The `model` of the stage the item is in now (decision 60), so every session of the item,
@@ -107,21 +221,42 @@ fn stage_model(state: &AppState, workspace: &Workspace, place: &Place) -> Option
     state.pipeline(workspace, place.board).pipeline?.stage(&item.stage)?.model.clone()
 }
 
-/// The MCP config of an item session (decision 61): the backend's `questions` server for this
-/// item, with the token. Written to `<root>/mcp/` with mode 0600, because argv is visible to every
-/// local user; rewritten on each launch.
-fn mcp_config(state: &AppState, workspace: &Workspace, dir: &str) -> Result<PathBuf, String> {
+/// The backend's `workitem` MCP server of one item (decision 61). Its token goes to the agent only
+/// through files in `<root>/mcp/` with mode 0600, because argv and the tmux env are visible to
+/// every local user; they are rewritten on each launch.
+struct Mcp {
+    url: String,
+    /// `<workspace>--<dir>`, the name of its files.
+    name: String,
+}
+
+impl Mcp {
+    fn new(state: &AppState, workspace: &Workspace, dir: &str) -> Mcp {
+        Mcp { url: format!("http://127.0.0.1:{}/api/mcp/{}/{dir}", state.port, workspace.name), name: format!("{}--{dir}", workspace.name) }
+    }
+
+    /// Claude's `--mcp-config` file, which the pi and omp glue read too.
+    fn claude_config(&self, state: &AppState) -> Result<PathBuf, String> {
+        let config = json!({ "mcpServers": { crate::questions::SERVER: {
+            "type": "http", "url": self.url, "headers": { "Authorization": format!("Bearer {}", state.store.token()) },
+        } } });
+        write_mcp_file(state, &format!("{}.json", self.name), &config.to_string())
+    }
+
+    /// The bare token, for opencode's `{file:...}`.
+    fn token_file(&self, state: &AppState) -> Result<PathBuf, String> {
+        write_mcp_file(state, &format!("{}.token", self.name), &state.store.token())
+    }
+}
+
+fn write_mcp_file(state: &AppState, name: &str, text: &str) -> Result<PathBuf, String> {
     use std::{io::Write, os::unix::fs::{DirBuilderExt, OpenOptionsExt}};
     let folder = state.store.sibling("mcp");
     fs::DirBuilder::new().recursive(true).mode(0o700).create(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let path = folder.join(format!("{}--{dir}.json", workspace.name));
-    let url = format!("http://127.0.0.1:{}/api/mcp/{}/{dir}", state.port, workspace.name);
-    let config = json!({ "mcpServers": { crate::questions::SERVER: {
-        "type": "http", "url": url, "headers": { "Authorization": format!("Bearer {}", state.store.token()) },
-    } } });
+    let path = folder.join(name);
     let _ = fs::remove_file(&path);
     let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    file.write_all(config.to_string().as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(text.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -138,16 +273,43 @@ fn add_dirs(dirs: &[PathBuf]) -> Vec<OsString> {
     std::iter::once("--add-dir".into()).chain(dirs.iter().map(|d| d.clone().into_os_string())).collect()
 }
 
+/// The agent conversation of a planning session: a new one, with the id the launcher picked for
+/// kinds that take one (Claude, pi), or the recorded one to resume.
+pub enum Conversation<'a> {
+    New(Option<&'a str>),
+    Resume(&'a str),
+}
+
+/// Whether `kind` takes the id of a new conversation from the launcher. The others pick it
+/// themselves, and their glue records it with `workitem-plan-note --agent-session`.
+pub fn presets_session(kind: AgentKind) -> bool {
+    matches!(kind, AgentKind::Claude | AgentKind::Pi)
+}
+
 /// Starts a planning session (decisions 36, 49) in the workspace folder with every board's repo
-/// added: `claude` with the planning settings and `claude_args` (`--session-id <uuid>`, or
-/// `--resume <uuid>`), then `prompt` if any. `record` is its plan record, which the hooks and
-/// `workitem-plan-note` update.
-pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, record: &Path, claude_args: &[&str], prompt: Option<&str>) -> Result<(), String> {
-    let env = [format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_WORKSPACE={}", workspace.dir.display()), CLAUDE_MD_OF_ADDED_DIRS.into()];
-    let mut args = add_dirs(&state.repos(workspace));
-    args.extend(["--settings".into(), plan_settings(state).into()]);
-    args.extend(claude_args.iter().map(OsString::from));
-    start(state, session, workspace, &workspace.dir, &env, &args, prompt).await
+/// added, with `agent`, then `prompt` if any. `record` is its plan record, which the hooks
+/// (Claude) or the kind's glue and `workitem-plan-note` update; both guard edits outside the
+/// workspace folder.
+pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, record: &Path, agent: &Agent, conversation: Conversation<'_>, prompt: Option<&str>) -> Result<(), String> {
+    let mut env = vec![format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_WORKSPACE={}", workspace.dir.display()), CLAUDE_MD_OF_ADDED_DIRS.into()];
+    let program = program(state, agent)?;
+    let dirs = state.repos(workspace);
+    let launch = Launch { dirs: &dirs, claude_settings: plan_settings(state).into(), model: None, mcp: None, plan: true };
+    let mut args = agent_args(state, agent.kind, &launch, &mut env)?;
+    let flags: Vec<OsString> = match (agent.kind, conversation) {
+        (AgentKind::Claude, Conversation::New(Some(id))) => vec!["--session-id".into(), id.into()],
+        (AgentKind::Claude, Conversation::Resume(id)) => vec!["--resume".into(), id.into()],
+        (AgentKind::Opencode, Conversation::Resume(id)) => vec!["--session".into(), id.into()],
+        // pi opens the conversation with that id, or creates it.
+        (AgentKind::Pi, Conversation::New(Some(id)) | Conversation::Resume(id)) => vec!["--session-id".into(), id.into()],
+        (AgentKind::Omp, Conversation::Resume(file)) => vec![prefixed("--resume=", Path::new(file))],
+        _ => vec![],
+    };
+    args.extend(flags);
+    if agent.kind == AgentKind::Opencode && prompt.is_some() {
+        args.push("--prompt".into());
+    }
+    start(state, session, workspace, &workspace.dir, &env, &program, &args, prompt).await
 }
 
 /// Inline `--settings` of a planning session: the helper and file edits run without asking, and
@@ -192,17 +354,13 @@ fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-/// Runs the workspace's agent (decisions 39, 52), resolved here because tmux's `PATH` may differ from ours,
-/// or `state.claude` when it has none, with `args` and then `prompt` as the last argument.
+/// Runs `program` with `args` and then `prompt` as the last argument.
 /// tmux sends a command to its server as one message and refuses one over about 16 KB, so the
 /// prompt goes through a private file that `LAUNCH` reads, deletes and appends unchanged. The
 /// workspace's GitHub token (decision 67) goes the same way into `GH_TOKEN`, so it is never in
 /// an argv; a workspace whose account cannot be read starts nothing.
-async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Path, env: &[String], args: &[OsString], prompt: Option<&str>) -> Result<(), String> {
-    let agent: OsString = match &workspace.agent {
-        Some(name) => config::resolve_executable(name).ok_or_else(|| format!("agent '{name}' of workspace {} not found", workspace.name))?.into(),
-        None => state.claude.clone().into(),
-    };
+#[allow(clippy::too_many_arguments)]
+async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Path, env: &[String], program: &OsString, args: &[OsString], prompt: Option<&str>) -> Result<(), String> {
     let token = crate::github::token(state, workspace).await?;
     let existing = tmux::sessions(state.tmux_socket.as_deref()).await;
     if let Some(other) = existing.iter().find(|s| s.name == session) {
@@ -225,7 +383,7 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
     };
     let empty = PathBuf::new();
     command.args(["/bin/sh", "-c", LAUNCH, "sh"]).arg(token_file.as_ref().unwrap_or(&empty)).arg(file.as_ref().unwrap_or(&empty));
-    command.arg(agent).args(args);
+    command.arg(program).args(args);
     // Without a target, tmux tags the session of `$TMUX_PANE` when the backend runs inside tmux.
     // Not `={session}`: in the same command list that is resolved before the session exists.
     command.args([";", "set-option", "-t", session, tmux::WORKSPACE_OPTION]).arg(&workspace.dir);
@@ -556,6 +714,14 @@ mod tests {
 
     fn place<'a>(workspace: &'a Path, board: &'a str) -> Place<'a> {
         Place { dir: "item-1", workspace, repo: Some(Path::new("/r/proj")), board }
+    }
+
+    #[test]
+    fn opencode_gets_only_a_provider_model() {
+        assert_eq!(model_args(AgentKind::Opencode, "opus"), Vec::<OsString>::new(), "a Claude alias falls back to opencode's default");
+        assert_eq!(model_args(AgentKind::Opencode, "anthropic/claude-opus"), ["-m", "anthropic/claude-opus"]);
+        assert_eq!(model_args(AgentKind::Omp, "opus"), ["--model=opus"]);
+        assert_eq!(model_args(AgentKind::Claude, "opus"), ["--model", "opus"]);
     }
 
     #[test]

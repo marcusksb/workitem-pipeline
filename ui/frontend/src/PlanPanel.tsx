@@ -63,7 +63,7 @@ export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, 
 
   const remove = async () => {
     const what = live.live ? "Stop the session and delete" : "Delete";
-    if (!confirm(`${what} the plan "${live.topic}"? Its Claude conversation can no longer be resumed from the UI.`)) return;
+    if (!confirm(`${what} the plan "${live.topic}"? Its agent conversation can no longer be resumed from the UI.`)) return;
     if (await act(() => api.deletePlan(live))) onClose();
   };
 
@@ -119,7 +119,7 @@ export function PlanPanel({ plan, workitems, onSelect, onItemsChanged, onClose, 
               <Terminal key={path} path={path} />
             ) : (
               <div className={cn("brief", scroll, prose)}>
-                <p>The session has ended. Resume continues the same Claude conversation in the repo.</p>
+                <p>The session has ended. Resume continues the same agent conversation in the repo.</p>
                 <Button variant="primary" className="mb-3" onClick={() => void resume()} disabled={busy}>
                   Resume
                 </Button>

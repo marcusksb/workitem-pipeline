@@ -14,16 +14,85 @@ use crate::pipeline::Watch;
 
 pub const DEFAULT_PORT: u16 = 7373;
 
+/// The agent CLIs sessions can run (decision 56). Each kind has its own arguments and hook glue.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentKind {
+    #[default]
+    Claude,
+    Opencode,
+    Pi,
+    Omp,
+}
+
+impl AgentKind {
+    pub const ALL: [AgentKind; 4] = [AgentKind::Claude, AgentKind::Opencode, AgentKind::Pi, AgentKind::Omp];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AgentKind::Claude => "claude",
+            AgentKind::Opencode => "opencode",
+            AgentKind::Pi => "pi",
+            AgentKind::Omp => "omp",
+        }
+    }
+}
+
+/// The agent that runs sessions: its kind and the executable (a name on `PATH` or an absolute
+/// path), which defaults to the kind's own name, or to `AppState::claude` for Claude.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "AgentSetting")]
+pub struct Agent {
+    pub kind: AgentKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+/// An older file holds the agent as a bare executable (decision 39), which is a Claude wrapper.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AgentSetting {
+    Command(String),
+    Table {
+        #[serde(default)]
+        kind: AgentKind,
+        #[serde(default)]
+        command: Option<String>,
+    },
+}
+
+impl From<AgentSetting> for Agent {
+    fn from(setting: AgentSetting) -> Agent {
+        match setting {
+            AgentSetting::Command(command) => Agent { kind: AgentKind::Claude, command: Some(command) },
+            AgentSetting::Table { kind, command } => Agent { kind, command },
+        }
+    }
+}
+
+impl Agent {
+    /// Trims the command, drops an empty one (the kind's default) and checks that the executable resolves.
+    fn checked(self) -> Result<Agent, String> {
+        let command = self.command.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+        let name = command.as_deref().unwrap_or(self.kind.name());
+        // Claude without a command runs `AppState::claude`, which the launcher resolves itself.
+        if (command.is_some() || self.kind != AgentKind::Claude) && resolve_executable(name).is_none() {
+            return Err(format!("'{name}' is not one executable on PATH or an absolute path to one"));
+        }
+        Ok(Agent { kind: self.kind, command })
+    }
+}
+
 /// A folder in `<root>/workspaces/` (decision 44): its items, boards, skills, watch scripts and plans.
 #[derive(Clone, Serialize)]
 pub struct Workspace {
     /// The folder name.
     pub name: String,
     pub dir: PathBuf,
-    /// Executable that runs this workspace's sessions instead of `AppState::claude` (decision 39),
+    /// Agent that runs this workspace's sessions instead of the default one (decisions 52, 56),
     /// from `workspace.toml`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent: Option<String>,
+    pub agent: Option<Agent>,
     /// `jira` or `github` (decision 62), from `workspace.toml`; `jira` when it names none.
     pub issue_tracker: String,
     /// The gh login whose token every process of the workspace gets (decision 67); gh's active
@@ -43,13 +112,16 @@ struct Config {
     token: String,
     #[serde(default = "default_port")]
     port: u16,
+    /// Agent of every workspace without its own (decision 56).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent: Option<Agent>,
 }
 
 /// `<workspace>/workspace.toml`.
 #[derive(Clone, Default, Deserialize)]
 struct Settings {
     #[serde(default)]
-    agent: Option<String>,
+    agent: Option<Agent>,
     #[serde(default)]
     issue_tracker: Option<String>,
     #[serde(default)]
@@ -132,7 +204,8 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let config = legacy
                     .and_then(|old| read(old).ok())
-                    .unwrap_or_else(|| Config { token: new_token(), port: DEFAULT_PORT });
+                    .map(|old| Config { agent: None, ..old })
+                    .unwrap_or_else(|| Config { token: new_token(), port: DEFAULT_PORT, agent: None });
                 save(&path, &config)?;
                 config
             }
@@ -231,20 +304,39 @@ impl Store {
         Ok(self.load(name))
     }
 
-    /// Sets or, with an empty `agent`, clears the workspace's agent. `None` when there is no such workspace.
-    pub fn set_agent(&self, name: &str, agent: &str) -> Result<Option<Workspace>, String> {
-        self.update(name, &SettingsChange { agent: Some(agent), ..Default::default() })
+    /// The agent of every workspace without its own.
+    pub fn default_agent(&self) -> Option<Agent> {
+        self.config.lock().unwrap().agent.clone()
+    }
+
+    /// The agent that runs `workspace`'s sessions: its own, else the default one, else Claude.
+    pub fn agent_for(&self, workspace: &Workspace) -> Agent {
+        workspace.agent.clone().or_else(|| self.default_agent()).unwrap_or_default()
+    }
+
+    /// Sets or, with `None`, clears the default agent.
+    pub fn set_default_agent(&self, agent: Option<Agent>) -> Result<Option<Agent>, String> {
+        let agent = agent.map(Agent::checked).transpose()?;
+        let mut config = self.config.lock().unwrap();
+        let next = Config { agent: agent.clone(), ..config.clone() };
+        save(&self.path(), &next).map_err(|e| e.to_string())?;
+        *config = next;
+        Ok(agent)
+    }
+
+    /// Sets or, with `None`, clears the workspace's agent. `None` when there is no such workspace.
+    pub fn set_agent(&self, name: &str, agent: Option<Agent>) -> Result<Option<Workspace>, String> {
+        self.update(name, SettingsChange { agent: Some(agent), ..Default::default() })
     }
 
     /// Applies the given settings to `workspace.toml` in one write, after checking all of them, so
-    /// a bad one changes nothing. An empty value removes its key. Only these keys change; the rest
-    /// of the file (its watchers) stays, though not its comments. `None` when there is no such
-    /// workspace. Whether gh knows a GitHub account is the caller's check (`github.rs`).
-    pub fn update(&self, name: &str, change: &SettingsChange) -> Result<Option<Workspace>, String> {
-        let (agent, tracker, login) = (change.agent.map(str::trim), change.issue_tracker.map(str::trim), change.github_account.map(str::trim));
-        if let Some(agent) = agent.filter(|a| !a.is_empty() && resolve_executable(a).is_none()) {
-            return Err(format!("'{agent}' is not one executable on PATH or an absolute path to one"));
-        }
+    /// a bad one changes nothing. An empty value (or `Some(None)` for the agent) removes its key.
+    /// Only these keys change; the rest of the file (its watchers) stays, though not its comments.
+    /// `None` when there is no such workspace. Whether gh knows a GitHub account is the caller's
+    /// check (`github.rs`).
+    pub fn update(&self, name: &str, change: SettingsChange) -> Result<Option<Workspace>, String> {
+        let (tracker, login) = (change.issue_tracker.map(str::trim), change.github_account.map(str::trim));
+        let agent = change.agent.map(|agent| agent.map(Agent::checked).transpose()).transpose()?;
         if let Some(tracker) = tracker.filter(|t| !t.is_empty() && !ISSUE_TRACKERS.contains(t)) {
             return Err(format!("issue tracker '{tracker}' is not one of {}", ISSUE_TRACKERS.join(", ")));
         }
@@ -259,7 +351,12 @@ impl Store {
         }
         let path = workspace.dir.join("workspace.toml");
         let mut table: toml::Table = fs::read_to_string(&path).ok().map(|t| t.parse()).transpose().map_err(|e: toml::de::Error| e.to_string())?.unwrap_or_default();
-        for (key, value) in [("agent", agent), ("issue_tracker", tracker), ("github_account", login)] {
+        match agent {
+            Some(None) => drop(table.remove("agent")),
+            Some(Some(agent)) => drop(table.insert("agent".into(), toml::Value::try_from(agent).map_err(|e| e.to_string())?)),
+            None => {}
+        }
+        for (key, value) in [("issue_tracker", tracker), ("github_account", login)] {
             match value {
                 Some("") => drop(table.remove(key)),
                 Some(value) => drop(table.insert(key.into(), value.into())),
@@ -274,7 +371,7 @@ impl Store {
 /// What `Store::update` changes; a `None` key stays as it is.
 #[derive(Default)]
 pub struct SettingsChange<'a> {
-    pub agent: Option<&'a str>,
+    pub agent: Option<Option<Agent>>,
     pub issue_tracker: Option<&'a str>,
     pub github_account: Option<&'a str>,
 }
@@ -349,20 +446,55 @@ mod tests {
         assert!(store.workspace("..").is_none());
     }
 
+    fn claude(command: &str) -> Option<Agent> {
+        Some(Agent { kind: AgentKind::Claude, command: Some(command.into()) })
+    }
+
     #[test]
     fn agent_persists_clears_and_rejects_non_executables() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path().to_path_buf(), None).unwrap();
         store.add_workspace("app").unwrap();
-        assert_eq!(store.set_agent("app", " /bin/sh ").unwrap().unwrap().agent.as_deref(), Some("/bin/sh"));
-        assert_eq!(Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap().agent.as_deref(), Some("/bin/sh"));
-        assert!(store.set_agent("app", "sh").is_ok(), "a bare name is looked up on PATH");
+        assert_eq!(store.set_agent("app", claude(" /bin/sh ")).unwrap().unwrap().agent, claude("/bin/sh"));
+        assert_eq!(Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap().agent, claude("/bin/sh"));
+        assert!(store.set_agent("app", claude("sh")).is_ok(), "a bare name is looked up on PATH");
         for bad in ["sh -c", "bin/sh", "/no/such/agent", "/etc/hosts"] {
-            assert!(store.set_agent("app", bad).is_err(), "{bad}");
+            assert!(store.set_agent("app", claude(bad)).is_err(), "{bad}");
         }
-        assert!(store.set_agent("nope", "sh").unwrap().is_none());
-        assert_eq!(store.set_agent("app", "").unwrap().unwrap().agent, None);
+        let missing = Agent { kind: AgentKind::Pi, command: Some("no-such-pi".into()) };
+        assert!(store.set_agent("app", Some(missing)).is_err());
+        let blank = Agent { kind: AgentKind::Claude, command: Some(" ".into()) };
+        assert_eq!(store.set_agent("app", Some(blank)).unwrap().unwrap().agent, Some(Agent::default()), "claude may run AppState::claude");
+        assert!(store.set_agent("nope", claude("sh")).unwrap().is_none());
+        assert_eq!(store.set_agent("app", None).unwrap().unwrap().agent, None);
         assert!(!fs::read_to_string(dir.path().join("workspaces/app/workspace.toml")).unwrap().contains("agent"));
+    }
+
+    #[test]
+    fn the_default_agent_applies_to_workspaces_without_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        let app = store.add_workspace("app").unwrap();
+        assert_eq!(store.agent_for(&app), Agent::default());
+        let omp = Agent { kind: AgentKind::Omp, command: Some("/bin/sh".into()) };
+        store.set_default_agent(Some(omp.clone())).unwrap();
+        let reopened = Store::open(dir.path().to_path_buf(), None).unwrap();
+        assert_eq!(reopened.agent_for(&reopened.workspace("app").unwrap()), omp);
+        let own = store.set_agent("app", claude("/bin/sh")).unwrap().unwrap();
+        assert_eq!(store.agent_for(&own), claude("/bin/sh").unwrap());
+        store.set_default_agent(None).unwrap();
+        assert_eq!(Store::open(dir.path().to_path_buf(), None).unwrap().default_agent(), None);
+    }
+
+    #[test]
+    fn a_bare_agent_string_reads_as_a_claude_wrapper() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().to_path_buf(), None).unwrap();
+        let file = store.add_workspace("app").unwrap().dir.join("workspace.toml");
+        fs::write(&file, "agent = \"yolo\"\n").unwrap();
+        assert_eq!(store.workspace("app").unwrap().agent, claude("yolo"));
+        store.set_agent("app", Some(Agent { kind: AgentKind::Omp, command: Some("/bin/sh".into()) })).unwrap();
+        assert!(fs::read_to_string(&file).unwrap().contains("kind = \"omp\""), "written as a table");
     }
 
     #[test]
@@ -374,14 +506,14 @@ mod tests {
         fs::write(&file, "[[watch]]\nevery = \"5m\"\ncommand = \"issue-status\"\n").unwrap();
         let watch = |store: &Store| store.workspace("app").unwrap().watch.iter().map(|w| (w.command.clone(), w.every.as_secs())).collect::<Vec<_>>();
         assert_eq!(watch(&store), [("issue-status".to_string(), 300)]);
-        store.set_agent("app", "/bin/sh").unwrap();
+        store.set_agent("app", claude("/bin/sh")).unwrap();
         assert_eq!(watch(&store), [("issue-status".to_string(), 300)], "setting the agent keeps the watchers");
         for bad in ["[[watch]]\nevery = \"5x\"\ncommand = \"a\"\n", "[[watch]]\nevery = \"5m\"\ncommand = \"../a\"\n", "agent = "] {
             fs::write(&file, bad).unwrap();
             let workspace = store.workspace("app").unwrap();
             assert!(workspace.error.is_some(), "{bad}");
-            assert_eq!((watch(&store), workspace.agent.as_deref()), (vec![("issue-status".to_string(), 300)], Some("/bin/sh")), "{bad}: the last valid file stays");
-            assert!(store.set_agent("app", "").err().unwrap().contains("workspace.toml"), "an invalid file is not overwritten");
+            assert_eq!((watch(&store), workspace.agent), (vec![("issue-status".to_string(), 300)], claude("/bin/sh")), "{bad}: the last valid file stays");
+            assert!(store.set_agent("app", None).err().unwrap().contains("workspace.toml"), "an invalid file is not overwritten");
         }
         let fresh = Store::open(dir.path().to_path_buf(), None).unwrap().workspace("app").unwrap();
         assert!(fresh.error.is_some() && fresh.watch.is_empty(), "nothing valid was ever read");
@@ -394,14 +526,14 @@ mod tests {
         store.add_workspace("app").unwrap();
         let app = store.workspace("app").unwrap();
         assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None));
-        store.set_agent("app", "/bin/sh").unwrap();
+        store.set_agent("app", claude("/bin/sh")).unwrap();
         let change = |tracker, login| SettingsChange { issue_tracker: Some(tracker), github_account: Some(login), ..Default::default() };
-        let app = store.update("app", &change("github", " work-bot ")).unwrap().unwrap();
-        assert_eq!((app.issue_tracker.as_str(), app.github_account.as_deref(), app.agent.as_deref()), ("github", Some("work-bot"), Some("/bin/sh")), "other keys stay");
-        assert!(store.update("app", &change("jira", "a b")).is_err());
+        let app = store.update("app", change("github", " work-bot ")).unwrap().unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account.as_deref(), app.agent), ("github", Some("work-bot"), claude("/bin/sh")), "other keys stay");
+        assert!(store.update("app", change("jira", "a b")).is_err());
         assert_eq!(store.workspace("app").unwrap().issue_tracker, "github", "a bad key changes nothing");
-        assert!(store.update("app", &change("gitlab", "")).is_err());
-        let app = store.update("app", &change("", "")).unwrap().unwrap();
+        assert!(store.update("app", change("gitlab", "")).is_err());
+        let app = store.update("app", change("", "")).unwrap().unwrap();
         assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None), "empty goes back to the defaults");
         let file = dir.path().join("workspaces/app/workspace.toml");
         fs::write(&file, "issue_tracker = \"linear\"\n").unwrap();

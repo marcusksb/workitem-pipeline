@@ -13,7 +13,7 @@ Pipeline:
 
 UI (run from `ui/`):
 - `npm install` then `npm run dev`: `vite build --watch` plus `cargo watch` (needs `cargo install cargo-watch`) on one port, 7373. The URL with `#token=` is printed on start.
-- `npm test`: `cargo test` and vitest. One Rust test: `cargo test --manifest-path backend/Cargo.toml <name>`; one file: `--test pipeline`.
+- `npm test`: `cargo test`, vitest and `node --test ../skills/workitem-pipeline/agents/glue.test.mjs` (the agent kinds' hook glue). One Rust test: `cargo test --manifest-path backend/Cargo.toml <name>`; one file: `--test pipeline`.
 - `cd frontend && npm run build && npm run e2e`: Playwright smoke test. It needs `cargo build` first (it runs `backend/target/debug/workload`) and Chromium (`npx playwright install chromium`).
 - `npm run build`: release binary at `backend/target/release/workload`.
 - The backend embeds `frontend/dist` at compile time (`rust-embed`), so build the frontend before `cargo build` on a fresh checkout.

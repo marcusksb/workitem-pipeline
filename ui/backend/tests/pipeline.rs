@@ -283,12 +283,186 @@ async fn project_agent_runs_the_handler_instead_of_the_default() {
 
     // Cleared, the next session runs the default again.
     fs::remove_file(w.repo.join(".agent-ran")).unwrap();
-    assert_eq!(put(&w, "/api/workspaces/app", r#"{"agent":""}"#).await.0, StatusCode::OK);
+    assert_eq!(put(&w, "/api/workspaces/app", r#"{"agent":null}"#).await.0, StatusCode::OK);
     assert_eq!(post(&w, "/api/workitems/app/T-9-agent/reject", r#"{"comment":"again"}"#).await.0, StatusCode::NO_CONTENT);
     settle(&w).await;
     settle(&w).await;
     eventually("analyze ran", || stub_log(&w.repo).len() == 2).await;
     assert!(!w.repo.join(".agent-ran").exists());
+}
+
+fn kill_quietly(w: &World, session: &str) {
+    let _ = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "kill-session", "-t", &format!("={session}")]).status();
+}
+
+#[tokio::test]
+async fn the_default_agent_runs_each_kind_with_its_own_arguments_and_glue() {
+    let w = world();
+    let logs = w.dir.path().join("kind-logs");
+    fs::create_dir_all(&logs).unwrap();
+    let (status, _) = put(&w, "/api/agent", r#"{"agent":{"kind":"pi","command":"/no/such/pi"}}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let settings: serde_json::Value = serde_json::from_str(&get(&w, "/api/agent").await).unwrap();
+    let kinds: Vec<&str> = settings["kinds"].as_array().unwrap().iter().map(|k| k["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["claude", "opencode", "pi", "omp"]);
+    assert_eq!(settings["kinds"][0]["installed"], true, "the stub is the default claude");
+    fs::create_dir_all(w.ws.join("boards")).unwrap();
+    fs::write(w.ws.join("boards/kinds.json"), board(&w, r#"[{"name":"qa","model":"p/m-1"}]"#)).unwrap();
+    let token = w.state.store.token();
+    for kind in ["opencode", "pi", "omp"] {
+        // Records its arguments, one per line, and the env the launcher sets for the kinds.
+        let stub = w.dir.path().join(kind);
+        let log = logs.join(kind);
+        let env = "echo \"config=$OPENCODE_CONFIG_CONTENT\"; echo \"mcp=$WORKITEM_MCP\"; echo \"create=$WORKITEM_CREATE\"";
+        fs::write(&stub, format!("#!/bin/bash\n{{ printf '%s\\n' \"$@\"; {env}; }} > {}\n", log.display())).unwrap();
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        let body = serde_json::json!({ "agent": { "kind": kind, "command": stub } }).to_string();
+        let (status, body) = put(&w, "/api/agent", &body).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let dir = format!("T-9-{kind}");
+        write_item(&w.ws, &dir, "qa", "board: kinds\n");
+        let (status, body) = post(&w, &format!("/api/workitems/app/{dir}/session"), "").await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        eventually("the agent ran", || log.exists()).await;
+        let args = fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = args.lines().collect();
+        let glue = skills().join(format!("workitem-pipeline/agents/{kind}/workitem-notify.ts"));
+        assert!(glue.exists(), "{}", glue.display());
+        assert!(args.contains(&format!("You are working on workitem {dir}")), "the prompt comes last: {args}");
+        assert!(!args.contains("--settings") && !args.contains("--mcp-config"), "{kind} gets no Claude settings: {args}");
+        assert!(!args.contains(&token), "the MCP token is never in argv or the env: {args}");
+        let ws_dir = format!("--add-dir={}", w.ws.display());
+        let value = |args: &str, key: &str| args.lines().find_map(|l| l.strip_prefix(&format!("{key}="))).unwrap().to_string();
+        let url = format!("/api/mcp/app/{dir}");
+        match kind {
+            "opencode" => {
+                assert_eq!(lines[..3], ["-m", "p/m-1", "--prompt"], "the stage's model: {args}");
+                let config: serde_json::Value = serde_json::from_str(&value(&args, "config")).unwrap();
+                assert_eq!(config["plugin"][0], format!("file://{}", glue.display()));
+                let rules = config["permission"]["external_directory"].as_object().unwrap();
+                assert!(rules.contains_key(&format!("{}/**", w.ws.display())), "the workspace, as Claude's --add-dir: {rules:?}");
+                assert!(rules.values().all(|v| v == "allow"), "only allow rules: {rules:?}");
+                assert!(config["permission"]["bash"].is_null(), "item sessions keep the user's shell setting");
+                let server = &config["mcp"]["workitem"];
+                assert!(server["type"] == "remote" && server["url"].as_str().unwrap().ends_with(&url), "{server}");
+                let header = server["headers"]["Authorization"].as_str().unwrap();
+                let file = header.strip_prefix("Bearer {file:").and_then(|f| f.strip_suffix('}')).unwrap();
+                assert_eq!(fs::read_to_string(file).unwrap(), token, "opencode reads the token from its file");
+                assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+            }
+            "pi" => assert_eq!(lines[..4], ["-e", glue.to_str().unwrap(), "--model", "p/m-1"], "{args}"),
+            _ => assert_eq!(lines[..4], [ws_dir.as_str(), "-e", glue.to_str().unwrap(), "--model=p/m-1"], "{args}"),
+        }
+        if kind != "opencode" {
+            // The glue offers the MCP server's tools from Claude's config file.
+            let config = fs::read_to_string(value(&args, "mcp")).unwrap();
+            assert!(config.contains(&url) && config.contains(&token), "{config}");
+        }
+
+        // A create session gets no stage, so no model and no MCP server, and its glue reports
+        // to the session's toast.
+        fs::remove_file(&log).unwrap();
+        let (status, body) = post(&w, "/api/workspaces/app/create", r#"{"input":"look into x","board":"default"}"#).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        eventually("the agent created", || log.exists()).await;
+        let args = fs::read_to_string(&log).unwrap();
+        assert!(value(&args, "create").starts_with("wi-new-"), "{args}");
+        assert!(value(&args, "mcp").is_empty() && !args.contains("m-1") && !value(&args, "config").contains("\"mcp\""), "{args}");
+
+        // Planning runs the same agent; Resume continues the recorded conversation.
+        fs::remove_file(&log).unwrap();
+        let (status, body) = post(&w, "/api/workspaces/app/plans", r#"{"input":"plan it"}"#).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"].as_str().unwrap().to_string();
+        eventually("the agent planned", || log.exists()).await;
+        let args = fs::read_to_string(&log).unwrap();
+        assert!(args.contains("This is a planning session"), "{args}");
+        if kind == "opencode" {
+            // Shell commands ask first, as in Claude's planning sessions; the record's helper does not.
+            let config: serde_json::Value = serde_json::from_str(&value(&args, "config")).unwrap();
+            let note = skills().join("workitem-pipeline/bin/workitem-plan-note");
+            assert_eq!(config["permission"]["bash"], serde_json::json!({ "*": "ask", format!("python3 {}*", note.display()): "allow" }));
+        }
+        let record = w.ws.join("plans").join(format!("{id}.md"));
+        let text = fs::read_to_string(&record).unwrap();
+        assert!(text.contains(&format!("agent: {kind}\n")), "{text}");
+        let preset = text.lines().find_map(|l| l.strip_prefix("agent_session:")).unwrap().trim().to_string();
+        let lines: Vec<&str> = args.lines().collect();
+        match kind {
+            "opencode" => {
+                assert!(preset.is_empty(), "opencode picks its own id");
+                assert_eq!(lines[0], "--prompt", "{args}");
+            }
+            "pi" => assert_eq!(lines[..4], ["-e", glue.to_str().unwrap(), "--session-id", &preset], "{args}"),
+            _ => {
+                assert!(preset.is_empty(), "omp picks its own id");
+                assert!(lines.contains(&"-e") && !lines.iter().any(|l| l.starts_with("--resume")), "{args}");
+            }
+        }
+        // What the glue of opencode and omp records once the CLI made its session.
+        let recorded = if preset.is_empty() { format!("{kind}-session") } else { preset.clone() };
+        fs::write(&record, text.replace("agent_session: \n", &format!("agent_session: {recorded}\n"))).unwrap();
+        kill_quietly(&w, &format!("wi-plan-{id}"));
+        fs::remove_file(&log).unwrap();
+        let (status, body) = post(&w, &format!("/api/plans/app/{id}/resume"), "").await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        eventually("the agent resumed", || log.exists()).await;
+        let args = fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = args.lines().collect();
+        let tail: Vec<String> = match kind {
+            "opencode" => vec!["--session".into(), recorded.clone()],
+            "pi" => vec!["--session-id".into(), recorded.clone()],
+            _ => vec![format!("--resume={recorded}")],
+        };
+        let body = &lines[..lines.len() - 3]; // without the env lines
+        assert_eq!(body[body.len() - tail.len()..], tail, "no prompt on resume: {args}");
+        kill_quietly(&w, &format!("wi-plan-{id}"));
+    }
+}
+
+/// Opt-in, since it runs the real CLIs with the user's own config and costs a model call each:
+/// `WORKITEM_LIVE_AGENTS=opencode,pi,omp cargo test --test pipeline live_agents`. An agent session
+/// reads the workitem and stops to wait for the human; its glue must then block the item. A
+/// planning session must record the agent's session and turn waiting the same way.
+#[tokio::test]
+async fn live_agents_block_the_item_when_they_stop() {
+    let Ok(kinds) = std::env::var("WORKITEM_LIVE_AGENTS") else { return };
+    let w = world();
+    for kind in kinds.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+        let (status, body) = put(&w, "/api/agent", &serde_json::json!({ "agent": { "kind": kind } }).to_string()).await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {body}");
+        let dir = format!("T-live-{kind}");
+        write_item(&w.ws, &dir, "ready_for_development", "");
+        let (status, body) = post(&w, &format!("/api/workitems/app/{dir}/session"), "").await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{kind}: {body}");
+        live_wait(&w, &format!("{kind} never blocked the item"), &format!("wi-{dir}"), || field(&w.ws, &dir, "agent_status").starts_with("blocked")).await;
+
+        let (status, body) = post(&w, "/api/workspaces/app/plans", r#"{"input":"Which folder holds the workitems? Answer in one sentence."}"#).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{kind}: {body}");
+        let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"].as_str().unwrap().to_string();
+        let record = w.ws.join("plans").join(format!("{id}.md"));
+        let value = |key: &str| {
+            let text = fs::read_to_string(&record).unwrap_or_default();
+            text.lines().find_map(|l| l.strip_prefix(&format!("{key}:"))).unwrap_or("").trim().to_string()
+        };
+        let what = format!("{kind}'s plan never recorded its session and waited; record {}", record.display());
+        live_wait(&w, &what, &format!("wi-plan-{id}"), || value("status") == "waiting" && !value("agent_session").is_empty()).await;
+    }
+}
+
+/// Waits up to 3 minutes for `done`, then kills `session`; on timeout, fails with its screen.
+async fn live_wait(w: &World, what: &str, session: &str, mut done: impl FnMut() -> bool) {
+    for _ in 0..180 {
+        if done() {
+            kill_quietly(w, session);
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let screen = std::process::Command::new("tmux").args(["-L", &w.tmux.0, "capture-pane", "-p", "-t", &format!("={session}")]).output().unwrap();
+    let record = what.rsplit_once("record ").map(|(_, path)| fs::read_to_string(path).unwrap_or_default()).unwrap_or_default();
+    panic!("{what}\n{record}\nthe screen:\n{}", String::from_utf8_lossy(&screen.stdout));
 }
 
 #[tokio::test]
@@ -1839,7 +2013,7 @@ async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_
     let (status, body) = post(&w, "/api/workitems/app/T-40-gh/session", "").await;
     assert!(!status.is_success() && body.contains("GitHub account gone is not logged in"), "{status} {body}");
     assert!(get(&w, "/api/workspaces").await.contains("GitHub account gone is not logged in"), "the header says why");
-    let (status, body) = put(&w, "/api/workspaces/app", r#"{"agent":"","issue_tracker":"jira","github_account":"gone"}"#).await;
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"agent":null,"issue_tracker":"jira","github_account":"gone"}"#).await;
     assert_eq!(status, StatusCode::OK, "a broken saved account does not block the other settings: {body}");
     let (status, body) = put(&w, "/api/workspaces/app", r#"{"issue_tracker":"github"}"#).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -1877,7 +2051,9 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
     assert!(text.contains("topic: How should we split auth?\n"), "{text}");
     assert!(text.contains("status: working\n"));
     assert!(text.contains(&format!("## Prompt\n\n{input}\n")));
-    let uuid = text.lines().find_map(|l| l.strip_prefix("claude_session: ")).unwrap().to_string();
+    assert!(text.contains("agent: claude\n"), "{text}");
+    let uuid = text.lines().find_map(|l| l.strip_prefix("agent_session: ")).unwrap().to_string();
+    assert_eq!(uuid.len(), 36, "Claude takes the id from the launcher");
 
     eventually("stub recorded the plan prompt", || stub_logs(&w).iter().any(|t| t.contains("planning session"))).await;
     let log = stub_logs(&w).into_iter().find(|t| t.contains("planning session")).unwrap();

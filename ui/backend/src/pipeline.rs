@@ -276,7 +276,7 @@ impl Pipeline {
                 return Err(format!("'{}' has both a handler and a prompt", stage.name));
             }
             if let Some(model) = stage.model.as_deref().filter(|m| !valid_model(m)) {
-                return Err(format!("'{}' has model '{model}', which is not a model name (letters, digits, . _ : - [ ], not starting with -)", stage.name));
+                return Err(format!("'{}' has model '{model}', which is not a model name (letters, digits, . _ : - / [ ], not starting with -)", stage.name));
             }
             if stage.limit == Some(0) {
                 return Err(format!("'{}' has limit 0, which no item could enter", stage.name));
@@ -312,10 +312,10 @@ pub struct Resolved {
     pub error: Option<String>,
 }
 
-/// A model name or alias for `--model`. It is one argv element, never seen by a shell; this
+/// A model name or alias for `--model`, or opencode's `provider/model`. It is one argv element, never seen by a shell; this
 /// only catches typos, and a leading `-` that would read as a flag.
 fn valid_model(name: &str) -> bool {
-    !name.is_empty() && !name.starts_with('-') && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-' | b'[' | b']'))
+    !name.is_empty() && !name.starts_with('-') && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-' | b'/' | b'[' | b']'))
 }
 
 /// Board names become file names, so only plain ones are accepted.

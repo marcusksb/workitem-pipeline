@@ -1,9 +1,9 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { api } from "./api";
 import { Dialog, DialogForm, Field } from "./Dialog";
 import { boardLabel } from "./boardState";
 import { ErrorText, Muted } from "./parts";
-import { Pipelines, Workspace } from "./types";
+import { AGENT_KINDS, Agent, AgentKind, AgentSettings, Pipelines, Workspace } from "./types";
 import { Button } from "@/components/ui/button";
 import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 
@@ -41,30 +41,82 @@ export function AddWorkspaceDialog({ onClose, onAdded }: { onClose: () => void; 
   );
 }
 
+export const agentLabel = (agent: Agent) => (agent.command ? `${agent.kind} (${agent.command})` : agent.kind);
+
+/** `kind` and `command` as the API takes them; an empty kind is none. */
+const agentOf = (kind: AgentKind | "", command: string): Agent | null => (kind ? { kind, command: command.trim() || undefined } : null);
+
+/** Kind and executable of an agent (decision 56). With `fallback`, an empty kind means that default. */
+function AgentFields(props: {
+  kind: AgentKind | "";
+  command: string;
+  onKind: (kind: AgentKind | "") => void;
+  onCommand: (command: string) => void;
+  settings?: AgentSettings;
+  fallback?: string;
+}) {
+  const installed = (kind: AgentKind) => props.settings?.kinds.find((k) => k.kind === kind)?.installed;
+  return (
+    <>
+      <Field label="Agent">
+        <NativeSelect
+          value={props.kind}
+          onChange={(e) => {
+            // An executable belongs to its kind; another kind starts with its own CLI.
+            props.onCommand("");
+            props.onKind(e.target.value as AgentKind | "");
+          }}
+          autoFocus
+        >
+          {props.fallback !== undefined && <option value="">Default ({props.fallback})</option>}
+          {AGENT_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {installed(kind) === false ? `${kind} (not found on PATH)` : kind}
+            </option>
+          ))}
+        </NativeSelect>
+      </Field>
+      {props.kind && (
+        <Field label="Executable">
+          <Input value={props.command} onChange={(e) => props.onCommand(e.target.value)} placeholder={props.kind} />
+        </Field>
+      )}
+    </>
+  );
+}
+
 export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Workspace; onClose: () => void; onSaved: () => void }) {
-  const [agent, setAgent] = useState(workspace.agent ?? "");
+  const [kind, setKind] = useState<AgentKind | "">(workspace.agent?.kind ?? "");
+  const [command, setCommand] = useState(workspace.agent?.command ?? "");
+  const [settings, setSettings] = useState<AgentSettings>();
+  const [editingDefault, setEditingDefault] = useState(false);
   const [tracker, setTracker] = useState(workspace.issue_tracker);
   const [account, setAccount] = useState(workspace.github_account ?? "");
   const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (!editingDefault) api.agentSettings().then(setSettings, (e) => setError(message(e)));
+  }, [editingDefault]);
   const save = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await api.updateWorkspace(workspace.name, { agent, issue_tracker: tracker, github_account: account });
+      await api.updateWorkspace(workspace.name, { agent: agentOf(kind, command), issue_tracker: tracker, github_account: account });
       onSaved();
     } catch (e) {
       setError(message(e));
     }
   };
+  if (editingDefault && settings) return <DefaultAgentDialog settings={settings} onClose={() => setEditingDefault(false)} />;
   return (
     <Dialog title={`Settings of ${workspace.name}`} onClose={onClose}>
       <DialogForm onSubmit={save}>
         {workspace.account_error && <ErrorText>{workspace.account_error}. No sessions or watchers run until it is fixed.</ErrorText>}
-        <Field label="Agent">
-          <Input value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="default (claude)" autoFocus />
-        </Field>
+        <AgentFields kind={kind} command={command} onKind={setKind} onCommand={setCommand} settings={settings} fallback={settings?.agent ? agentLabel(settings.agent) : "claude"} />
         <Muted>
-          One executable on PATH or an absolute path, taking the same arguments as claude. Put flags in a wrapper script. Empty uses
-          the default. Applies to sessions started from now on.
+          The CLI that runs this workspace's sessions, planning included. The executable is one name on PATH or an absolute path, for
+          example a wrapper script that adds flags; empty runs the kind's own CLI. Applies to sessions started from now on.{" "}
+          <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => setEditingDefault(true)} disabled={!settings}>
+            Edit the default of all workspaces
+          </button>
         </Muted>
         <Field label="Issue tracker">
           <NativeSelect value={tracker} onChange={(e) => setTracker(e.target.value)}>
@@ -80,6 +132,34 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
           A login gh is signed in to (gh auth login). Its token goes to this workspace's sessions, watchers and PR actions. Empty uses
           gh's active account.
         </Muted>
+        <Button type="submit" variant="primary">
+          Save
+        </Button>
+        {error && <ErrorText>{error}</ErrorText>}
+      </DialogForm>
+    </Dialog>
+  );
+}
+
+/** The agent of every workspace without its own (`config.toml`). */
+function DefaultAgentDialog({ settings, onClose }: { settings: AgentSettings; onClose: () => void }) {
+  const [kind, setKind] = useState<AgentKind | "">(settings.agent?.kind ?? "claude");
+  const [command, setCommand] = useState(settings.agent?.command ?? "");
+  const [error, setError] = useState<string>();
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.setDefaultAgent(agentOf(kind, command));
+      onClose();
+    } catch (e) {
+      setError(message(e));
+    }
+  };
+  return (
+    <Dialog title="Default agent of all workspaces" onClose={onClose}>
+      <DialogForm onSubmit={save}>
+        <AgentFields kind={kind} command={command} onKind={setKind} onCommand={setCommand} settings={settings} />
+        <Muted>Runs the sessions of every workspace without an agent of its own, from now on.</Muted>
         <Button type="submit" variant="primary">
           Save
         </Button>

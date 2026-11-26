@@ -5,6 +5,8 @@
   workitem-plan-note --status working        also: waiting, ended
   workitem-plan-note --plan < plan.md        saves the plan as the record's ## Plan
   workitem-plan-note --workitem <dir>        adds a workitem made from this session to its list
+  workitem-plan-note --agent-session <id>    the agent's own session, for Resume (set by the
+                                             agents' glue when the CLI picks the id itself)
 
 Options combine. The record is the file in WORKITEM_PLAN, which the backend sets when it starts
 a `wi-plan-*` session; the UI's Plans bar reads it.
@@ -47,6 +49,7 @@ def main(argv):
     parser.add_argument("--status", choices=STATUSES)
     parser.add_argument("--plan", action="store_true", help="read the plan from stdin")
     parser.add_argument("--workitem")
+    parser.add_argument("--agent-session")
     args = parser.parse_args(argv)
     record = os.environ.get("WORKITEM_PLAN")
     if not record:
@@ -69,6 +72,8 @@ def main(argv):
         if args.workitem.strip() not in items:
             items.append(args.workitem.strip())
         frontmatter = set_field(frontmatter, "workitems", ", ".join(items))
+    if args.agent_session:
+        frontmatter = set_field(frontmatter, "agent_session", one_line(args.agent_session))
     if args.plan:
         plan = sys.stdin.read()
         if not plan.strip():

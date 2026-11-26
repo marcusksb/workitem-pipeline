@@ -38,6 +38,11 @@ class PlanTest(unittest.TestCase):
         self.assertIn("workitems: X-1-a\n---\n", text)
         self.assertIn("## Prompt\n\nt\n", text)
 
+    def test_note_records_the_agent_session(self):
+        self.run_script("workitem-plan-note", "--agent-session", "ses_1")
+        self.run_script("workitem-plan-note", "--agent-session", "ses_2")
+        self.assertIn("agent_session: ses_2\n---\n", self.record.read_text())
+
     def test_note_caps_the_summary(self):
         self.run_script("workitem-plan-note", "x" * 500)
         summary = next(l for l in self.record.read_text().splitlines() if l.startswith("summary:"))

@@ -98,7 +98,7 @@ export type WorkspaceWatch = { every: string; command: string; args: string[]; i
 export type Workspace = {
   name: string;
   dir: string;
-  agent?: string;
+  agent?: Agent;
   issue_tracker: string;
   github_account?: string;
   watch?: WorkspaceWatch[];
@@ -106,8 +106,15 @@ export type Workspace = {
   account_error?: string;
 };
 
+export const AGENT_KINDS = ["claude", "opencode", "pi", "omp"] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
+/** The agent CLI that runs sessions; `command` defaults to the kind's name. */
+export type Agent = { kind: AgentKind; command?: string };
+/** The default agent, and which kinds have their own CLI on the backend's PATH. */
+export type AgentSettings = { agent: Agent | null; kinds: { kind: AgentKind; installed: boolean }[] };
+
 /** What the workspace settings dialog changes; an empty value clears it. */
-export type WorkspaceChange = { agent?: string; issue_tracker?: string; github_account?: string };
+export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; github_account?: string };
 
 /** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
 export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };

@@ -1,7 +1,8 @@
-//! Planning sessions (decisions 36, 49): a `claude` conversation about a workspace with no workitem
-//! and no worktree, in tmux session `wi-plan-<id>`. Its record `<workspace>/plans/<id>.md` is the
-//! source of truth (topic, summary, status, Claude session id, optional plan); tmux only tells
-//! whether it is live. The agent updates the record through `workitem-plan-note` and the hooks.
+//! Planning sessions (decisions 36, 49, 56): a conversation with the workspace's agent about a
+//! workspace with no workitem and no worktree, in tmux session `wi-plan-<id>`. Its record
+//! `<workspace>/plans/<id>.md` is the source of truth (topic, summary, status, the agent's kind and
+//! session id, optional plan); tmux only tells whether it is live. The agent updates the record
+//! through `workitem-plan-note` and the hooks (Claude) or its glue.
 use std::{
     collections::HashSet,
     fs,
@@ -19,8 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::ApiError,
-    config::Workspace,
-    launch, tmux,
+    config::{Agent, AgentKind, Workspace},
+    launch::{self, Conversation},
+    tmux,
     workitem::{self, frontmatter},
     AppState, Shared,
 };
@@ -239,13 +241,14 @@ Only when the human asks, you may edit the workspace's board files ({workspace}/
 Keep the record of this session current, always with exactly these commands:\n\
 - Right after reading the request, and after each meaningful step: python3 {note} \"<one line: what this is about and where it stands>\"\n\
 - Only when the human wants a plan saved: python3 {note} --plan <<'PLAN' ... PLAN (the whole plan as markdown on stdin).\n\
-- Only when the human asks for workitems: use the workitem-create skill with --workspace {workspace} --board <board>, once per board \
+- Only when the human asks for workitems: follow the instructions in {create} with --workspace {workspace} --board <board>, once per board \
 the work touches (one item per repo, linked with depends_on as that skill describes), then python3 {note} --workitem <dir> for each item.\n\
 The status (working, waiting) is kept by hooks; do not set it. The tmux session is {session}.\n\
 The request, as typed in the web UI:\n\n{input}\n",
         workspace = workspace.dir.display(),
         boards = launch::board_list(state, workspace),
         note = note.display(),
+        create = state.skills_dir.join("workitem-create/SKILL.md").display(),
     )
 }
 
@@ -261,12 +264,15 @@ pub async fn create(
     }
     let id = hex(&rand::rng().random::<[u8; 3]>());
     let session = session_name(&id);
-    let claude_session = uuid();
+    let agent = state.store.agent_for(&workspace);
+    // Kinds that pick their own id get it recorded by their glue once it exists.
+    let agent_session = if launch::presets_session(agent.kind) { uuid() } else { String::new() };
     let folder = folder(&workspace.dir);
     let path = folder.join(format!("{id}.md"));
     let text = format!(
-        "---\ntopic: {topic}\nsummary: \nstatus: working\nclaude_session: {claude_session}\ncreated: {created}\n---\n\n## Prompt\n\n{input}\n",
+        "---\ntopic: {topic}\nsummary: \nstatus: working\nagent: {kind}\nagent_session: {agent_session}\ncreated: {created}\n---\n\n## Prompt\n\n{input}\n",
         topic = topic(input),
+        kind = agent.kind.name(),
         created = now(),
     );
     let prompt = prompt(&state, &workspace, &session, input);
@@ -276,22 +282,31 @@ pub async fn create(
     }
     fs::create_dir_all(&folder).map_err(internal)?;
     fs::write(&path, text).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &["--session-id", &claude_session], Some(&prompt)).await {
+    let preset = (!agent_session.is_empty()).then_some(agent_session.as_str());
+    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &agent, Conversation::New(preset), Some(&prompt)).await {
         let _ = fs::remove_file(&path);
         return Err(conflict(e));
     }
     Ok((StatusCode::ACCEPTED, Json(Started { id, session })))
 }
 
-/// Continues an ended plan's Claude conversation in a new `wi-plan-<id>` session.
+/// Continues an ended plan's agent conversation in a new `wi-plan-<id>` session, with the kind
+/// that holds it: the workspace's agent when it is that kind, else the kind's own CLI. Older
+/// records hold a Claude conversation as `claude_session`.
 pub async fn resume(State(state): State<Shared>, UrlPath((workspace, id)): UrlPath<(String, String)>) -> Result<(StatusCode, Json<Started>)> {
     let workspace = workspace_of(&state, &workspace)?;
     let path = record(&workspace, &id).ok_or(ApiError::not_found("plan"))?;
     let text = fs::read_to_string(&path).map_err(internal)?;
-    let claude_session = frontmatter(&text).get("claude_session").cloned().unwrap_or_default();
-    if claude_session.is_empty() {
-        return Err(conflict("the plan has no claude_session to resume"));
-    }
+    let fields = frontmatter(&text);
+    let field = |key: &str| fields.get(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let kind = match field("agent") {
+        Some(name) => serde_json::from_value::<AgentKind>(serde_json::Value::String(name.clone())).map_err(|_| conflict(format!("the plan's agent '{name}' is unknown")))?,
+        None => AgentKind::Claude,
+    };
+    let Some(agent_session) = field("agent_session").or_else(|| field("claude_session")) else {
+        return Err(conflict(format!("the plan has no {} session to resume", kind.name())));
+    };
+    let agent = Some(state.store.agent_for(&workspace)).filter(|a| a.kind == kind).unwrap_or(Agent { kind, command: None });
     let session = session_name(&id);
     let _busy = state.busy.lock().await;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
@@ -299,7 +314,7 @@ pub async fn resume(State(state): State<Shared>, UrlPath((workspace, id)): UrlPa
         return Err(conflict(format!("{session} is still running")));
     }
     workitem::set_fields(&path, &[("status", "working")]).map_err(internal)?;
-    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &["--resume", &claude_session], None).await {
+    if let Err(e) = launch::spawn_plan(&state, &session, &workspace, &path, &agent, Conversation::Resume(&agent_session), None).await {
         let _ = workitem::set_fields(&path, &[("status", "ended")]);
         return Err(conflict(e));
     }
