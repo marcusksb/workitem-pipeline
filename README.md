@@ -56,7 +56,7 @@ Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/
 
 ### Custom boards
 
-Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **New board** starts it as a copy of the bundled `skills/workitem-pipeline/pipeline.json`. Edit the file to change it. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, a `require`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board (`boards/<name>/skills/`) or per workspace (`skills/`). Details: [`workitem-pipeline.md`](workitem-pipeline.md).
+Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **New board** starts it as a copy of the bundled `skills/workitem-pipeline/pipeline.json`. Edit the file to change it. Stages can use a skill, an inline `prompt`, a `gate`, a `limit`, a `require`, or a `watch` script that runs on a timer. Handler skills and watch scripts can be overridden per board (`boards/<name>/skills/`) or per workspace (`skills/`). Details: [`docs/spec.md`](docs/spec.md).
 
 ## Skills
 
@@ -88,7 +88,7 @@ npm test        # cargo test + vitest
 npm run build   # release binary at backend/target/release/workload
 ```
 
-Settings come from env vars: `WORKITEM_UI_HOME` (default `~/.workitems-pipeline`), `WORKITEM_UI_PORT`, `WORKITEM_UI_TMUX_SOCKET`, `WORKITEM_UI_SKILLS`, `WORKITEM_UI_CLAUDE`, `WORKITEM_UI_GH`, `WORKITEM_UI_DISPATCH=off`. Design and decisions: [`workitem-pipeline-ui.md`](workitem-pipeline-ui.md).
+Settings come from env vars: `WORKITEM_UI_HOME` (default `~/.workitems-pipeline`), `WORKITEM_UI_PORT`, `WORKITEM_UI_TMUX_SOCKET`, `WORKITEM_UI_SKILLS`, `WORKITEM_UI_CLAUDE`, `WORKITEM_UI_GH`, `WORKITEM_UI_DISPATCH=off`. Spec: [`docs/spec.md`](docs/spec.md); decision log: [`docs/decisions.md`](docs/decisions.md).
 
 ## Tests
 

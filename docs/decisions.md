@@ -1,10 +1,12 @@
-# Workitem pipeline UI — design
+# Decision log
 
-## Goal
+History of the numbered design decisions, newest last. It is append-only: a decision is never edited or renumbered, because code comments cite them by number ("decision 61"). A later decision may supersede an earlier one; the current behaviour is in [`spec.md`](spec.md), and where the two disagree the spec wins.
 
-A local web UI to see and steer workitems across projects, and to attach a browser terminal to an agent session when it is blocked. Backend in Rust, frontend in React. Builds on `workitem-pipeline.md`; the pipeline stays the source of truth.
+A behaviour change appends the next number to the Workload UI list below and folds its result into `spec.md`.
 
-## Decisions
+## Workload UI decisions
+
+Numbered 1 to 77 (57 to 59 were never used; 26 and 27 sit after 32). Code comments that say "decision N" mean this list.
 
 1. **Access:** localhost only. Bind `127.0.0.1`, fixed port (default 7373, overridable).
 2. **Auth:** persistent random token, generated on first run and stored in `~/.config/workitem-ui/config.toml` (mode `0600`). The backend prints `http://127.0.0.1:<port>/#token=…`. The page posts the fragment once to `/api/login` and gets an `HttpOnly; SameSite=Strict` cookie. Every API call and WebSocket upgrade checks the cookie; the WebSocket also requires `Origin` to equal the server's own origin. `workload --rotate-token` replaces the token.
@@ -27,9 +29,9 @@ A local web UI to see and steer workitems across projects, and to attach a brows
 
 Sessions without a workitem (`wi-new-*`) show as toasts with a pop-out terminal link (decision 75), because a blocked create session can only be answered by attaching. Env overrides: `WORKITEM_UI_PORT`, `WORKITEM_UI_CONFIG`, `WORKITEM_UI_TMUX_SOCKET`, `WORKITEM_UI_SKILLS` (default `~/.claude/skills`), `WORKITEM_UI_CLAUDE` (default `claude`), `WORKITEM_UI_GH` (default `gh`), `WORKITEM_UI_DISPATCH=off`.
 
-## Configurable boards (planned)
+### Configurable boards (planned)
 
-Each project can define its own boards: the columns, and what each column's watcher does. Decisions 12 to 27 extend the list above. Once built they replace the hardcoded paths and stage names in decisions 3, 8 and 9. The file format is in `workitem-pipeline.md`.
+Each project can define its own boards: the columns, and what each column's watcher does. Decisions 12 to 27 extend the list above. Once built they replace the hardcoded paths and stage names in decisions 3, 8 and 9. The file format was in the pipeline design doc; it is now in `spec.md`.
 
 12. **Location.** Items and config live in `<repo>/.workitems/`, not under `.claude/`, so the pipeline is not tied to Claude. If `.workitems/` does not exist, `<repo>/.claude/workitems/` is read instead, so existing projects keep working. `workitem-migrate` moves an old folder over; nothing migrates by itself. The path is built in one place per language (`workitem-move`, `workitem.rs`).
 13. **Scope.** Boards are per project and configured by file only; there is no editor in the UI (except the top-level settings, 73). A project's board file replaces the bundled `skills/workitem-pipeline/pipeline.json` in full, with no merging. A project without a file uses the bundled one.
@@ -66,7 +68,7 @@ Each project can define its own boards: the columns, and what each column's watc
 42. **Column order per board** (built; `Pipeline::order`, `boardState::treeOrder`). A board file can carry a top-level `"order"`: a list of item fields, each optionally followed by `asc` (the default) or `desc`, e.g. `["issue_status_category", "issue_status desc"]`. Every column of the board sorts its siblings by those fields in turn and then by title; children still follow their parent. A stage can carry its own `order` of the same shape, which replaces the board's for that column. `issue_status_category` ranks `new`, `indeterminate`, `done`; other fields compare as text, numbers as numbers. Items with an empty value go last in either direction. The backend rejects a field outside `issue_status_category`, `issue_status`, `issue`, `title`, `kind`, `agent_status`, `created`, `dir`, so a typo shows as a board error instead of a silent no-op. With several projects on one board, the first project whose file has a stage `order` decides, else the first with a board `order`. No `order` means title only; the bundled board sorts by `issue_status_category`, then title.
 43. **Activity toasts** (built; `activity.ts`, `ActivityToasts.tsx`, `quips.ts`). The frontend compares each poll of `/api/items` with the one before (`activityEvents`) and shows a toast, for every project and board, only for what needs you or is worth celebrating: an item done (a final stage, with confetti), a PR became approved, or an item became blocked (once per reason). Moves, CI, merges, Jira status and the rest used to toast too and were dropped as noise; the board shows them. The first poll and a PR's first reading stay quiet. Nothing is stored and the backend knows nothing of it, so it only sees what changes while a tab is open and cannot tell who made a change; a persistent log would need the writers to append events, which is a separate decision. Toasts sit bottom left of the board area, clear of the detail panel, newest on top, at most 4 with "+N more"; a poll with more than 4 events becomes one summary toast. Each leaves when its 6s countdown bar ends (paused while the stack is hovered); blocked ones stay until dismissed. Clicking one opens the item. The item open in the detail panel gets no blocked toast while the page has focus. Text is a plain line plus a random quip from `quips.ts`; each event type has its own icon animation, CSS only, and `prefers-reduced-motion` turns them into fades. There is no mute switch. Sounds and browser notifications stay in `useAlerts`.
 
-## Workspaces
+### Workspaces
 
 Decisions 44 to 53 replace projects with workspaces, so a feature that spans a frontend and a backend repo is handled in one place. Where an earlier decision says "project" or `<repo>/.workitems`, read "workspace" and the workspace folder; 2, 4, 7, 12, 21, 22, 23, 39 and the default-board parts of 13, 20, 32 and 37 are superseded as described here.
 
@@ -87,7 +89,7 @@ Decisions 44 to 53 replace projects with workspaces, so a feature that spans a f
 60. **Model per stage** (`pipeline.rs`, `launch.rs`). A stage can name a `model`; every item session started while the item is in that stage (handler, fixer, Start session, Discuss brief) gets `--model <model>`, so the same skill can run on different models on different boards, and inline-prompt stages are covered too. A skill's frontmatter `model:` is ignored, because the launcher strips the frontmatter. Without `model` no flag is passed and the agent's own default applies (settings, `ANTHROPIC_MODEL`, the workspace `agent`); Create and Plan sessions have no stage and always use it. The value must be letters, digits and `. _ : - / [ ]` (`/` for opencode's `provider/model`, 56), not starting with `-` (a typo, not a security check: it is one argv element); anything else makes the board invalid. There is no list of known models, so aliases, full IDs and names only a custom agent knows all work. The Settings tab of the stage dialog (decision 76) shows and edits it, empty meaning the agent default; the cards do not.
 61. **Questions to the parent over MCP** (`questions.rs`, `launch.rs`). An item asks its parent item (`parent:`) through an MCP server the backend serves per item at `/api/mcp/<workspace>/<dir>` (Streamable HTTP, JSON responses only, Bearer token like `/run`), not through the terminal, so any agent with an MCP client can take part and nothing reads or types into a pane. Tools: `ask_parent` (records the question in the item's `questions.json`, sets `blocked: asking parent: <question>` and waits up to `ask_wait`, 240s, for the answer), `wait_for_answer`, `list_child_questions` and `answer_child` (only the parent may answer, and only a parent with `answers_children: true` is asked: something must answer, and otherwise the child asks in its terminal as before; once nothing is open the block lifts to `working` while the asker's session waits, else `ok`, so its handler runs again and finds the answer in the file). The backend decides nothing beyond that: who answers, and when the human is asked, is the parent's board's business (on the features board its `children` watcher starts a resolver on the parent). Every item session gets `--mcp-config` with a file in `<root>/mcp/` (mode 0600, because argv is public), `hooks.json` allows `mcp__workitem`, and the session protocol tells an item with a `parent:` to ask with `ask_parent`. Registering the server is the agent-specific part; decision 56 maps it for each agent kind (opencode through its config, pi and omp through their glue), and a `claude` kind's command must accept `--mcp-config` like the other Claude flags. Permission prompts stay in the terminal. Rejected: Claude Code's `SendMessage` between named sessions (Claude-only, and messages live only while both sessions run) and a shell helper polling a file (depends on the agent calling it again).
 
-## Issue trackers and GitHub accounts (built)
+### Issue trackers and GitHub accounts (built)
 
 Decisions 62 to 72 let a workspace use GitHub Issues instead of Jira and its own GitHub account. The code host stays GitHub; PRs get no provider seam until a second host exists (`pr-status` writing facts that `pr-review` reads is already where one would go). Bitbucket and GitLab are not built.
 
@@ -110,25 +112,7 @@ Decisions 62 to 72 let a workspace use GitHub Issues instead of Jira and its own
 
 Build order: (1) `workitem-issue` and the shared tracker module, `issue-status` on top of it, tests with stubbed `gh` and a stub Jira server; (2) `issue_tracker`, `github_account`, `GH_TOKEN` injection and the fail-closed alert; (3) `issue_project`, `reviewers` and `issue_state` (with the `workitem-move` hook) and validation and the *Add board* fields; (4) skills call only `workitem-issue`; (5) one real item in a GitHub workspace from issue to a merged PR that closes it.
 
-## UI
-
-Kanban, one column per stage. A left sidebar (`Sidebar.tsx`) holds the workspace switcher (with *Add workspace*), Search ⌘K (a palette that finds workitems and also runs *New workitem*, *New plan* and *Switch to workspace*), the workspace's boards as vertical tabs with their item count and blocked count, *New board*, the Plans list and, at the bottom, *Learnings* (of the board on screen), *Watchers* and *Settings*. The content column has a top bar (`TopBar.tsx`) with the board's name and repo, the Board/List toggle and *New workitem*, then the board. Below 768px the sidebar stacks above a full-height content column.
-
-- **Card:** title, project badge, `agent_status` chip (blocked in red with reason, working with spinner, waiting as a calm 💤 chip with the reason in its tooltip and no alert), terminal icon when a session is alive. In `in_review`: approval, merge and CI pills.
-- **Detail panel** (right, on card click): the title with its type icon and close, pills (stage, board, which shows that board, issue, PR, agent status, open follow-ups), an alert box while the item is blocked (the reason, *Start agent* when no session runs, *Clear*) or at a gate (*Discuss brief* when no session runs, and *Approve*), then tabs: *Brief* (rendered `workitem.md` under *Discuss brief* and *Edit*; *Edit* swaps in a textarea for the body after the frontmatter, and the save is refused with 409 if the file changed since the editor opened), *Info*, *Files* (the item folder; a picked file is previewed: image, video, Markdown, text, or HTML in a frame with `sandbox="allow-scripts"`), *PR*, *Depends on*, *Children*, *Terminal* (xterm.js with start, clear blocked and kill session), and *Remove* at the end of the tab row. Only the actions valid for the state are shown. The header has "New workitem".
-- **URL and history:** the selected item and its tab live in the hash (`#<project>/<dir>[/<tab>]`). Card clicks, tab switches and Close push a history entry, Back/Forward walk them, and a pasted deep link opens the item on that tab.
-- No drag-and-drop. Moves happen only through the rule-checked actions.
-
-## Layout and build
-
-```
-ui/backend    Rust, axum
-ui/frontend   React, Vite, TypeScript, xterm.js
-```
-
-One binary: the built frontend is embedded (`rust-embed`) and served with the API and WebSocket on one port. Dev: `vite dev` proxies `/api` and `/ws` to the Rust server. `install.sh` is unchanged; the UI is built with `cargo build --release`.
-
-## Build order
+### Build order
 
 1. **Read-only board and terminal.** Config and project add/remove, frontmatter reader, tmux listing, token auth, PTY bridge, kanban, detail panel, terminal. Done when you can open a blocked item and type into its agent from the browser.
 2. **Direct actions.** Approve, reject, clear blocked.
@@ -143,18 +127,40 @@ Configurable boards (decisions 12 to 25), each step shippable on its own:
 8. **Several boards.** `board:` frontmatter, `boards/` lookup, `--board`, the tab switcher with badges.
 9. **Handler context and lookup.** The launcher's stage block, the handler lookup chain (26, 27) with the launcher reading `SKILL.md`, and the handler skills changed to use the stage block.
 
-## Testing
-
-- Rust unit tests: frontmatter parser, dispatcher rules (skip blocked, attempt cap, reap dead panes, session-path check).
-- Integration tests against real tmux on an isolated socket (`tmux -L wi-test`) with a stub `claude` script that sets `agent_status`. The backend takes the socket name as a parameter. No tmux mocks.
-- Frontend: Vitest for state logic, one Playwright smoke test of board and terminal against the stub setup.
-
-## Non-goals
+### Non-goals
 
 Remote or multi-user access, drag-and-drop stage moves, Jira/Sentry polling, a `workitem-watch` port, a service installer, Tauri/Electron.
 
-## Risks
+### Risks
 
 - Run rules exist in the `workitem-run` skill and in the Rust dispatcher until the skill is retired for auto stages.
 - Web and real-terminal clients attached at once make tmux size the window to the smaller one.
 - The token protects against other web pages, not against other local processes that can read the config file.
+
+## Pipeline decisions (original design)
+
+The first design of the pipeline itself, before the UI. Its own numbers collide with the list above, so they are cited as P1 to P11 (decision 35 calls P11 "pipeline decision 11").
+
+1. **State:** `stage:` in `workitem.md` frontmatter is the source of truth. Jira mirroring is a later add-on.
+2. **Stages:** `analyze → ready_for_development → in_development → in_review → done`. "Blocked" is `agent_status: blocked: <reason>`, not a stage. `waiting: <what>` is an agent that idles on purpose (CI, a deploy) and needs nobody; its session is kept, and the notify hook only blocks it on a permission or elicitation prompt.
+3. **Registry:** one `pipeline.json` in `~/.claude/skills/workitem-pipeline/`. It lists each stage with `handler`, `next` (allowed transitions) and `auto`.
+4. **Transitions:** only `bin/workitem-move <workitem-dir> <stage>` changes `stage`. It checks the registry and the brief rule.
+5. **Runner:** `/workitem-run`, one per repo, meant for `/loop 10m /workitem-run`. It only runs stages with `auto: true` (`analyze`, `in_development`). Pattern from `workitem-watch`: lock file `workitem-<dir>.running`, stale after 20 min, max 3 attempts, then `agent_status: blocked` and a push notification.
+6. **Analyze mode** (`analyze`, UI decision 74). A new item starts in `analyze`; when `analyze_mode` is missing, `workitem-analyze` sets it first (there is no separate triage stage):
+   - concrete steps, named files/layers, no open questions → `validate`
+   - bug or Sentry error → `root_cause`
+   - feature request → `clarify`
+   - too vague → stay in `analyze`, `agent_status: blocked: <what is missing>`
+7. **Review brief:** `analyze` writes a `## Review brief` section: root cause or decisions, plan, risk, size, test plan, assumptions, issue and system error links. `bin/workitem-move` refuses `ready_for_development` if a part is missing. A linked issue is required only where a stage's `require` has `issue: linked` (on the bundled board, `ready_for_development`); `workitem-move` refuses such a stage while `issue:` is `none`, and the skills ask for an issue only there.
+8. **Approval:** `/workitem-approve <dir>` prints the brief, asks to confirm, sets `approved: true` and `approved_at`. Reject with a comment moves the item back to `analyze`. After approval it offers to start development.
+9. **Intake:** manual. `workitem-create` accepts a Jira key, text, or a Sentry issue URL. New field `source: issue | system_error | text`.
+10. **Existing skills:** `workitem-start` is the `in_development` handler and ends by moving to `in_review`. `workitem-watch` also moves an item to `done` when its PR is merged. Old `status` values migrate: `pending` → `ready_for_development` + `approved: true`, `in_progress` → `in_development`, `in-review` → `in_review`.
+11. **Follow-ups:** work left for after the item is done goes in a `## Follow-ups` section, last in `workitem.md` (after `## Review brief`), one `- [ ]` line each. Agents never work on a follow-up. `analyze` and the development handler add one only when something has to happen after the item is done (a deploy step, a cleanup after a flag rollout, telling someone). Humans add and tick them by hand. Skills only append: they never delete, reword or untick a line, and skip one that is already listed. An open follow-up is an unticked line between `## Follow-ups` and the next `##` heading.
+
+### Non-goals
+
+Pull-based intake (Jira/Sentry polling), Jira status mirroring, cross-repo runner, central workitem store.
+
+### Open points (decided during build)
+
+- `analyze` is read-only for Sentry and the codebase. No production data access by default.
