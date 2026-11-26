@@ -92,7 +92,7 @@ pub async fn spawn(state: &AppState, session: &str, workspace: &Workspace, scope
         Scope::Item(place) => (state.skills_dir.join("workitem-pipeline/hooks.json").into(), Some(Mcp::new(state, workspace, place.dir))),
         Scope::Workspace => (create_settings(state).into(), None),
     };
-    let launch = Launch { dirs: &dirs, claude_settings, model: model.as_deref(), mcp: mcp.as_ref() };
+    let launch = Launch { dirs: &dirs, claude_settings, model: model.as_deref(), mcp: mcp.as_ref(), plan: false };
     let mut args = agent_args(state, agent.kind, &launch, &mut env)?;
     if agent.kind == AgentKind::Opencode {
         // The prompt follows as the flag's value.
@@ -111,6 +111,8 @@ struct Launch<'a> {
     model: Option<&'a str>,
     /// The item's `workitem` MCP server (decision 61); item sessions only.
     mcp: Option<&'a Mcp>,
+    /// A planning session: opencode asks before shell commands, as Claude does there.
+    plan: bool,
 }
 
 /// Maps a session's folders, settings, model and MCP server to `kind`'s arguments, before the
@@ -139,13 +141,20 @@ fn agent_args(state: &AppState, kind: AgentKind, launch: &Launch, env: &mut Vec<
         }
     }
     if let Some(model) = launch.model {
-        args.extend(match kind {
-            AgentKind::Opencode => vec!["-m".into(), model.into()],
-            AgentKind::Omp => vec![format!("--model={model}").into()],
-            AgentKind::Claude | AgentKind::Pi => vec!["--model".into(), model.into()],
-        });
+        args.extend(model_args(kind, model));
     }
     Ok(args)
+}
+
+/// The stage's model (decision 60) in `kind`'s flag. opencode wants `provider/model` and refuses
+/// a Claude alias like `opus`, so it gets none and uses its own default.
+fn model_args(kind: AgentKind, model: &str) -> Vec<OsString> {
+    match kind {
+        AgentKind::Opencode if !model.contains('/') => vec![],
+        AgentKind::Opencode => vec!["-m".into(), model.into()],
+        AgentKind::Omp => vec![format!("--model={model}").into()],
+        AgentKind::Claude | AgentKind::Pi => vec!["--model".into(), model.into()],
+    }
 }
 
 /// The plugin or extension of `kind` that reports waiting and runs the planning guards.
@@ -172,6 +181,12 @@ fn opencode_config(state: &AppState, launch: &Launch) -> Result<String, String> 
         "plugin": [format!("file://{}", plugin.display().to_string().replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F"))],
         "permission": { "external_directory": rules },
     });
+    if launch.plan {
+        // The guard covers edit tools only, so a shell command asks first, as in Claude's
+        // planning sessions; the record's own helper runs without asking.
+        let note = state.skills_dir.join("workitem-pipeline/bin/workitem-plan-note");
+        config["permission"]["bash"] = json!({ "*": "ask", format!("python3 {}*", note.display()): "allow" });
+    }
     if let Some(mcp) = launch.mcp {
         let token = mcp.token_file(state)?;
         config["mcp"] = json!({ crate::questions::SERVER: {
@@ -279,7 +294,7 @@ pub async fn spawn_plan(state: &AppState, session: &str, workspace: &Workspace, 
     let mut env = vec![format!("WORKITEM_PLAN={}", record.display()), format!("WORKITEM_WORKSPACE={}", workspace.dir.display()), CLAUDE_MD_OF_ADDED_DIRS.into()];
     let program = program(state, agent)?;
     let dirs = state.repos(workspace);
-    let launch = Launch { dirs: &dirs, claude_settings: plan_settings(state).into(), model: None, mcp: None };
+    let launch = Launch { dirs: &dirs, claude_settings: plan_settings(state).into(), model: None, mcp: None, plan: true };
     let mut args = agent_args(state, agent.kind, &launch, &mut env)?;
     let flags: Vec<OsString> = match (agent.kind, conversation) {
         (AgentKind::Claude, Conversation::New(Some(id))) => vec!["--session-id".into(), id.into()],
@@ -699,6 +714,14 @@ mod tests {
 
     fn place<'a>(workspace: &'a Path, board: &'a str) -> Place<'a> {
         Place { dir: "item-1", workspace, repo: Some(Path::new("/r/proj")), board }
+    }
+
+    #[test]
+    fn opencode_gets_only_a_provider_model() {
+        assert_eq!(model_args(AgentKind::Opencode, "opus"), Vec::<OsString>::new(), "a Claude alias falls back to opencode's default");
+        assert_eq!(model_args(AgentKind::Opencode, "anthropic/claude-opus"), ["-m", "anthropic/claude-opus"]);
+        assert_eq!(model_args(AgentKind::Omp, "opus"), ["--model=opus"]);
+        assert_eq!(model_args(AgentKind::Claude, "opus"), ["--model", "opus"]);
     }
 
     #[test]

@@ -71,6 +71,17 @@ export async function refusedEdit(tool, input, cwd) {
   return null;
 }
 
+/**
+ * The shell command a planning session must ask the human about, or null. The edit guard does
+ * not see shell commands, so they ask first, as in Claude's planning sessions; a plain call of
+ * the record's own helper (bin/workitem-plan-note) runs without asking.
+ */
+export function askedCommand(tool, input) {
+  if (!process.env.WORKITEM_PLAN || !/^(bash|shell)$/i.test(tool ?? "")) return null;
+  const command = String(input?.command ?? "");
+  return /^python3 \S*\/workitem-plan-note(\s[^;&|`$()<>\n]*)?(\s*<\s*\S+)?$/.test(command.trim()) ? null : command;
+}
+
 /** The files a patch (`*** Update File: <path>` and the like) adds, changes, moves or deletes. */
 function patchedFiles(patch) {
   if (typeof patch !== "string") return [];

@@ -307,7 +307,7 @@ async fn the_default_agent_runs_each_kind_with_its_own_arguments_and_glue() {
     assert_eq!(kinds, ["claude", "opencode", "pi", "omp"]);
     assert_eq!(settings["kinds"][0]["installed"], true, "the stub is the default claude");
     fs::create_dir_all(w.ws.join("boards")).unwrap();
-    fs::write(w.ws.join("boards/kinds.json"), board(&w, r#"[{"name":"qa","model":"m-1"}]"#)).unwrap();
+    fs::write(w.ws.join("boards/kinds.json"), board(&w, r#"[{"name":"qa","model":"p/m-1"}]"#)).unwrap();
     let token = w.state.store.token();
     for kind in ["opencode", "pi", "omp"] {
         // Records its arguments, one per line, and the env the launcher sets for the kinds.
@@ -337,12 +337,13 @@ async fn the_default_agent_runs_each_kind_with_its_own_arguments_and_glue() {
         let url = format!("/api/mcp/app/{dir}");
         match kind {
             "opencode" => {
-                assert_eq!(lines[..3], ["-m", "m-1", "--prompt"], "the stage's model: {args}");
+                assert_eq!(lines[..3], ["-m", "p/m-1", "--prompt"], "the stage's model: {args}");
                 let config: serde_json::Value = serde_json::from_str(&value(&args, "config")).unwrap();
                 assert_eq!(config["plugin"][0], format!("file://{}", glue.display()));
                 let rules = config["permission"]["external_directory"].as_object().unwrap();
                 assert!(rules.contains_key(&format!("{}/**", w.ws.display())), "the workspace, as Claude's --add-dir: {rules:?}");
                 assert!(rules.values().all(|v| v == "allow"), "only allow rules: {rules:?}");
+                assert!(config["permission"]["bash"].is_null(), "item sessions keep the user's shell setting");
                 let server = &config["mcp"]["workitem"];
                 assert!(server["type"] == "remote" && server["url"].as_str().unwrap().ends_with(&url), "{server}");
                 let header = server["headers"]["Authorization"].as_str().unwrap();
@@ -350,8 +351,8 @@ async fn the_default_agent_runs_each_kind_with_its_own_arguments_and_glue() {
                 assert_eq!(fs::read_to_string(file).unwrap(), token, "opencode reads the token from its file");
                 assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
             }
-            "pi" => assert_eq!(lines[..4], ["-e", glue.to_str().unwrap(), "--model", "m-1"], "{args}"),
-            _ => assert_eq!(lines[..4], [ws_dir.as_str(), "-e", glue.to_str().unwrap(), "--model=m-1"], "{args}"),
+            "pi" => assert_eq!(lines[..4], ["-e", glue.to_str().unwrap(), "--model", "p/m-1"], "{args}"),
+            _ => assert_eq!(lines[..4], [ws_dir.as_str(), "-e", glue.to_str().unwrap(), "--model=p/m-1"], "{args}"),
         }
         if kind != "opencode" {
             // The glue offers the MCP server's tools from Claude's config file.
@@ -377,6 +378,12 @@ async fn the_default_agent_runs_each_kind_with_its_own_arguments_and_glue() {
         eventually("the agent planned", || log.exists()).await;
         let args = fs::read_to_string(&log).unwrap();
         assert!(args.contains("This is a planning session"), "{args}");
+        if kind == "opencode" {
+            // Shell commands ask first, as in Claude's planning sessions; the record's helper does not.
+            let config: serde_json::Value = serde_json::from_str(&value(&args, "config")).unwrap();
+            let note = skills().join("workitem-pipeline/bin/workitem-plan-note");
+            assert_eq!(config["permission"]["bash"], serde_json::json!({ "*": "ask", format!("python3 {}*", note.display()): "allow" }));
+        }
         let record = w.ws.join("plans").join(format!("{id}.md"));
         let text = fs::read_to_string(&record).unwrap();
         assert!(text.contains(&format!("agent: {kind}\n")), "{text}");

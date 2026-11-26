@@ -31,7 +31,7 @@ const blocked = "blocked: waiting for input, tmux attach -t wi-T-1";
 function extension(factory, tools = {}) {
   const handlers = {};
   const loaded = factory({ on: (name, handler) => (handlers[name] ??= []).push(handler), registerTool: (tool) => (tools[tool.name] = tool) });
-  const fire = (name, event = {}) => Promise.all((handlers[name] ?? []).map((h) => h(event, {})));
+  const fire = (name, event = {}, ctx = {}) => Promise.all((handlers[name] ?? []).map((h) => h(event, ctx)));
   fire.loaded = loaded;
   return fire;
 }
@@ -147,6 +147,23 @@ test("pi and omp planning: mark working, refuse code edits; omp records its sess
     omp({ on: (name, handler) => (handlers[name] = handler) });
     await handlers.session_start({}, { sessionManager: { getSessionFile: () => "/s/2026_abc.jsonl" } });
     assert.match(text(), /^agent_session: \/s\/2026_abc\.jsonl$/m);
+  }));
+
+test("pi planning: asks the human before a shell command, except the record's helper", () =>
+  planning(async (text) => {
+    const fire = extension(pi);
+    const asked = [];
+    const ui = (answer) => ({ hasUI: true, ui: { confirm: async (_title, command) => (asked.push(command), answer) } });
+    const bash = (command, ctx) => fire("tool_call", { toolName: "bash", input: { command } }, ctx).then(([r]) => r);
+    const refused = await bash("sed -i s/a/b/ app.py", ui(false));
+    assert.equal(refused?.block, true);
+    assert.deepEqual(asked, ["sed -i s/a/b/ app.py"]);
+    assert.match(text(), /^status: working$/m, "answered, the agent goes on");
+    assert.equal(await bash("git log -1", ui(true)), undefined);
+    assert.equal((await bash("ls", {}))?.block, true, "no UI to ask: refused");
+    assert.equal(await bash("python3 /s/bin/workitem-plan-note --plan < /tmp/plan.md", ui(false)), undefined);
+    assert.equal((await bash("python3 /s/bin/workitem-plan-note x; rm -rf src", ui(false)))?.block, true);
+    assert.deepEqual(asked, ["sed -i s/a/b/ app.py", "git log -1", "python3 /s/bin/workitem-plan-note x; rm -rf src"]);
   }));
 
 test("create sessions: waiting sets the toast's option, going on unsets it", async () => {
