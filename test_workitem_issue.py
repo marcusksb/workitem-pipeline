@@ -354,6 +354,32 @@ class WorkitemIssueTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("no transition to Done (available: In Progress, In Review)", result.stderr)
 
+    # link
+
+    def test_link_writes_the_ref_with_its_url(self):
+        self.setup("jira")
+        path = self.item("x")
+        url = f"http://127.0.0.1:{self.server.server_port}/browse/MNT-7"
+        result = self.run_script(ISSUE, "link", path, "MNT-7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"issue: MNT-7 ({url})\n")
+        self.assertIn(f"issue: MNT-7 ({url})\n", self.read(path))
+        self.setup("github", {"issue_project": "acme/web"})
+        for given in ["#12", "acme/web#12"]:
+            path = self.item(f"g{given[-4:].replace('/', '')}")
+            self.assertEqual(self.run_script(ISSUE, "link", path, given).returncode, 0, given)
+            self.assertIn("issue: acme/web#12 (https://github.com/acme/web/issues/12)\n", self.read(path), given)
+
+    def test_link_refuses_a_linked_item_and_a_ref_of_the_other_tracker(self):
+        self.setup("github", {"issue_project": "acme/web"})
+        linked = self.item("a", "acme/web#1 (https://github.com/acme/web/issues/1)")
+        result = self.run_script(ISSUE, "link", linked, "#2")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("already has issue", result.stderr)
+        path = self.item("b")
+        self.assertEqual(self.run_script(ISSUE, "link", path, "MNT-1").returncode, 2)
+        self.assertIn("issue: none\n", self.read(path))
+
     # create, pr-line, accounts
 
     def test_create_files_a_github_issue_and_links_it(self):
@@ -410,6 +436,14 @@ class WorkitemIssueTest(unittest.TestCase):
         self.assertIn("issue_status: In progress\nissue_status_category: indeterminate\n", self.read(a))
         self.assertIn("issue_status: Closed\nissue_status_category: done\n", self.read(b))
         self.assertEqual(Jira.requests, [], "a Jira key in a GitHub workspace is left alone")
+
+    def test_issue_status_adds_the_url_to_a_bare_github_ref(self):
+        self.setup("github")
+        a = self.item("a", "acme/web#1")
+        data = {"data": {"repository": {"i1": {"state": "OPEN", "assignees": {"totalCount": 0}}}}}
+        self.answers([[["api", "graphql"], [json.dumps(data), 0]]])
+        self.run_script(STATUS, stdin=json.dumps([{"dir": "a", "issue": "acme/web#1"}]), WORKITEM_DIR_ROOT=self.workspace)
+        self.assertIn("issue: acme/web#1 (https://github.com/acme/web/issues/1)\n", self.read(a))
 
     def test_issue_status_keeps_the_issues_github_found_when_one_is_gone(self):
         self.setup("github")

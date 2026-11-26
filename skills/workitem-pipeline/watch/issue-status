@@ -4,7 +4,8 @@
   issue-status
 
 Writes `issue_status` (e.g. `Waiting for Deployment`) and `issue_status_category` (`new`,
-`indeterminate` or `done`). The tracker is the workspace's `issue_tracker` (decision 62); items
+`indeterminate` or `done`), and adds the URL to an `issue:` that holds only a key the tracker
+found (`MNT-1` becomes `MNT-1 (<server>/browse/MNT-1)`). The tracker is the workspace's `issue_tracker` (decision 62); items
 whose `issue:` belongs to another tracker are left alone. The file is only written when a value
 changed.
 
@@ -63,6 +64,8 @@ def main():
             values = {"issue_status": status, "issue_status_category": category}
             try:
                 fields = read_fields(path)
+                if fields.get("issue", "").strip() == key:
+                    values["issue"] = f"{key} ({client.url(key)})"
                 set_fields(path, {k: v for k, v in values.items() if fields.get(k) != v})
             except (RuntimeError, OSError) as e:
                 # An item an agent is busy writing waits for the next run; the others are written.

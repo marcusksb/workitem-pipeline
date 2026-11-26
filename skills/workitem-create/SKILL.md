@@ -46,7 +46,7 @@ A new workitem always starts in the `entry` stage of its board (`entry` in `<wor
 
 **Case A — issue given:**
 
-1. `workitem-issue parse --workspace <workspace> --board <board> <ref>` prints `issue: <value>` (the exact `issue:` line for the frontmatter) and `prefix: <prefix>` (for the directory name, Step 7). It refuses an issue of the other tracker; show its message and stop.
+1. `workitem-issue parse --workspace <workspace> --board <board> <ref>` prints `issue: <value>` and `prefix: <prefix>` (for the directory name, Step 7). Do not copy the `issue:` line: Step 8 links the issue with `workitem-issue link`. It refuses an issue of the other tracker; show its message and stop.
 2. `workitem-issue read --workspace <workspace> --board <board> <ref>` prints the title, status, description and comments.
 
 If either fails, show the error and stop — do not create a file.
@@ -54,7 +54,7 @@ If either fails, show the error and stop — do not create a file.
 - `title` = the issue title, trimmed to ~10 words if needed.
 - `summary` = the title, one line.
 - `description` = the issue description, condensed to a short paragraph (3–6 sentences) if long.
-- `issue` = the `issue:` value `parse` printed.
+- `issue` = the ref you gave `parse`; Step 8 links it.
 
 **Case B — Plain text task:**
 
@@ -62,8 +62,8 @@ If either fails, show the error and stop — do not create a file.
 - `summary` = one sentence stating what needs to happen.
 - `description` = the user's task text, condensed to a short paragraph if long.
 - Do not ask about an issue. Use `--issue <ref>`, or an issue reference that appears in the text and `parse` accepts.
-  - If there is one, fetch it as in Case A and merge: keep the user's own framing for `description` unless it conflicts with the issue, and set `issue` to the value `parse` printed.
-  - If none, set `issue: none`.
+  - If there is one, fetch it as in Case A and merge: keep the user's own framing for `description` unless it conflicts with the issue, and set `issue` to that ref; Step 8 links it.
+  - If none, there is no issue.
 
 **Case C — Sentry issue URL given:**
 
@@ -140,7 +140,7 @@ One file per item, dependencies first.
 title: <title>
 type: bug | feature | analysis | refactor | docs | style | perf | test | build | ci | chore | revert
 source: issue | system_error | text
-issue: <the value parse printed> | none
+issue: none
 system_error: <error url> | none
 worktree_needed: true | false
 pr_mode: none | draft | ready
@@ -183,6 +183,8 @@ depends_on: <dir>, <dir>   # only for an item that needs others merged first; om
 
 <issue URL, or "None">
 ```
+
+Always write `issue: none`. If the item has an issue (Cases A to C), link it right after writing the file: `workitem-issue link <workitem file> <ref>`. It writes `issue: <ref> (<url>)` itself, so the frontmatter holds the clickable URL; never type the `issue:` value by hand. If it fails, show the error and stop.
 
 If `--parent` was given, check that `<workspace>/<parent dir>/workitem.md` exists; if not, stop and write nothing. A child is an independent workitem with its own stage; the parent is not changed.
 

@@ -69,6 +69,13 @@ class IssueStatusTest(unittest.TestCase):
         self.assertNotIn("Code Review", self.read("b"))
         self.assertNotIn("issue_status", self.read("c"), "a key Jira does not know is left alone")
 
+    def test_adds_the_url_to_a_bare_key_it_found(self):
+        items = [self.item("a", "MNT-1"), self.item("b", "SHAPE-2 (https://jira/browse/SHAPE-2)"), self.item("c", "NOPE-3")]
+        self.assertEqual(self.run_script(items).returncode, 0)
+        self.assertIn(f"issue: MNT-1 (http://127.0.0.1:{self.server.server_port}/browse/MNT-1)\n", self.read("a"))
+        self.assertIn("issue: SHAPE-2 (https://jira/browse/SHAPE-2)\n", self.read("b"), "a URL already there is kept")
+        self.assertIn("issue: NOPE-3\n", self.read("c"), "a key Jira does not know is left alone")
+
     def test_splits_more_than_a_hundred_keys_into_several_requests(self):
         items = [{"dir": f"i{n}", "issue": f"MNT-{n}"} for n in range(1000, 1150)]
         self.assertEqual(self.run_script(items).returncode, 0)
