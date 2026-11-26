@@ -42,7 +42,7 @@ Because the intake watcher writes the files itself and does not use `workitem-cr
 
 ## 3. Docs
 
-`workitem-pipeline.md` (per-stage keys), `workitem-pipeline-ui.md` (new decisions 28 to 30: `limit`, pull rule, `once`/`when`).
+`docs/spec.md` (per-stage keys), `docs/decisions.md` (new decisions 28 to 30: `limit`, pull rule, `once`/`when`).
 
 ## Build order
 

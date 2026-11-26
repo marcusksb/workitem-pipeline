@@ -1,6 +1,6 @@
 # Workload
 
-Local web UI for the workitem pipeline. Design: `../workitem-pipeline-ui.md`.
+Local web UI for the workitem pipeline. Spec: [`../docs/spec.md`](../docs/spec.md), decisions: [`../docs/decisions.md`](../docs/decisions.md).
 
 ## Run
 
