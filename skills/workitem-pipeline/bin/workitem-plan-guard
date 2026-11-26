@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""PreToolUse hook of planning sessions: file edits are only allowed in the workspace folder.
+"""PreToolUse hook of planning sessions: file edits are only allowed in the workspace folder,
+outside its `.worktrees/` (the items' checkouts, decision 80).
 
 A planning session may create workitems but never changes code, also not after its plan was
 approved. Gets the tool call as JSON on stdin; exit 2 refuses it and tells Claude why. Does
@@ -21,10 +22,12 @@ if not target or not workspace:
 
 allowed = Path(workspace).resolve()
 path = Path(call.get("cwd") or workspace, target).resolve()
-if path == allowed or allowed in path.parents:
+worktrees = allowed / ".worktrees"
+if (path == allowed or allowed in path.parents) and not (path == worktrees or worktrees in path.parents):
     sys.exit(0)
 print(
-    f"This is a planning session: it does not change code. Edits are only allowed under {allowed}. "
+    f"This is a planning session: it does not change code. Edits are only allowed under {allowed}, "
+    f"not in {worktrees}. "
     "Save a plan with workitem-plan-note --plan, or create a workitem for the change.",
     file=sys.stderr,
 )
