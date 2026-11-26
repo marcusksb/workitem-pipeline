@@ -30,16 +30,21 @@ def with_fields(text, updates):
 
 
 def set_fields(path, updates):
-    """Sets keys in the frontmatter (see with_fields). Agents, the backend and other watchers write
-    the same file, so it rereads the file right before replacing it, starts over when someone
-    wrote in between, and replaces it in one rename."""
-    if not updates:
-        return
+    """Sets keys in the frontmatter (see with_fields), through update_file."""
+    if updates:
+        update_file(path, lambda text: with_fields(text, updates))
+
+
+def update_file(path, change):
+    """Replaces the file with `change(text)`; None (or the same text) leaves it alone. Agents, the
+    backend and other watchers write the same file, so it rereads the file right before replacing
+    it, starts over (calling `change` again on the new text) when someone wrote in between, and
+    replaces it in one rename, so a reader never sees half a file."""
     for _ in range(5):
         with open(path) as f:
             text = f.read()
-        new = with_fields(text, updates)
-        if new == text:
+        new = change(text)
+        if new is None or new == text:
             return
         tmp = f"{path}.{os.getpid()}.tmp"
         with open(tmp, "w") as f:

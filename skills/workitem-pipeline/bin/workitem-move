@@ -15,6 +15,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from workitem_fields import set_fields  # noqa: E402
+
 BOARD_NAME = re.compile(r"[A-Za-z0-9_-]+")
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 
@@ -90,18 +94,6 @@ def read(path):
         if sep:
             fields[key.strip()] = value.strip()
     return text, match, fields
-
-
-def set_field(frontmatter, key, value):
-    line = f"{key}: {value}"
-    pattern = re.compile(rf"^{re.escape(key)}:.*$", re.M)
-    if pattern.search(frontmatter):
-        return pattern.sub(line, frontmatter, count=1)
-    return f"{frontmatter}\n{line}"
-
-
-def drop_field(frontmatter, key):
-    return re.sub(rf"^{re.escape(key)}:.*\n?", "", frontmatter, count=1, flags=re.M).rstrip("\n")
 
 
 def brief_problems(text, sections):
@@ -182,7 +174,7 @@ def resolve(target):
 
 def move(target, stage):
     path = resolve(target)
-    text, match, fields = read(path)
+    text, _, fields = read(path)
     board = load_board(path.parent.parent, fields.get("board"))
     stages = board["stages"]
     current = fields.get("stage")
@@ -193,7 +185,7 @@ def move(target, stage):
             fail(f"'{current}' -> '{stage}' is not allowed (allowed: {', '.join(stages[current].get('next', [])) or 'none'})")
     elif stage != board["entry"]:
         fail(f"current stage '{current}' is not on this board; it can only move to '{board['entry']}'")
-    enter(path, text, match, fields, board, stage)
+    enter(path, text, fields, board, stage)
     print(f"{path.parent.name}: {current} -> {stage}")
 
 
@@ -206,7 +198,7 @@ def holding(path, board, stage):
             count += fields.get("stage") == stage and fields.get("board") == board
     return count
 
-def enter(path, text, match, fields, board, stage, extra=None):
+def enter(path, text, fields, board, stage, extra=None):
     """Checks `require` for `stage`, then writes the stage, `ok`, `on_enter` and any `extra` fields."""
     stages = board["stages"]
     limit = stages[stage].get("limit")
@@ -218,14 +210,9 @@ def enter(path, text, match, fields, board, stage, extra=None):
         unmet = requirement_problem(key, wanted, fields, text, board["brief_sections"], path)
         if unmet:
             fail(f"'{stage}' requires {unmet}")
-    frontmatter = match.group(1)
-    frontmatter = set_field(frontmatter, "stage", stage)
-    frontmatter = set_field(frontmatter, "agent_status", "ok")
     # A new stage starts its handler's attempts over (see watch/run-items).
-    frontmatter = drop_field(frontmatter, "handler_attempts")
-    for key, value in {**stages[stage].get("on_enter", {}), **(extra or {})}.items():
-        frontmatter = set_field(frontmatter, key, value)
-    path.write_text(f"---\n{frontmatter}\n---\n{text[match.end():]}")
+    set_fields(path, {"stage": stage, "agent_status": "ok", "handler_attempts": None,
+                      **stages[stage].get("on_enter", {}), **(extra or {})})
     if stages[stage].get("issue_state"):
         move_issue(path, stages[stage]["issue_state"])
 
@@ -258,11 +245,11 @@ def has_session(name):
 def switch(target, name):
     """Puts the item on board `name`, at that board's entry stage."""
     path = resolve(target)
-    text, match, fields = read(path)
+    text, _, fields = read(path)
     if has_session(f"wi-{path.parent.name}"):
         fail(f"{path.parent.name} has a running session (wi-{path.parent.name}); end it first")
     board = load_board(path.parent.parent, name)
-    enter(path, text, match, fields, board, board["entry"], {"board": name})
+    enter(path, text, fields, board, board["entry"], {"board": name})
     print(f"{path.parent.name}: board {fields.get('board', '-')} -> {name}, stage {board['entry']}")
 
 

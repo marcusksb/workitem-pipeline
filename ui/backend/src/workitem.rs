@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::Serialize;
@@ -146,52 +147,77 @@ fn frontmatter_end(text: &str) -> Option<usize> {
     Some(4 + rest.find("\n---\n")?)
 }
 
+/// Replaces the file with `change(text)`; `None` leaves it alone and returns `false`. Agents and the
+/// watchers write the same file, so it rereads the file right before replacing it, starts over
+/// (calling `change` again on the new text) when someone wrote in between, and replaces it with
+/// one rename, so a reader never sees half a file. Same as `workitem_fields.update_file`.
+fn replace(path: &Path, mut change: impl FnMut(&str) -> io::Result<Option<String>>) -> io::Result<bool> {
+    // The backend writes from several threads, so the pid alone does not make the name unique.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!("{name}.{}.{}.tmp", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
+    for _ in 0..5 {
+        let text = fs::read_to_string(path)?;
+        let Some(new) = change(&text)? else { return Ok(false) };
+        if new == text {
+            return Ok(true);
+        }
+        fs::write(&tmp, &new)?;
+        if fs::read_to_string(path)? == text {
+            return fs::rename(&tmp, path).map(|()| true);
+        }
+        fs::remove_file(&tmp)?;
+    }
+    Err(io::Error::other(format!("{} kept changing; not written", path.display())))
+}
+
+fn no_frontmatter() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "workitem.md has no frontmatter")
+}
+
 /// Sets frontmatter fields in place, appending missing ones. The body is untouched.
 pub fn set_fields(path: &std::path::Path, fields: &[(&str, &str)]) -> io::Result<()> {
-    let text = fs::read_to_string(path)?;
-    let end = frontmatter_end(&text)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "workitem.md has no frontmatter"))?;
-    let mut lines: Vec<String> = text[4..end].lines().map(String::from).collect();
-    for (key, value) in fields {
-        let line = format!("{key}: {value}");
-        match lines.iter_mut().find(|l| l.split_once(':').is_some_and(|(k, _)| k.trim() == *key)) {
-            Some(existing) => *existing = line,
-            None => lines.push(line),
+    replace(path, |text| {
+        let end = frontmatter_end(text).ok_or_else(no_frontmatter)?;
+        let mut lines: Vec<String> = text[4..end].lines().map(String::from).collect();
+        for (key, value) in fields {
+            let line = format!("{key}: {value}");
+            match lines.iter_mut().find(|l| l.split_once(':').is_some_and(|(k, _)| k.trim() == *key)) {
+                Some(existing) => *existing = line,
+                None => lines.push(line),
+            }
         }
-    }
-    fs::write(path, format!("---\n{}{}", lines.join("\n"), &text[end..]))
+        Ok(Some(format!("---\n{}{}", lines.join("\n"), &text[end..])))
+    })
+    .map(|_| ())
 }
 
 /// Replaces everything after the frontmatter with `body`, but only while it still equals `base`
 /// (what the editor started from), so an agent's concurrent edit is never overwritten.
 /// Returns `false` when it changed.
 pub fn set_body(path: &std::path::Path, base: &str, body: &str) -> io::Result<bool> {
-    let text = fs::read_to_string(path)?;
-    let end = frontmatter_end(&text)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "workitem.md has no frontmatter"))?
-        + "\n---\n".len();
-    if text[end..] != *base {
-        return Ok(false);
-    }
-    fs::write(path, format!("{}{body}", &text[..end]))?;
-    Ok(true)
+    replace(path, |text| {
+        let end = frontmatter_end(text).ok_or_else(no_frontmatter)? + "\n---\n".len();
+        Ok((text[end..] == *base).then(|| format!("{}{body}", &text[..end])))
+    })
 }
 
 /// Replaces (or appends) a `## Rejection` section holding `comment`.
 pub fn set_rejection(path: &std::path::Path, comment: &str) -> io::Result<()> {
-    let text = fs::read_to_string(path)?;
-    let mut kept = String::new();
-    let mut skipping = false;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with("## ") {
-            skipping = line.trim_end() == "## Rejection";
+    replace(path, |text| {
+        let mut kept = String::new();
+        let mut skipping = false;
+        for line in text.split_inclusive('\n') {
+            if line.starts_with("## ") {
+                skipping = line.trim_end() == "## Rejection";
+            }
+            if !skipping {
+                kept.push_str(line);
+            }
         }
-        if !skipping {
-            kept.push_str(line);
-        }
-    }
-    let kept = kept.trim_end();
-    fs::write(path, format!("{kept}\n\n## Rejection\n\n{}\n", comment.trim()))
+        Ok(Some(format!("{}\n\n## Rejection\n\n{}\n", kept.trim_end(), comment.trim())))
+    })
+    .map(|_| ())
 }
 
 #[cfg(test)]
@@ -301,6 +327,42 @@ mod tests {
         assert!(text.contains("## Review brief\n\nkeep"));
         assert!(text.ends_with("## Rejection\n\nnew reason\n"));
         assert!(!text.contains("old"));
+    }
+
+    #[test]
+    fn replace_keeps_a_write_that_lands_between_read_and_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("workitem.md");
+        fs::write(&file, "---\nagent_status: working\n---\nbody\n").unwrap();
+        let mut calls = 0;
+        let written = replace(&file, |text| {
+            calls += 1;
+            if calls == 1 {
+                fs::write(&file, "---\nagent_status: working\npr_state: open\n---\nbody\n").unwrap();
+            }
+            Ok(Some(text.replace("working", "ok")))
+        })
+        .unwrap();
+        assert!(written);
+        assert_eq!(calls, 2);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "---\nagent_status: ok\npr_state: open\n---\nbody\n");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temp file left");
+    }
+
+    #[test]
+    fn replace_gives_up_on_a_file_that_keeps_changing_and_skips_on_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("workitem.md");
+        fs::write(&file, "---\n---\n").unwrap();
+        let mut n = 0;
+        let result = replace(&file, |text| {
+            n += 1;
+            fs::write(&file, format!("---\nn: {n}\n---\n")).unwrap();
+            Ok(Some(format!("{text}x")))
+        });
+        assert!(result.is_err());
+        assert!(!replace(&file, |_| Ok(None)).unwrap());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temp file left");
     }
 
     #[test]
