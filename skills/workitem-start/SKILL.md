@@ -76,8 +76,8 @@ Read `worktree_needed` from the frontmatter.
 
 **If `true`:**
 
-1. If `issue:` is `none`, stop and ask for an issue per this repo's Git Workflow rule — never invent one. If running inline, ask directly. If running as a background agent (Step 4b), instead set `agent_status: blocked: no issue linked, needs an issue`, call `PushNotification` with that reason, and stop — there's no one to ask inline. Link a given issue with `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-issue link <workitem file> <ref>`; it sets `issue:` itself.
-2. Reuse the workitem's own directory name (already `<issue prefix>-<slug>`) instead of re-deriving a slug. Type prefix: `bug` → `fix`, `feature` → `feature`, any other commitizen type (`refactor`, `docs`, `chore`, …) → the type itself, matching the repo's own `fix/SHAPE-15490-description` example — adjust to match an existing branch pattern in the repo if this guess conflicts.
+1. `issue:` may be `none`. Do not ask for one: `workitem-move` (Step 3) already refused this stage if its `require` has `issue: linked`, so an item that got here without an issue is allowed to.
+2. Reuse the workitem's own directory name (already `<issue prefix>-<slug>`, or just `<slug>` without an issue) instead of re-deriving a slug. Type prefix: `bug` → `fix`, `feature` → `feature`, any other commitizen type (`refactor`, `docs`, `chore`, …) → the type itself, matching the repo's own `fix/SHAPE-15490-description` example — adjust to match an existing branch pattern in the repo if this guess conflicts.
 3. If `../<repo-name>-<workitem-dir-name>` already exists (`git worktree list`), or you are already in it, reuse it: work there and skip to step 4. Otherwise follow this repo's own documented worktree flow (AGENTS.md → Worktrees), not a generic one — it runs `bin/setup_worktree` for isolated test databases. Branch from the freshly fetched remote master, never the local `master`, which may be stale:
    ```
    git fetch origin master

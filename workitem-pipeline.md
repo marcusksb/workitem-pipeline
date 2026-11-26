@@ -16,7 +16,7 @@ Move a workitem (feature request, implementation task, bug report, Sentry error)
    - bug or Sentry error → `root_cause`
    - feature request → `clarify`
    - too vague → stay in `analyze`, `agent_status: blocked: <what is missing>`
-7. **Review brief:** `analyze` writes a `## Review brief` section: root cause or decisions, plan, risk, size, test plan, assumptions, issue and system error links. `bin/workitem-move` refuses `ready_for_development` if a part is missing or if `jira:` is `none`: an item is only ready for development with a linked Jira ticket.
+7. **Review brief:** `analyze` writes a `## Review brief` section: root cause or decisions, plan, risk, size, test plan, assumptions, issue and system error links. `bin/workitem-move` refuses `ready_for_development` if a part is missing. A linked issue is required only where a stage's `require` has `issue: linked` (on the bundled board, `ready_for_development`); `workitem-move` refuses such a stage while `issue:` is `none`, and the skills ask for an issue only there.
 8. **Approval:** `/workitem-approve <dir>` prints the brief, asks to confirm, sets `approved: true` and `approved_at`. Reject with a comment moves the item back to `analyze`. After approval it offers to start development.
 9. **Intake:** manual. `workitem-create` accepts a Jira key, text, or a Sentry issue URL. New field `source: issue | system_error | text`.
 10. **Existing skills:** `workitem-start` is the `in_development` handler and ends by moving to `in_review`. `workitem-watch` also moves an item to `done` when its PR is merged. Old `status` values migrate: `pending` → `ready_for_development` + `approved: true`, `in_progress` → `in_development`, `in-review` → `in_review`.
