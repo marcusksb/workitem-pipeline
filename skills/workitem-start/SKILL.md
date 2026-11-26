@@ -78,11 +78,12 @@ Read `worktree_needed` from the frontmatter.
 
 1. `issue:` may be `none`. Do not ask for one: `workitem-move` (Step 3) already refused this stage if its `require` has `issue: linked`, so an item that got here without an issue is allowed to.
 2. Reuse the workitem's own directory name (already `<issue prefix>-<slug>`, or just `<slug>` without an issue) instead of re-deriving a slug. Type prefix: `bug` → `fix`, `feature` → `feature`, any other commitizen type (`refactor`, `docs`, `chore`, …) → the type itself, matching the repo's own `fix/SHAPE-15490-description` example — adjust to match an existing branch pattern in the repo if this guess conflicts.
-3. If `../<repo-name>-<workitem-dir-name>` already exists (`git worktree list`), or you are already in it, reuse it: work there and skip to step 4. Otherwise follow this repo's own documented worktree flow (AGENTS.md → Worktrees), not a generic one — it runs `bin/setup_worktree` for isolated test databases. Branch from the freshly fetched remote master, never the local `master`, which may be stale:
+3. The worktree path is `$WORKITEM_WORKTREE`; when it is unset (run by hand), it is `<workspace>/.worktrees/<repo-name>-<workitem-dir-name>`. Never put it in the item folder or next to the repo. If it already exists (`git worktree list`), or you are already in it, reuse it: work there and skip to step 4. Otherwise follow this repo's own documented worktree flow (AGENTS.md → Worktrees), not a generic one — it runs `bin/setup_worktree` for isolated test databases — but with this path. Branch from the freshly fetched remote master, never the local `master`, which may be stale:
    ```
    git fetch origin master
-   git worktree add -b <type-prefix>/<workitem-dir-name> ../<repo-name>-<workitem-dir-name> origin/master
-   cd ../<repo-name>-<workitem-dir-name>
+   mkdir -p "$(dirname <worktree>)"
+   git worktree add -b <type-prefix>/<workitem-dir-name> <worktree> origin/master
+   cd <worktree>
    bin/setup_worktree
    ```
 4. Per stored project memory, `bin/setup_worktree` alone may not be enough: check `.env.development.local` and `.env.test.local` exist in the new worktree; if missing, copy them from the main checkout.

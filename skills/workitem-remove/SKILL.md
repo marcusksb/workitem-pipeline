@@ -15,7 +15,7 @@ This is destructive. The workitem file is not in git, so it cannot be recovered.
 2. Read the frontmatter and collect what exists:
    - **Folder:** the workitem directory (list its files).
    - **Session:** `tmux has-session -t =wi-<dir>` succeeds: an agent is working on it. Say so and stop unless the user insists.
-   - **Worktree:** `../<repo-name>-<dir>` (check with `git worktree list`). Note if it has uncommitted changes (`git -C <path> status --short`).
+   - **Worktree:** the one `git worktree list` shows ending in `/<repo-name>-<dir>` (`<workspace>/.worktrees/`, or next to the repo for older items). Note if it has uncommitted changes (`git -C <path> status --short`).
    - **Branch:** the branch checked out in that worktree, or the `pr:` head branch.
    - **PR:** the `pr:` URL and its state (`gh pr view <n> --json state --jq .state`).
    - **Children and dependents:** other workitems whose frontmatter has `parent: <dir>` (`grep -l '^parent: <dir>$' <workspace>/*/workitem.md`) or names `<dir>` in `depends_on:`. They are not deleted. Remove the dangling `parent:` line, and `<dir>` from `depends_on:`, in each of them after the folder is deleted, and report it.
