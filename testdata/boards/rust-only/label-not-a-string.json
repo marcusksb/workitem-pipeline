@@ -1,0 +1,44 @@
+{
+  "repo": "/",
+  "brief_sections": [
+    "Plan"
+  ],
+  "entry": "a",
+  "stages": [
+    {
+      "name": "a",
+      "handler": "workitem-analyze",
+      "auto": true,
+      "next": [
+        "b"
+      ],
+      "on_enter": {
+        "approved": "false"
+      },
+      "label": 1
+    },
+    {
+      "name": "b",
+      "next": [
+        "c",
+        "a"
+      ],
+      "limit": 1,
+      "require": {
+        "approved": "true"
+      },
+      "gate": {
+        "label": "Approve",
+        "approve_to": "c",
+        "reject_to": "a"
+      }
+    },
+    {
+      "name": "c",
+      "issue_state": [
+        "In Progress"
+      ],
+      "next": []
+    }
+  ]
+}

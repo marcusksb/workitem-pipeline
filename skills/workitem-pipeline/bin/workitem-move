@@ -28,28 +28,58 @@ def fail(message):
     sys.exit(1)
 
 
+def strings(value):
+    return isinstance(value, list) and all(isinstance(x, str) for x in value)
+
+
 def problems(config):
-    """Why `config` cannot be used as a board, as a list of messages (empty when it can)."""
+    """Why `config` cannot be used as a board, as a list of messages (empty when it can).
+    The backend (`Pipeline::parse`) rejects the same files; testdata/boards holds both sides' cases."""
+    if not isinstance(config, dict):
+        return ["the board must be a JSON object"]
     stages = config.get("stages")
     if not isinstance(stages, list) or not all(isinstance(s, dict) for s in stages):
         return ["'stages' must be a list of objects"]
     names = [s.get("name") for s in stages]
-    found = []
     if not all(isinstance(n, str) and n for n in names):
-        found.append("every stage needs a 'name'")
+        return ["every stage needs a 'name'"]
+    found = []
     if len(set(names)) != len(names):
         found.append("stage names must be unique")
     if config.get("entry") not in names:
         found.append(f"'entry' ({config.get('entry')!r}) is not a stage")
     for stage in stages:
-        for target in stage.get("next", []):
+        name = stage["name"]
+        targets = stage.get("next", [])
+        if not strings(targets):
+            found.append(f"'{name}' has next {targets!r}, which must be a list of stage names")
+            targets = []
+        for target in targets:
             if target not in names:
-                found.append(f"'{stage.get('name')}' has next '{target}', which is not a stage")
+                found.append(f"'{name}' has next '{target}', which is not a stage")
+        # Only moves listed in `next` are allowed, so a gate or on_merge target outside it could never work.
+        gate = stage.get("gate")
+        if gate is not None and not (isinstance(gate, dict) and all(isinstance(gate.get(k), str) for k in ("label", "approve_to", "reject_to"))):
+            found.append(f"'{name}' has gate {gate!r}, which needs a label, approve_to and reject_to")
+            gate = None
+        moves = [(key, gate[key]) for key in ("approve_to", "reject_to")] if gate else []
+        if stage.get("on_merge") is not None:
+            moves.append(("on_merge", stage["on_merge"]))
+        for key, target in moves:
+            if target not in targets:
+                found.append(f"'{name}' has {key} {target!r}, which is not in its next")
+        limit = stage.get("limit")
+        if limit is not None and not (type(limit) is int and limit > 0):
+            found.append(f"'{name}' has limit {limit!r}, which must be a whole number above 0")
+        for key in ("require", "on_enter"):
+            value = stage.get(key, {})
+            if not (isinstance(value, dict) and all(isinstance(v, str) for v in value.values())):
+                found.append(f"'{name}' has {key} {value!r}, which must be an object of strings")
         states = stage.get("issue_state")
         if states is not None and not (isinstance(states, list) and states and all(isinstance(x, str) and x for x in states)):
-            found.append(f"'{stage.get('name')}' has issue_state {states!r}, which must be a list of state names")
-    if not isinstance(config.get("brief_sections"), list):
-        found.append("'brief_sections' must be a list")
+            found.append(f"'{name}' has issue_state {states!r}, which must be a list of state names")
+    if not strings(config.get("brief_sections")):
+        found.append("'brief_sections' must be a list of section names")
     # A board without a repo (an intake board that writes no code) is valid; a given one must exist.
     repo = config.get("repo")
     if "repo" in config and not (isinstance(repo, str) and Path(repo).expanduser().is_absolute() and Path(repo).expanduser().is_dir()):

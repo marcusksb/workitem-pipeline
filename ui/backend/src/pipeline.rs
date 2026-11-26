@@ -136,13 +136,17 @@ pub struct Stage {
     pub issue_state: Vec<String>,
     /// What `workitem-move` checks before an item may enter; only `issue` is read here.
     #[serde(default, skip_serializing)]
-    pub require: serde_json::Map<String, serde_json::Value>,
+    pub require: HashMap<String, String>,
+    /// Frontmatter values `workitem-move` writes on entry; not read here, only checked.
+    #[serde(default, skip_serializing)]
+    #[allow(dead_code)]
+    on_enter: HashMap<String, String>,
 }
 
 impl Stage {
     /// Entering needs a linked issue (`require: {"issue": "linked"}`, the rule `workitem-move` applies).
     pub fn requires_issue(&self) -> bool {
-        self.require.get("issue").and_then(|v| v.as_str()) == Some("linked")
+        self.require.get("issue").map(String::as_str) == Some("linked")
     }
 
     /// The stage whose PRs are watched, and acted on, by the `pr-review` script.
@@ -696,6 +700,25 @@ mod tests {
         assert!(parse(r#"[{"name":""}]"#, "").unwrap_err().contains("name"));
         assert!(parse(r#"[{"name":"a","next":["gone"]}]"#, "a").unwrap_err().contains("gone"));
         assert!(Pipeline::parse(r#"{"entry":"a","stages":[{"name":"a"}]}"#).is_err());
+    }
+
+    /// `testdata/boards`, shared with `test_workitem_move.py`: `workitem-move` must refuse every
+    /// file there but `valid.json` too; `rust-only/` holds the rules that do not affect moves.
+    #[test]
+    fn rejects_the_shared_invalid_board_fixtures() {
+        let boards = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/boards");
+        let read = |path: &Path| fs::read_to_string(path).unwrap();
+        Pipeline::parse(&read(&boards.join("valid.json"))).unwrap();
+        let mut fixtures: Vec<PathBuf> = [boards.clone(), boards.join("rust-only")]
+            .iter()
+            .flat_map(|dir| fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().path()))
+            .filter(|path| path.extension().is_some_and(|e| e == "json") && !path.ends_with("valid.json"))
+            .collect();
+        fixtures.sort();
+        assert!(fixtures.len() > 30, "{fixtures:?}");
+        for fixture in fixtures {
+            assert!(Pipeline::parse(&read(&fixture)).is_err(), "{} parsed", fixture.display());
+        }
     }
 
     #[test]
