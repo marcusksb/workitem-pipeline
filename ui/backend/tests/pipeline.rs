@@ -1999,6 +1999,30 @@ async fn board_settings_are_edited_from_the_ui_and_checked_before_the_file_is_wr
     assert_eq!(put(&w, "/api/workspaces/nope/boards/default", r#"{"entry":"analyze"}"#).await.0, StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn stage_settings_are_edited_from_the_ui_and_shown_in_the_stage_source() {
+    let w = world();
+    let file = w.ws.join("boards/default.json");
+    let uri = "/api/workspaces/app/boards/default/stages/analyze";
+    let (status, body) = put(&w, uri, r#"{"model":"sonnet","require_issue":true}"#).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let source: serde_json::Value = serde_json::from_str(&get(&w, &format!("{uri}/source")).await).unwrap();
+    assert_eq!((&source["model"], &source["require_issue"]), (&serde_json::json!("sonnet"), &serde_json::json!(true)));
+
+    assert_eq!(put(&w, uri, r#"{"model":"","require_issue":false}"#).await.0, StatusCode::NO_CONTENT);
+    let source: serde_json::Value = serde_json::from_str(&get(&w, &format!("{uri}/source")).await).unwrap();
+    assert_eq!((&source["model"], &source["require_issue"]), (&serde_json::Value::Null, &serde_json::json!(false)));
+
+    let saved = fs::read_to_string(&file).unwrap();
+    let (status, body) = put(&w, uri, r#"{"model":"--opus","require_issue":false}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(fs::read_to_string(&file).unwrap(), saved, "a refused change leaves the file as it was");
+    let settings = r#"{"model":"","require_issue":false}"#;
+    assert_eq!(put(&w, "/api/workspaces/app/boards/default/stages/nope", settings).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(put(&w, "/api/workspaces/app/boards/nope/stages/analyze", settings).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(put(&w, "/api/workspaces/nope/boards/default/stages/analyze", settings).await.0, StatusCode::NOT_FOUND);
+}
+
 /// One JSON-RPC message to an item's MCP endpoint (`questions.rs`), as an agent sends it: with the
 /// Bearer token, not the cookie.
 async fn mcp(w: &World, dir: &str, message: serde_json::Value) -> (StatusCode, serde_json::Value) {

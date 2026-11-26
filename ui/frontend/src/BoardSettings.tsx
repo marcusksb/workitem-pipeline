@@ -72,8 +72,8 @@ export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }
           <Input {...field("reviewers")} placeholder="org/team (optional)" />
         </Field>
         <Muted>
-          Workitem Sort Order: one item field per line, optionally followed by asc or desc; title breaks ties. Stages and watchers are edited in boards/{board}.json in
-          the workspace folder.
+          Workitem Sort Order: one item field per line, optionally followed by asc or desc; title breaks ties. A stage's model and issue requirement are set in its column's stage
+          settings; the rest of the stages and the watchers are edited in boards/{board}.json in the workspace folder.
         </Muted>
         <Button type="submit" variant="primary" disabled={busy}>
           Save
