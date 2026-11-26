@@ -26,7 +26,8 @@ if [ -n "$WORKITEM" ]; then
   echo "$WORKITEM $stage" >> "$repo/.stub-log"
   mode=$(cat "$repo/.stub-$stage" 2>/dev/null || echo idle)
   case "$mode" in
-    advance) python3 "$SKILLS/workitem-pipeline/bin/workitem-move" "$file" analyze ;;
+    advance) printf '\n## Review brief\n\n### Findings\nx\n### Plan\nx\n### Risk\nx\n### Size\nx\n### Test plan\nx\n### Assumptions\nx\n### Links\nx\n' >> "$file"
+      python3 "$SKILLS/workitem-pipeline/bin/workitem-move" "$file" ready_for_development ;;
     block) perl -pi -e 's/^agent_status:.*/agent_status: blocked: need input/' "$file" ;;
     wait) perl -pi -e 's/^agent_status:.*/agent_status: waiting: CI/' "$file" ;;
     done) perl -pi -e 's/^agent_status:.*/agent_status: ok/' "$file" ;;
@@ -234,23 +235,28 @@ async fn get(w: &World, uri: &str) -> String {
 #[tokio::test]
 async fn dispatcher_runs_handlers_reaps_finished_sessions_and_leaves_blocked_alone() {
     let w = world();
-    write_item(&w.ws, "T-1-flow", "backlog", "");
-    fs::write(w.repo.join(".stub-backlog"), "advance").unwrap();
-    fs::write(w.repo.join(".stub-analyze"), "block").unwrap();
+    write_item(&w.ws, "T-1-flow", "analyze", "");
+    fs::write(w.repo.join(".stub-analyze"), "advance").unwrap();
     fs::write(w.ws.join("boards/default/learnings.md"), "# Learnings\n\n- Never mock tmux.\n").unwrap();
 
     settle(&w).await;
-    assert!(w.tmux.has("wi-T-1-flow"), "backlog item gets a handler session");
-    eventually("triage moved the item to analyze", || field(&w.ws, "T-1-flow", "stage") == "analyze").await;
+    assert!(w.tmux.has("wi-T-1-flow"), "an analyze item gets a handler session");
+    eventually("analyze moved the item on", || field(&w.ws, "T-1-flow", "stage") == "ready_for_development").await;
 
-    // Status is `ok` after the move, so the finished session is reaped and analyze starts.
+    // Status is `ok` after the move, so the finished session is reaped; the gate starts nothing.
+    settle(&w).await;
+    eventually("the finished session is reaped", || !w.tmux.has("wi-T-1-flow")).await;
+
+    // Rejected, it is back in analyze, where the handler starts again and blocks.
+    fs::write(w.repo.join(".stub-analyze"), "block").unwrap();
+    assert_eq!(post(&w, "/api/workitems/app/T-1-flow/reject", r#"{"comment":"again"}"#).await.0, StatusCode::NO_CONTENT);
     settle(&w).await;
     eventually("analyze handler blocked the item", || field(&w.ws, "T-1-flow", "agent_status").starts_with("blocked")).await;
 
     settle(&w).await;
     settle(&w).await;
     assert!(w.tmux.has("wi-T-1-flow"), "a blocked session waits for the human");
-    assert_eq!(stub_log(&w.repo), vec!["T-1-flow backlog", "T-1-flow analyze"]);
+    assert_eq!(stub_log(&w.repo), vec!["T-1-flow analyze", "T-1-flow analyze"]);
     let args = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(!args.contains("Never mock tmux"), "stages that do not write code get no learnings: {args}");
 }
@@ -269,15 +275,16 @@ async fn project_agent_runs_the_handler_instead_of_the_default() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(get(&w, "/api/workspaces").await.contains("my-agent"));
 
-    write_item(&w.ws, "T-9-agent", "backlog", "");
-    fs::write(w.repo.join(".stub-backlog"), "advance").unwrap();
+    write_item(&w.ws, "T-9-agent", "analyze", "");
+    fs::write(w.repo.join(".stub-analyze"), "advance").unwrap();
     settle(&w).await;
-    eventually("the handler ran and moved the item", || field(&w.ws, "T-9-agent", "stage") == "analyze").await;
+    eventually("the handler ran and moved the item", || field(&w.ws, "T-9-agent", "stage") == "ready_for_development").await;
     assert!(w.repo.join(".agent-ran").exists(), "the project's agent ran the handler");
 
     // Cleared, the next session runs the default again.
     fs::remove_file(w.repo.join(".agent-ran")).unwrap();
     assert_eq!(put(&w, "/api/workspaces/app", r#"{"agent":""}"#).await.0, StatusCode::OK);
+    assert_eq!(post(&w, "/api/workitems/app/T-9-agent/reject", r#"{"comment":"again"}"#).await.0, StatusCode::NO_CONTENT);
     settle(&w).await;
     settle(&w).await;
     eventually("analyze ran", || stub_log(&w.repo).len() == 2).await;
@@ -343,7 +350,7 @@ async fn dispatcher_starts_development_once_a_ready_item_is_approved() {
 async fn dispatcher_ignores_manual_stages_and_a_same_named_session_from_another_workspace() {
     let w = world();
     write_item(&w.ws, "T-3-manual", "ready_for_development", "");
-    write_item(&w.ws, "T-4-other", "backlog", "");
+    write_item(&w.ws, "T-4-other", "analyze", "");
     let elsewhere = w.dir.path().join("elsewhere");
     fs::create_dir_all(&elsewhere).unwrap();
     w.tmux.run(&["new-session", "-d", "-s", "wi-T-4-other", "sleep 60", ";", "set-option", "@workitem_workspace", elsewhere.to_str().unwrap()]);
@@ -359,7 +366,7 @@ async fn dispatcher_ignores_manual_stages_and_a_same_named_session_from_another_
 #[tokio::test]
 async fn approve_and_reject_edit_the_workitem_through_the_pipeline_rules() {
     let w = world();
-    write_item(&w.ws, "T-5-gate", "backlog", "");
+    write_item(&w.ws, "T-5-gate", "analyze", "");
     let (status, _) = post(&w, "/api/workitems/app/T-5-gate/approve", "").await;
     assert_eq!(status, StatusCode::CONFLICT, "only ready_for_development can be approved");
 
@@ -494,7 +501,7 @@ async fn agent_sessions_start_from_the_ui_and_pass_text_as_one_argument() {
 #[tokio::test]
 async fn a_manual_session_starts_in_any_stage_and_survives_the_dispatcher() {
     let w = world();
-    write_item(&w.ws, "T-12-chat", "backlog", "");
+    write_item(&w.ws, "T-12-chat", "analyze", "");
     let (status, _) = post(&w, "/api/workitems/app/T-12-chat/session", "").await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert!(w.tmux.has("wi-T-12-chat"));
@@ -992,7 +999,7 @@ fn board(w: &World, stages: &str) -> String {
 async fn project_board_decides_which_stages_the_dispatcher_runs() {
     let w = world();
     write_item(&w.ws, "T-20-qa", "qa", "");
-    write_item(&w.ws, "T-21-off", "backlog", "");
+    write_item(&w.ws, "T-21-off", "analyze", "");
     let file = w.ws.join("boards/default.json");
     fs::write(&file, board(&w, r#"[{"name":"qa","handler":"my-qa","auto":true,"next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
 
@@ -1019,7 +1026,7 @@ async fn invalid_board_file_keeps_the_last_valid_board_and_is_reported() {
 
     let bundled = stages(&get(&w, "/api/pipelines").await);
     assert_eq!(bundled["error"], serde_json::Value::Null);
-    assert_eq!(bundled["pipeline"]["stages"][0]["name"], "backlog");
+    assert_eq!(bundled["pipeline"]["stages"][0]["name"], "analyze");
 
     fs::write(&file, board(&w, r#"[{"name":"qa","next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
     let own = stages(&get(&w, "/api/pipelines").await);
@@ -1122,7 +1129,7 @@ async fn items_follow_the_board_they_name_and_boards_are_listed_by_name() {
     fs::write(boards.join("not-a-board.txt"), "x").unwrap();
     write_item(&w.ws, "T-50-research", "qa", "board: research\n");
     write_item(&w.ws, "T-51-lost", "qa", "board: gone\n");
-    write_item(&w.ws, "T-52-default", "backlog", "");
+    write_item(&w.ws, "T-52-default", "analyze", "");
 
     let listed: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
     let names: Vec<&str> = listed["app"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap()).collect();
@@ -1194,12 +1201,13 @@ async fn handler_instructions_come_from_the_board_then_the_project_then_the_bund
     assert_eq!(find("research", "my-qa").unwrap(), "BOARD QA\n");
     assert_eq!(find("default", "my-qa").unwrap(), "PROJECT QA\n", "another board still gets the project's");
 
-    let bundled = find("default", "workitem-triage").unwrap();
+    let bundled = find("default", "workitem-analyze").unwrap();
     assert!(!bundled.is_empty() && !bundled.starts_with("---"), "{bundled}");
     write_skill(&workitems.join("skills"), "workitem-start", "MY START\n");
     assert_eq!(find("default", "workitem-start").unwrap(), "MY START\n", "a project overrides a bundled skill");
 
     assert!(find("default", "nope").unwrap_err().contains("not found"));
+    assert!(find("default", "workitem-triage").unwrap_err().contains("not found"), "triage is part of analyze");
     for bad in ["../x", "a/b", "", "Upper"] {
         assert!(find("default", bad).unwrap_err().contains("not a handler name"), "{bad}");
     }
@@ -1683,7 +1691,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
 #[tokio::test]
 async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
     let w = world();
-    write_item(&w.ws, "T-1-files", "backlog", "");
+    write_item(&w.ws, "T-1-files", "analyze", "");
     let dir = w.ws.join("T-1-files");
     fs::create_dir_all(dir.join("notes")).unwrap();
     fs::write(dir.join("notes/page.html"), "<script>x</script>").unwrap();
@@ -1924,11 +1932,11 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     assert_eq!(post(&w, "/api/workspaces/app/boards", r#"{"name":"x","repo":"/no/such/repo"}"#).await.0, StatusCode::BAD_REQUEST);
     let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
     let ui = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "ui").unwrap().clone();
-    assert_eq!(ui["pipeline"]["entry"], "backlog", "a copy of the bundled board");
+    assert_eq!(ui["pipeline"]["entry"], "analyze", "a copy of the bundled board");
     assert_eq!(ui["pipeline"]["repo"], w.repo.display().to_string());
 
-    write_item(&w.ws, "T-70-api", "backlog", "");
-    write_item(&w.ws, "T-71-ui", "backlog", "board: ui\n");
+    write_item(&w.ws, "T-70-api", "analyze", "");
+    write_item(&w.ws, "T-71-ui", "analyze", "board: ui\n");
     let edit = |deps: &str| serde_json::json!({ "fields": { "depends_on": deps } }).to_string();
     let (status, body) = post(&w, "/api/workitems/app/T-71-ui/frontmatter", &edit("T-70-api, T-99-gone")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -1956,19 +1964,19 @@ async fn board_settings_are_edited_from_the_ui_and_checked_before_the_file_is_wr
     let saved = fs::read_to_string(&file).unwrap();
     for (bad, why) in [
         (r#"{"entry":"gone"}"#, "entry 'gone'"),
-        (r#"{"entry":"backlog","order":["nope"]}"#, "nope"),
-        (r#"{"entry":"backlog","issue_project":"acme/web"}"#, "Jira project key"),
-        (r#"{"entry":"backlog","reviewers":"team"}"#, "org/team"),
+        (r#"{"entry":"analyze","order":["nope"]}"#, "nope"),
+        (r#"{"entry":"analyze","issue_project":"acme/web"}"#, "Jira project key"),
+        (r#"{"entry":"analyze","reviewers":"team"}"#, "org/team"),
     ] {
         let (status, body) = put(&w, "/api/workspaces/app/boards/default", bad).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
         assert!(body.contains(why), "{body}");
     }
-    let (status, _) = put(&w, "/api/workspaces/app/boards/default", r#"{"entry":"backlog","repo":"/tmp"}"#).await;
+    let (status, _) = put(&w, "/api/workspaces/app/boards/default", r#"{"entry":"analyze","repo":"/tmp"}"#).await;
     assert!(status.is_client_error(), "repo cannot be changed: {status}");
     assert_eq!(fs::read_to_string(&file).unwrap(), saved, "a refused change leaves the file as it was");
-    assert_eq!(put(&w, "/api/workspaces/app/boards/nope", r#"{"entry":"backlog"}"#).await.0, StatusCode::NOT_FOUND);
-    assert_eq!(put(&w, "/api/workspaces/nope/boards/default", r#"{"entry":"backlog"}"#).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(put(&w, "/api/workspaces/app/boards/nope", r#"{"entry":"analyze"}"#).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(put(&w, "/api/workspaces/nope/boards/default", r#"{"entry":"analyze"}"#).await.0, StatusCode::NOT_FOUND);
 }
 
 /// One JSON-RPC message to an item's MCP endpoint (`questions.rs`), as an agent sends it: with the
@@ -2002,7 +2010,7 @@ fn status_of(w: &World, dir: &str) -> String {
 #[tokio::test]
 async fn the_mcp_endpoint_speaks_enough_mcp_for_an_agent() {
     let w = world();
-    write_item(&w.ws, "T-70-item", "backlog", "");
+    write_item(&w.ws, "T-70-item", "analyze", "");
     let (status, reply) = mcp(&w, "T-70-item", serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } } })).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(reply["id"], 1);
@@ -2027,9 +2035,9 @@ async fn the_mcp_endpoint_speaks_enough_mcp_for_an_agent() {
 #[tokio::test]
 async fn a_child_asks_its_parent_and_gets_the_answer_back() {
     let w = world();
-    write_item(&w.ws, "T-72-parent", "backlog", "answers_children: true\n");
-    write_item(&w.ws, "T-73-child", "backlog", "parent: T-72-parent\n");
-    write_item(&w.ws, "T-74-other", "backlog", "");
+    write_item(&w.ws, "T-72-parent", "analyze", "answers_children: true\n");
+    write_item(&w.ws, "T-73-child", "analyze", "parent: T-72-parent\n");
+    write_item(&w.ws, "T-74-other", "analyze", "");
 
     let asking = {
         let w_state = w.state.clone();
@@ -2070,8 +2078,8 @@ async fn a_child_asks_its_parent_and_gets_the_answer_back() {
 #[tokio::test]
 async fn an_unanswered_question_can_be_waited_for_again() {
     let w = world();
-    write_item(&w.ws, "T-75-parent", "backlog", "answers_children: true\n");
-    write_item(&w.ws, "T-76-child", "backlog", "parent: T-75-parent\n");
+    write_item(&w.ws, "T-75-parent", "analyze", "answers_children: true\n");
+    write_item(&w.ws, "T-76-child", "analyze", "parent: T-75-parent\n");
     let (text, error) = tool(&w, "T-76-child", "ask_parent", serde_json::json!({ "question": "Which endpoint?" })).await;
     assert!(!error);
     assert_eq!(text, "No answer to question 1 yet. Call wait_for_answer with id 1 to keep waiting.");
@@ -2083,8 +2091,8 @@ async fn an_unanswered_question_can_be_waited_for_again() {
     assert!(error && text.contains("no parent"), "{text}");
     assert_eq!(status_of(&w, "T-75-parent"), "ok");
 
-    write_item(&w.ws, "T-78-plain-parent", "backlog", "");
-    write_item(&w.ws, "T-79-split", "backlog", "parent: T-78-plain-parent\n");
+    write_item(&w.ws, "T-78-plain-parent", "analyze", "");
+    write_item(&w.ws, "T-79-split", "analyze", "parent: T-78-plain-parent\n");
     let (text, error) = tool(&w, "T-79-split", "ask_parent", serde_json::json!({ "question": "x" })).await;
     assert!(error && text.contains("does not answer questions"), "a parent nothing answers for: {text}");
     assert_eq!(status_of(&w, "T-79-split"), "ok");
@@ -2094,7 +2102,7 @@ async fn an_unanswered_question_can_be_waited_for_again() {
 #[tokio::test]
 async fn item_sessions_get_the_questions_server_with_the_token_in_a_private_file() {
     let w = world();
-    write_item(&w.ws, "T-77-item", "backlog", "");
+    write_item(&w.ws, "T-77-item", "analyze", "");
     let (status, _) = post(&w, "/api/workitems/app/T-77-item/session", "{}").await;
     assert_eq!(status, StatusCode::ACCEPTED);
     eventually("the session started", || args_log(&w).contains("mcp=")).await;

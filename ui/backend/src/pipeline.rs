@@ -695,8 +695,9 @@ mod tests {
     fn the_bundled_file_is_a_valid_template() {
         let text = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/workitem-pipeline/pipeline.json")).unwrap();
         let pipeline = Pipeline::parse(&board_text(&text, Path::new("/"), "", "", "jira").unwrap()).unwrap();
-        assert_eq!(pipeline.entry, "backlog");
-        assert_eq!(pipeline.stages.len(), 6);
+        assert_eq!(pipeline.entry, "analyze");
+        assert_eq!(pipeline.stages.len(), 5);
+        assert!(pipeline.stage("backlog").is_none());
         assert!(pipeline.stage("ready_for_development").unwrap().gate.is_some());
         assert!(pipeline.stage("in_review").unwrap().watches_prs());
         assert!(pipeline.stage("in_development").unwrap().develops());

@@ -7,15 +7,15 @@ Move a workitem (feature request, implementation task, bug report, Sentry error)
 ## Decisions
 
 1. **State:** `stage:` in `workitem.md` frontmatter is the source of truth. Jira mirroring is a later add-on.
-2. **Stages:** `backlog → analyze → ready_for_development → in_development → in_review → done`. "Blocked" is `agent_status: blocked: <reason>`, not a stage. `waiting: <what>` is an agent that idles on purpose (CI, a deploy) and needs nobody; its session is kept, and the notify hook only blocks it on a permission or elicitation prompt.
+2. **Stages:** `analyze → ready_for_development → in_development → in_review → done`. "Blocked" is `agent_status: blocked: <reason>`, not a stage. `waiting: <what>` is an agent that idles on purpose (CI, a deploy) and needs nobody; its session is kept, and the notify hook only blocks it on a permission or elicitation prompt.
 3. **Registry:** one `pipeline.json` in `~/.claude/skills/workitem-pipeline/`. It lists each stage with `handler`, `next` (allowed transitions) and `auto`.
 4. **Transitions:** only `bin/workitem-move <workitem-dir> <stage>` changes `stage`. It checks the registry and the brief rule.
-5. **Runner:** `/workitem-run`, one per repo, meant for `/loop 10m /workitem-run`. It only runs stages with `auto: true` (`backlog`, `analyze`, `in_development`). Pattern from `workitem-watch`: lock file `workitem-<dir>.running`, stale after 20 min, max 3 attempts, then `agent_status: blocked` and a push notification.
-6. **Triage rules** (`backlog`). Every item goes to `analyze`; triage only sets `analyze_mode`:
+5. **Runner:** `/workitem-run`, one per repo, meant for `/loop 10m /workitem-run`. It only runs stages with `auto: true` (`analyze`, `in_development`). Pattern from `workitem-watch`: lock file `workitem-<dir>.running`, stale after 20 min, max 3 attempts, then `agent_status: blocked` and a push notification.
+6. **Analyze mode** (`analyze`, decision 74 in `workitem-pipeline-ui.md`). A new item starts in `analyze`; when `analyze_mode` is missing, `workitem-analyze` sets it first (there is no separate triage stage):
    - concrete steps, named files/layers, no open questions → `validate`
    - bug or Sentry error → `root_cause`
    - feature request → `clarify`
-   - too vague → stay in `backlog`, `agent_status: blocked: <what is missing>`
+   - too vague → stay in `analyze`, `agent_status: blocked: <what is missing>`
 7. **Review brief:** `analyze` writes a `## Review brief` section: root cause or decisions, plan, risk, size, test plan, assumptions, issue and system error links. `bin/workitem-move` refuses `ready_for_development` if a part is missing or if `jira:` is `none`: an item is only ready for development with a linked Jira ticket.
 8. **Approval:** `/workitem-approve <dir>` prints the brief, asks to confirm, sets `approved: true` and `approved_at`. Reject with a comment moves the item back to `analyze`. After approval it offers to start development.
 9. **Intake:** manual. `workitem-create` accepts a Jira key, text, or a Sentry issue URL. New field `source: issue | system_error | text`.
@@ -26,21 +26,20 @@ Move a workitem (feature request, implementation task, bug report, Sentry error)
 
 | Stage | Handler | auto | Moves on when |
 |---|---|---|---|
-| `backlog` | `workitem-triage` | yes | routed to `analyze`, or blocked if vague |
-| `analyze` | `workitem-analyze` (modes: validate, root_cause, clarify) | yes | brief written → `ready_for_development` |
+| `analyze` | `workitem-analyze` (picks a mode if none: validate, root_cause, clarify) | yes | brief written → `ready_for_development`, or blocked if vague or not actionable |
 | `ready_for_development` | none, waits for `/workitem-approve` | no | `approved: true` |
 | `in_development` | `workitem-start` | yes | PR opened → `in_review` |
 | `in_review` | `workitem-watch` | yes | PR merged → `done` |
 | `done` | none | no | terminal |
 
-Allowed backward moves: `analyze → backlog`, `ready_for_development → analyze`.
+Allowed backward move: `ready_for_development → analyze`.
 
 ## Frontmatter
 
 ```yaml
-stage: backlog
+stage: analyze
 approved: false
-analyze_mode: validate | root_cause | clarify   # set by triage
+analyze_mode: validate | root_cause | clarify   # set by analyze when missing
 source: issue | system_error | text
 parent: <dir of the workitem this was split from>   # optional, set by workitem-create --parent
 agent_status: working | waiting: <what> | ok | blocked: <reason>
@@ -55,11 +54,10 @@ The stage list above is the bundled default. A project can replace it, and can h
 
 ```json
 {
-  "entry": "backlog",
+  "entry": "analyze",
   "stages": [
-    { "name": "backlog", "handler": "workitem-triage", "auto": true, "next": ["analyze"] },
     { "name": "analyze", "handler": "workitem-analyze", "auto": true,
-      "next": ["ready_for_development", "backlog"], "on_enter": { "approved": "false" } },
+      "next": ["ready_for_development"], "on_enter": { "approved": "false" } },
     { "name": "ready_for_development", "label": "Ready", "auto": false,
       "next": ["in_development", "analyze"], "on_enter": { "approved": "false" },
       "require": { "issue": "linked", "brief": "complete" },
@@ -85,7 +83,7 @@ Items no longer live in a repo. A workspace (`~/.workitems-pipeline/workspaces/<
 
 ## Components
 
-New: `pipeline.json`, `bin/workitem-move`, `workitem-triage`, `workitem-analyze`, `workitem-approve`, `workitem-run`, `workitem-remove` (manual, deletes a workitem after confirmation; leaves branch and PR alone).
+New: `pipeline.json`, `bin/workitem-move`, `workitem-analyze`, `workitem-approve`, `workitem-run`, `workitem-remove` (manual, deletes a workitem after confirmation; leaves branch and PR alone).
 Changed: `workitem-create`, `workitem-start`, `workitem-watch`.
 
 ## Non-goals

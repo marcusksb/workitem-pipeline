@@ -38,7 +38,7 @@ Items live in a workspace folder, outside the repo. The workitem file is the one
 
 Read the matched `workitem.md` and parse the frontmatter.
 
-- If `stage` is `backlog`, `analyze` or `ready_for_development` with `approved: false`, stop: it is not approved. Tell the user which stage it is in.
+- If `stage` is `analyze` or `ready_for_development` with `approved: false`, stop: it is not approved. Tell the user which stage it is in.
 - If `stage` is `in_development` and the last `### Round` under `## Self-review` has unchecked `Blocking` findings, the self-review sent it back: this is a **fix round**. Do not ask whether to resume or restart. Set `agent_status: working`, reuse the worktree (Step 5, step 3), and fix only those blockers, nothing else from the review. Commit each fix and tick its line `- [x]`, adding ` (fixed in <short sha>)` to the end of its title line. Run `rubocop -a` and the relevant `bin/rspec` target, push, then follow Step 7 from `/monitor-pr` on (the PR exists already). A blocker you cannot fix: leave it unticked and set `agent_status: blocked: cannot fix self-review blocker: <title>`.
 - If `stage` is already `in_development`, `in_review`, or `done`, tell the user and ask whether to resume as-is or restart — do not silently reset it.
   - If it's `in_development` and a `session:` field is present, that's a previously spawned background agent (see Step 4b) — offer to reconnect to it (Step 6) instead of restarting.

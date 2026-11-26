@@ -347,7 +347,7 @@ If the edit fails because the file changed, read it again and retry.",
     )
 }
 
-/// Prompt for a stage handler (triage, analyze, development, or an inline prompt): the stage
+/// Prompt for a stage handler (analyze, development, or an inline prompt): the stage
 /// context, then `instructions`.
 pub fn handler_prompt(state: &AppState, place: &Place, stage: &Stage, instructions: &str) -> String {
     let session = format!("wi-{}", place.dir);

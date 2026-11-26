@@ -3,8 +3,8 @@
 A kanban pipeline for Claude Code agents. A workitem (a Jira ticket, a Sentry error, or a plain task) moves through stages. Each stage has a handler skill that runs as an interactive `claude` session in tmux. A human approves the plan before any code gets written.
 
 ```
-backlog → analyze → ready_for_development → in_development → in_review → done
- triage    brief        human approves        implement + PR    watch PR
+analyze → ready_for_development → in_development → in_review → done
+ brief       human approves        implement + PR    watch PR
 ```
 
 Two parts live in this repo:
@@ -48,8 +48,7 @@ Items live in a **workspace**, not in a repo: `~/.workitems-pipeline/workspaces/
 
 | Stage | Handler | What happens |
 |---|---|---|
-| `backlog` | `workitem-triage` | Picks an analyze mode (`validate`, `root_cause`, `clarify`) or blocks the item as too vague |
-| `analyze` | `workitem-analyze` | Writes the `## Review brief`: findings, plan, risk, size, test plan, assumptions, links |
+| `analyze` | `workitem-analyze` | Picks an analyze mode (`validate`, `root_cause`, `clarify`) if none is set, or blocks the item as too vague; writes the `## Review brief`: findings, plan, risk, size, test plan, assumptions, links |
 | `ready_for_development` | gate | You approve (→ `in_development`) or reject with a comment (→ `analyze`) |
 | `in_development` | `workitem-start` | Sets up the worktree and branch, implements, opens a PR |
 | `in_review` | `watch/pr-review` | Reacts to what the workspace's `watch/pr-status` read: fixes conflicts, red CI and review comments, moves merged PRs to `done` |
@@ -64,7 +63,7 @@ Each board is `<workspace>/boards/<name>.json` with a `"repo"`; **New board** st
 | Skill | Use |
 |---|---|
 | `workitem-create` | Create a workitem from a Jira key, a Sentry URL or text; one linked item per repo when the task spans several |
-| `workitem-triage`, `workitem-analyze` | Handlers for `backlog` and `analyze` |
+| `workitem-analyze` | Handler for `analyze` |
 | `workitem-approve` | Review the brief and approve or reject (terminal-only flow; the UI has a button) |
 | `workitem-start` | Implement an approved item and open the PR |
 | `workitem-remove` | Delete a workitem and its worktree |

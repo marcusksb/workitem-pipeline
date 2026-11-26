@@ -1,6 +1,6 @@
 ---
 name: workitem-analyze
-description: Handler for the `analyze` stage of the workitem pipeline. Reads one workitem, works in the mode set by triage (validate, root_cause, clarify), writes the `## Review brief` and moves it to `ready_for_development`. Use when asked to "analyze workitem X"; normally started by the UI's dispatcher.
+description: Handler for the `analyze` stage of the workitem pipeline. Reads one workitem, picks its analyze mode (validate, root_cause, clarify) unless one is set, works in that mode, writes the `## Review brief` and moves it to `ready_for_development`. Use when asked to "analyze workitem X"; normally started by the UI's dispatcher.
 ---
 
 # Workitem Analyze
@@ -11,7 +11,13 @@ Read-only: read the codebase, ADRs, the linked issue (`python3 ~/.claude/skills/
 
 ## Steps
 
-1. Read `workitem.md`. Confirm the item is in the stage your prompt names as the current stage (`analyze` on the bundled board). Read `analyze_mode`. If a `## Rejection` section exists (added by `/workitem-approve`), address it first. If an `## Open questions` section exists, read the answers under each question and treat them as decisions. A question still without an answer stays open (see step 4).
+1. Read `workitem.md`. Confirm the item is in the stage your prompt names as the current stage (`analyze` on the bundled board). Read `analyze_mode`. If it is missing, pick it now with the first rule that matches and write `analyze_mode: <mode>` to the frontmatter:
+   1. **`validate`** — the item has concrete steps, names files or layers, and has no open questions.
+   2. **`root_cause`** — `type: bug`, or `source: system_error`.
+   3. **`clarify`** — a feature request or an idea (`type: feature`, or an ask without a plan; this includes `refactor`, `perf` and the other non-bug types).
+   4. **Too vague** — you cannot tell what is wanted, or the description is empty. A bug report without enough detail is too vague, not `root_cause`. Set `agent_status: blocked: <what is missing, one line>` and stop.
+
+   If a `## Rejection` section exists (added by `/workitem-approve`), address it first. If an `## Open questions` section exists, read the answers under each question and treat them as decisions. A question still without an answer stays open (see step 4).
 2. Work by mode:
    - **`validate`** — the item already has a plan. Check every file, class and method it names against the current code. Fix small errors in the plan. Find risks the plan missed.
    - **`root_cause`** — find why it fails. For `source: system_error`, fetch the issue with the Sentry tools (stack trace, first/last seen, count). Follow the code path. Name the exact file and line. State how you know (code evidence), not how it might be.
@@ -34,7 +40,7 @@ Read-only: read the codebase, ADRs, the linked issue (`python3 ~/.claude/skills/
 ## Rules
 
 - Prove claims with code you read. Label anything else as an assumption.
-- If the item is not actionable at all (wrong repo, duplicate, already fixed), move it back with `workitem-move <workitem file> <earlier stage>` (the other allowed next stage that sends it back, `backlog` on the bundled board) and set `agent_status: blocked: <reason>`.
+- If the item is not actionable at all (wrong repo, duplicate, already fixed), do not move it. Set `agent_status: blocked: <reason>` and stop.
 - Never remove the user's own text from the workitem.
 - If something has to happen after the item is done (a deploy step, a cleanup after a rollout, telling someone), add it as a `- [ ]` line under `## Follow-ups`, the last section of the file; create the section if it is missing. Do not work on follow-ups. Only append: never delete, reword or untick a line, and skip one that is already listed.
 - To split the work into smaller workitems, create each with `workitem-create --parent <this workitem's dir> --workspace <workspace> --board <board>` (plus `--issue` as needed). Do not write child `workitem.md` files by hand.
