@@ -595,87 +595,60 @@ If the brief changes while the workitem is approved, say so: the human decides w
     )
 }
 
-/// Prompt for the fixer the dispatcher starts when an in-review PR has red CI.
-pub fn ci_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
-    let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(repo, place.dir);
-    format!(
-        "CI is failing on {pr}, the PR of workitem {dir} in repo {repo}.\n\
-1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Find the failure: gh pr checks {pr}, then gh run view <run> --log-failed.\n\
-3. Fix the cause in code, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
-4. Pushed a fix: set agent_status: ok and stop.\n\
-5. Cannot fix it (flaky or infrastructure failure, failure not caused by this PR, needs a decision or a secret): \
-set agent_status: blocked: <one line reason>, explain here and wait.\n\
-{learnings}The workitem file is {file} (in the workspace folder, outside the repo): set agent_status there.\n\
-Never change stage:.\n\
-{protocol}",
-        dir = place.dir,
-        file = place.file().display(),
-        worktree = worktree.display(),
-        repo = repo.display(),
-        learnings = learnings(place.workspace, place.board),
-        protocol = protocol(&session),
-    )
+/// A fixer the `pr-review` watcher starts on an item's PR. Its steps are the handler skill
+/// `skill()`, resolved like any handler, so a board or workspace can override them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fixer {
+    Ci,
+    Comments,
+    Conflict,
 }
 
-/// Prompt for the fixer `pr-review` starts when an in-review PR gets new comments or reviews that ask for a change.
-pub fn comments_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
-    let session = format!("wi-{}", place.dir);
-    let worktree = git::worktree_path(repo, place.dir);
-    format!(
-        "New review comments or a review requesting changes on {pr}, the PR of workitem {dir} in repo {repo}.\n\
-1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Read them: gh pr view {pr} --comments (reviews included), and gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments for inline ones. \
-Act only on comments and reviews from others and on your user's own comments that contain @change or that start an inline thread (not a reply). \
-A review that requests changes: implement what the reviewer asked for.\n\
-3. Check each against the actual code before acting, bot findings included. Implement a clear, legitimate change. \
-Leave a clearly wrong one untouched. Unsure whether a comment or suggestion is right, or what it asks for: \
-do not guess and do not skip it. Finish the rest, then set agent_status: blocked: <your question, one line>, ask it here and wait.\n\
-4. Run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.\n\
-5. Reply once on the PR to each comment you acted on: \"Fixed in <short sha>\" plus a few words on what changed, \
-or \"Not changing this: <reason>\" for one you denied. Inline comment: \
-gh api repos/{{owner}}/{{repo}}/pulls/<number>/comments/<id>/replies -f body=<text>. Other PR comment: gh pr comment {pr} --body <text>. \
-Do not reply to one you are blocked on.\n\
-6. {record} Then set agent_status: ok and stop.\n\
-7. Cannot do it (needs a decision, large refactor, database migration): \
-set agent_status: blocked: <one line reason>, explain here and wait.\n\
-{learnings}The workitem file is {file} (in the workspace folder, outside the repo): set agent_status there.\n\
-Never change stage:.\n\
-{protocol}",
-        dir = place.dir,
-        file = place.file().display(),
-        worktree = worktree.display(),
-        repo = repo.display(),
-        record = record_learnings(place),
-        learnings = learnings(place.workspace, place.board),
-        protocol = protocol(&session),
-    )
+impl Fixer {
+    pub const ALL: [Fixer; 3] = [Fixer::Ci, Fixer::Comments, Fixer::Conflict];
+
+    /// The `kind` of `POST .../fix`.
+    pub fn parse(kind: &str) -> Option<Fixer> {
+        match kind {
+            "ci" => Some(Fixer::Ci),
+            "comments" => Some(Fixer::Comments),
+            "conflict" => Some(Fixer::Conflict),
+            _ => None,
+        }
+    }
+
+    pub fn skill(self) -> &'static str {
+        match self {
+            Fixer::Ci => "workitem-fix-ci",
+            Fixer::Comments => "workitem-fix-comments",
+            Fixer::Conflict => "workitem-fix-conflict",
+        }
+    }
 }
 
-/// Prompt for the fixer the dispatcher starts when an in-review PR conflicts with its base.
-pub fn conflict_fix_prompt(place: &Place, repo: &Path, pr: &str) -> String {
+/// Prompt for a fixer: what happened to which PR, where to work, then the skill's `instructions`,
+/// the board's learnings (and for review comments, where to record new ones).
+pub fn fix_prompt(place: &Place, repo: &Path, pr: &str, fixer: Fixer, instructions: &str) -> String {
     let session = format!("wi-{}", place.dir);
     let worktree = git::worktree_path(repo, place.dir);
+    let (dir, repo) = (place.dir, repo.display());
+    let situation = match fixer {
+        Fixer::Ci => format!("CI is failing on {pr}, the PR of workitem {dir} in repo {repo}."),
+        Fixer::Comments => format!("New review comments or a review requesting changes on {pr}, the PR of workitem {dir} in repo {repo}."),
+        Fixer::Conflict => format!("{pr}, the PR of workitem {dir} in repo {repo}, conflicts with its base branch."),
+    };
+    let record = match fixer {
+        Fixer::Comments => format!("{}\n", record_learnings(place)),
+        _ => String::new(),
+    };
     format!(
-        "{pr}, the PR of workitem {dir} in repo {repo}, conflicts with its base branch.\n\
-1. Work in the workitem's worktree {worktree} on the PR branch (git worktree add it if missing).\n\
-2. Get the base branch name (gh pr view {pr} --json baseRefName), git fetch origin <base>, then git merge origin/<base>, \
-never a local copy of it. Do not rebase.\n\
-3. Resolve every conflict. Read what each side changed (git log --merge -p <file>) and keep both sides' behavior. \
-When it is unclear what someone meant, pick the most likely meaning and go on. \
-Generated files (lockfiles, schema dumps, generated docs): take the base version, then rerun the tool that writes them; \
-if the tool cannot run, merge both sides by hand. No -X ours/theirs, never git merge --abort.\n\
-4. Run the affected tests and the linter, and fix what the merge broke. Commit the merge and git push (no force push). \
-If failures remain that you cannot fix, push anyway and name them here in one line: the CI fixer takes over.\n\
-5. Set agent_status: ok and stop. Do not block on the conflict.\n\
-{learnings}The workitem file is {file} (in the workspace folder, outside the repo): set agent_status there.\n\
-Never change stage:.\n\
-{protocol}",
-        dir = place.dir,
-        file = place.file().display(),
+        "{situation}\n\
+The workitem's worktree is {worktree}.\n\
+The workitem file is {file} (in the workspace folder, outside the repo).\n\
+Follow these instructions:\n--- instructions ---\n{instructions}\n--- end of instructions ---\n\
+{record}{learnings}{protocol}",
         worktree = worktree.display(),
-        repo = repo.display(),
+        file = place.file().display(),
         learnings = learnings(place.workspace, place.board),
         protocol = protocol(&session),
     )
@@ -719,6 +692,16 @@ mod tests {
         Place { dir: "item-1", workspace, repo: Some(Path::new("/r/proj")), board }
     }
 
+    /// The bundled steps of `fixer`, as `instructions` reads them.
+    fn bundled(fixer: Fixer) -> String {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills").join(fixer.skill()).join("SKILL.md");
+        strip_frontmatter(&fs::read_to_string(file).unwrap()).to_string()
+    }
+
+    fn fixer_prompts(place: &Place, repo: &Path) -> Vec<String> {
+        Fixer::ALL.iter().map(|&f| fix_prompt(place, repo, "#7", f, &bundled(f))).collect()
+    }
+
     #[test]
     fn opencode_gets_only_a_provider_model() {
         assert_eq!(model_args(AgentKind::Opencode, "opus"), Vec::<OsString>::new(), "a Claude alias falls back to opencode's default");
@@ -733,7 +716,7 @@ mod tests {
         let want = "/w/main/item-1/workitem.md";
         let place = place(workspace, "dev");
         let repo = Path::new("/r/proj");
-        for prompt in [ci_fix_prompt(&place, repo, "#7"), comments_fix_prompt(&place, repo, "#7"), conflict_fix_prompt(&place, repo, "#7"), session_prompt(&place), brief_prompt(&place)] {
+        for prompt in fixer_prompts(&place, repo).into_iter().chain([session_prompt(&place), brief_prompt(&place)]) {
             assert!(prompt.contains(want), "missing workitem path in: {prompt}");
             assert!(prompt.contains("/r/proj"), "missing repo in: {prompt}");
         }
@@ -742,7 +725,7 @@ mod tests {
     #[test]
     fn the_conflict_fixer_merges_the_base_and_never_blocks() {
         let place = place(Path::new("/w/main"), "dev");
-        let prompt = conflict_fix_prompt(&place, Path::new("/r/proj"), "#7");
+        let prompt = fix_prompt(&place, Path::new("/r/proj"), "#7", Fixer::Conflict, &bundled(Fixer::Conflict));
         assert!(prompt.contains("git merge origin/<base>"), "{prompt}");
         for word in ["rebase onto", "--force", "needs manual rebase", "Give up", "git rebase --abort"] {
             assert!(!prompt.contains(word), "{word} in: {prompt}");
@@ -799,8 +782,9 @@ mod tests {
         let file = workspace.path().join("boards/ops/learnings.md").display().to_string();
         let place = place(workspace.path(), "ops");
         let repo = Path::new("/r/proj");
-        let review = [comments_fix_prompt(&place, repo, "#7")];
-        let other = [ci_fix_prompt(&place, repo, "#7"), conflict_fix_prompt(&place, repo, "#7")];
+        let [ci, comments, conflict]: [String; 3] = fixer_prompts(&place, repo).try_into().unwrap();
+        let review = [comments];
+        let other = [ci, conflict];
         for prompt in review.iter().chain(&other) {
             assert!(prompt.contains("--- learnings ---\n# Learnings\n\n- Never mock tmux.\n--- end of learnings ---"), "{prompt}");
             assert!(!prompt.contains("Dev rule"), "{prompt}");

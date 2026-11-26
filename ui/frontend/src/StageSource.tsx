@@ -69,7 +69,7 @@ function Settings({ workspace, board, stage, sources, onSaved }: { workspace: st
   );
 }
 
-/** A stage's settings, and what it runs, read-only: its watch scripts and its handler skill (or inline prompt). */
+/** A stage's settings, and what it runs, read-only: its watch scripts and its handler skill (or inline prompt), and on the PR stage the fixer skills. */
 export function StageSource({ label, stage, board, workspaces, onClose }: Props) {
   const [workspace, setWorkspace] = useState(workspaces[0]);
   const [sources, setSources] = useState<Sources>();
@@ -85,7 +85,7 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
   }, [workspace, board, stage, loads]);
 
   const hasScript = !!sources?.scripts.length;
-  const hasProse = !!sources?.prose;
+  const hasProse = !!sources?.prose || !!sources?.fixers.length;
   const shown = tab === "script" && hasScript ? "script" : tab === "prose" && hasProse ? "prose" : hasProse ? "prose" : "script";
   return (
     <Dialog title={`${label}: stage`} onClose={onClose} className="max-w-[760px]">
@@ -118,6 +118,7 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
             </TabsList>
           </Tabs>
           {shown === "prose" && sources.prose && <File source={sources.prose} />}
+          {shown === "prose" && sources.fixers.map((fixer) => <File key={fixer.name} source={fixer} />)}
           {shown === "script" && sources.scripts.map((script, i) => <File key={i} source={script} />)}
           {!hasProse && !hasScript && <Muted>This stage runs nothing.</Muted>}
         </>

@@ -519,6 +519,8 @@ pub async fn save_learnings(
 pub struct StageSource {
     scripts: Vec<Source>,
     prose: Option<Source>,
+    /// The PR stage's fixer skills (CI, comments, conflict), which its `pr-review` watcher starts.
+    fixers: Vec<Source>,
     /// The stage's `model` (decision 60); `None` means the agent's default.
     model: Option<String>,
     /// Entering the stage needs a linked issue (`require: {"issue": "linked"}`).
@@ -537,8 +539,8 @@ fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static s
     source
 }
 
-/// What a stage runs, resolved the way the dispatcher resolves it: its watch scripts, and the
-/// handler skill or inline prompt.
+/// What a stage runs, resolved the way the dispatcher resolves it: its watch scripts, the
+/// handler skill or inline prompt, and on the PR stage the fixer skills.
 pub async fn stage_source(
     State(state): State<Shared>,
     Path((workspace, board, stage)): Path<(String, String, String)>,
@@ -564,7 +566,11 @@ pub async fn stage_source(
         }),
         (None, None) => None,
     };
-    Ok(Json(StageSource { scripts, prose, model: stage.model.clone(), require_issue: stage.requires_issue() }))
+    let fixers = match stage.watches_prs() {
+        true => launch::Fixer::ALL.iter().map(|f| file_source(f.skill(), launch::handler_file(&state, &workspace, &board, f.skill()), None)).collect(),
+        false => Vec::new(),
+    };
+    Ok(Json(StageSource { scripts, prose, fixers, model: stage.model.clone(), require_issue: stage.requires_issue() }))
 }
 
 #[derive(Deserialize)]

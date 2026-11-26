@@ -282,12 +282,10 @@ pub async fn fix(
     }
     let repo = pr_repo_of(&state, &workspace, &item)?;
     let place = Place { dir: &item.dir, workspace: &workspace.dir, repo: Some(&repo), board: &item.board };
-    let prompt = match kind.as_str() {
-        "ci" => launch::ci_fix_prompt(&place, &repo, &item.pr),
-        "conflict" => launch::conflict_fix_prompt(&place, &repo, &item.pr),
-        "comments" => launch::comments_fix_prompt(&place, &repo, &item.pr),
-        other => return Err(ApiError(StatusCode::BAD_REQUEST, format!("'{other}' is not a fixer"))),
-    };
+    let fixer = launch::Fixer::parse(&kind).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("'{kind}' is not a fixer")))?;
+    // A missing or unreadable skill is not a state that retrying fixes, like a handler's.
+    let instructions = launch::instructions(&state, &workspace, &item.board, fixer.skill()).map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    let prompt = launch::fix_prompt(&place, &repo, &item.pr, fixer, &instructions);
     launch_item_session(&state, &workspace, &path, &place, &prompt, Admit::Ok).await
 }
 
