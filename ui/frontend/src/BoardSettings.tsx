@@ -22,14 +22,28 @@ export const settingsOf = (form: ReturnType<typeof formOf>): Settings => ({
   order: form.order.split("\n").map((line) => line.trim()).filter(Boolean),
 });
 
-type Props = { workspace: string; board: string; pipeline: Pipeline; onClose: () => void; onChanged: () => void };
+/** "1 workitem", "3 workitems". */
+export const workitemCount = (n: number) => `${n} workitem${n === 1 ? "" : "s"}`;
+
+type Props = {
+  workspace: string;
+  board: string;
+  pipeline: Pipeline;
+  /** How many workitems are on the board, for the delete confirmation. */
+  items: number;
+  onClose: () => void;
+  onChanged: () => void;
+  /** Called once the board was deleted. */
+  onDeleted: () => void;
+};
 
 /** A board's top-level settings (decision 73). `repo` is shown but fixed; stages and watchers are
  * edited in the board file. The backend checks the result before it writes. */
-export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }: Props) {
+export function BoardSettings({ workspace, board, pipeline, items, onClose, onChanged, onDeleted }: Props) {
   const [form, setForm] = useState(() => formOf(pipeline));
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }) });
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -44,6 +58,41 @@ export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }
     }
     setBusy(false);
   };
+  /** Deletes the board with its items (decision 77). A worktree git refused to remove is reported
+   * after the board is gone, so the dialog stays open to show it. */
+  const remove = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(undefined);
+    try {
+      const { worktrees_left } = await api.deleteBoard(workspace, board);
+      onDeleted();
+      if (worktrees_left.length === 0) {
+        onClose();
+        return;
+      }
+      setError(`The board is deleted, but these worktrees stay:\n${worktrees_left.join("\n")}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
+  if (deleting) {
+    return (
+      <Dialog title={`Delete ${workspace} · ${pipeline.label || board}`} onClose={onClose}>
+        <DialogForm onSubmit={remove}>
+          <Muted>
+            Deletes the board and its {workitemCount(items)}: their agent sessions are stopped, and their worktrees and workitem folders are deleted, as are boards/{board}.json
+            and boards/{board}/ (skills, watchers, learnings). This cannot be recovered. Branches and PRs stay.
+          </Muted>
+          <Button type="submit" variant="danger" disabled={busy}>
+            Delete board and {workitemCount(items)}
+          </Button>
+          {error && <ErrorText>{error}</ErrorText>}
+        </DialogForm>
+      </Dialog>
+    );
+  }
   return (
     <Dialog title={`Settings of ${workspace} · ${pipeline.label || board}`} onClose={onClose}>
       <DialogForm onSubmit={save}>
@@ -79,6 +128,12 @@ export function BoardSettings({ workspace, board, pipeline, onClose, onChanged }
           Save
         </Button>
         {error && <ErrorText>{error}</ErrorText>}
+        <Button type="button" variant="danger" disabled={busy} onClick={() => {
+            setError(undefined);
+            setDeleting(true);
+          }}>
+          Delete board
+        </Button>
       </DialogForm>
     </Dialog>
   );

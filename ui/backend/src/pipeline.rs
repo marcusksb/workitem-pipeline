@@ -483,6 +483,22 @@ impl AppState {
         write_board(workspace, &path, text)
     }
 
+    /// Deletes `boards/<name>.json`, the board's `boards/<name>/` folder (skills, watchers,
+    /// learnings) and its last valid file, so `/api/pipelines` stops serving it.
+    pub fn delete_board(&self, workspace: &Workspace, name: &str) -> Result<(), String> {
+        if !valid_board_name(name) {
+            return Err(format!("'{name}' is not a board name"));
+        }
+        let boards = workspace.dir.join("boards");
+        fs::remove_file(boards.join(format!("{name}.json"))).map_err(|e| e.to_string())?;
+        match fs::remove_dir_all(boards.join(name)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+            _ => {}
+        }
+        self.pipelines.lock().unwrap().remove(&format!("{}/{name}", workspace.name));
+        Ok(())
+    }
+
     /// Sets `settings` on `stage` of `boards/<name>.json`, checked and kept like `update_board`.
     pub fn update_stage(&self, workspace: &Workspace, name: &str, stage: &str, settings: &StageSettings) -> Result<(), String> {
         if !valid_board_name(name) {

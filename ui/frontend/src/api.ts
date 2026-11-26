@@ -34,6 +34,8 @@ export const api = {
     request<void>("POST", `/api/workspaces/${segment(workspace)}/boards`, board),
   updateBoard: (workspace: string, board: string, settings: BoardSettings) =>
     request<void>("PUT", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}`, settings),
+  deleteBoard: (workspace: string, board: string) =>
+    request<{ removed: number; worktrees_left: string[] }>("DELETE", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}`),
   pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
   stageSource: (workspace: string, board: string, stage: string) =>
     request<StageSource>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/stages/${segment(stage)}/source`),

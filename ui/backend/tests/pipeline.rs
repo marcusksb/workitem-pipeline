@@ -676,6 +676,50 @@ async fn remove_is_finished_when_the_request_returns() {
     assert!(!w.tmux.has("wi-T-11-busy"));
 }
 
+async fn delete_board(w: &World, board: &str) -> (StatusCode, String) {
+    let request = Request::delete(format!("/api/workspaces/app/boards/{board}"))
+        .header(header::HOST, format!("127.0.0.1:{}", w.state.port))
+        .header(header::COOKIE, format!("wi_session={}", w.token))
+        .body(Body::empty())
+        .unwrap();
+    let response = router(w.state.clone()).oneshot(request).await.unwrap();
+    let status = response.status();
+    (status, String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned())
+}
+
+#[tokio::test]
+async fn deleting_a_board_removes_its_items_and_files() {
+    let w = world();
+    fs::copy(w.ws.join("boards/default.json"), w.ws.join("boards/side.json")).unwrap();
+    fs::create_dir_all(w.ws.join("boards/side/skills")).unwrap();
+    fs::write(w.ws.join("boards/side/learnings.md"), "# Learnings\n").unwrap();
+    write_item(&w.ws, "T-12-keep", "analyze", "");
+    write_item(&w.ws, "T-13-side", "analyze", "board: side\n");
+    write_item(&w.ws, "T-14-side", "ready_for_development", "board: side\n");
+    own_session(&w, "wi-T-13-side");
+    let workspace = w.state.store.workspace("app").unwrap();
+    workitem_ui::watch::set_paused(&w.state, &workspace, "side", "analyze", true).unwrap();
+    workitem_ui::watch::set_paused(&w.state, &workspace, "default", "analyze", true).unwrap();
+    fs::write(w.state.store.sibling("watch.json"), r#"{"app/side/analyze/0": 1, "app/default/analyze/0": 1}"#).unwrap();
+    assert!(get(&w, "/api/pipelines").await.contains(r#""name":"side""#));
+
+    assert_eq!(delete_board(&w, "nope").await.0, StatusCode::NOT_FOUND);
+    assert_eq!(delete_board(&w, "..").await.0, StatusCode::NOT_FOUND);
+
+    let (status, body) = delete_board(&w, "side").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, r#"{"removed":2,"worktrees_left":[]}"#);
+    assert!(!w.tmux.has("wi-T-13-side"), "session stopped");
+    assert!(!w.ws.join("T-13-side").exists() && !w.ws.join("T-14-side").exists(), "items removed");
+    assert!(!w.ws.join("boards/side.json").exists() && !w.ws.join("boards/side").exists(), "board removed");
+    assert!(w.ws.join("T-12-keep").exists() && w.ws.join("boards/default.json").exists(), "other board kept");
+    assert!(!get(&w, "/api/pipelines").await.contains(r#""name":"side""#), "not served from the cache");
+    let paused = fs::read_to_string(w.state.store.sibling("paused.json")).unwrap();
+    assert!(!paused.contains("app/side/") && paused.contains("app/default/analyze"), "{paused}");
+    let runs = fs::read_to_string(w.state.store.sibling("watch.json")).unwrap();
+    assert!(!runs.contains("app/side/") && runs.contains("app/default/analyze/0"), "{runs}");
+}
+
 const PR: &str = "pr: https://github.com/app/pull/7\n";
 
 #[tokio::test]

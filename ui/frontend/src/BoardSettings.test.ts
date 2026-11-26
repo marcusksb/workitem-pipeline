@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formOf, settingsOf } from "./BoardSettings";
+import { formOf, settingsOf, workitemCount } from "./BoardSettings";
 import { Pipeline } from "./types";
 
 const pipeline: Pipeline = { repo: "/code/app", entry: "backlog", stages: [], order: ["issue_status desc", "title"], reviewers: "acme/web" };
@@ -16,5 +16,9 @@ describe("board settings form", () => {
     expect(settings.order).toEqual(["created desc", "title"]);
     expect(settings).not.toHaveProperty("repo");
     expect(settingsOf({ ...formOf(pipeline), order: "" }).order).toEqual([]);
+  });
+
+  it("counts the workitems the delete confirmation names", () => {
+    expect([0, 1, 2].map(workitemCount)).toEqual(["0 workitems", "1 workitem", "2 workitems"]);
   });
 });

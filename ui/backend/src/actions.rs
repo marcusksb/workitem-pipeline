@@ -420,26 +420,34 @@ async fn worktree_of(repo: &Path, dir: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Removal is done here, not by an agent, so it is finished when the request returns and
-/// the dispatcher never sees a half-removed item. Stops the session, drops the worktree
-/// (never `--force`), then deletes the folder. Branch and PR stay.
+/// the dispatcher never sees a half-removed item.
 pub async fn remove(
     State(state): State<Shared>,
     UrlPath((workspace, dir)): UrlPath<(String, String)>,
 ) -> Result<Json<Removed>> {
     let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let _busy = state.busy.lock().await;
+    let worktree_left = remove_item(&state, &workspace, &path, &item).await?;
+    state.wake.notify_one();
+    Ok(Json(Removed { worktree_left }))
+}
+
+/// Stops the item's session, drops its worktree (never `--force`), then deletes its folder.
+/// Branch and PR stay. Returns why git refused the worktree, if it did. The caller holds `busy`.
+async fn remove_item(state: &AppState, workspace: &Workspace, path: &Path, item: &Workitem) -> Result<Option<String>> {
+    let dir = &item.dir;
     // Only this workspace's session; a same-named session from another workspace is not ours.
     let session = format!("wi-{dir}");
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    if tmux::named(&sessions, &workspace, &session).is_some() {
+    if tmux::named(&sessions, workspace, &session).is_some() {
         tmux::kill(state.tmux_socket.as_deref(), &session).await;
     }
 
     let mut worktree_left = None;
     // An item whose board has no valid file, or no repo, has no worktree to look for.
-    let repo = state.repo_of(&workspace, &item.board).ok().flatten();
+    let repo = state.repo_of(workspace, &item.board).ok().flatten();
     let worktree = match &repo {
-        Some(repo) => worktree_of(repo, &dir).await,
+        Some(repo) => worktree_of(repo, dir).await,
         None => None,
     };
     if let (Some(worktree), Some(repo)) = (worktree, &repo) {
@@ -461,8 +469,40 @@ pub async fn remove(
 
     let folder = path.parent().ok_or_else(|| internal("workitem has no folder"))?;
     std::fs::remove_dir_all(folder).map_err(internal)?;
+    Ok(worktree_left)
+}
+
+#[derive(Serialize)]
+pub struct BoardDeleted {
+    /// How many workitems were removed with the board.
+    removed: usize,
+    /// One line per worktree git refused to remove; their workitem folders are gone regardless.
+    worktrees_left: Vec<String>,
+}
+
+/// Deletes a board with every item on it (decision 77): each item as `remove` does, then the
+/// board file, its folder and what the backend keeps by the board. An item that cannot be
+/// deleted stops it before the board is touched, so no item is left on a missing board.
+pub async fn delete_board(
+    State(state): State<Shared>,
+    UrlPath((workspace, board)): UrlPath<(String, String)>,
+) -> Result<Json<BoardDeleted>> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    if !state.board_names(&workspace).contains(&board) {
+        return Err(ApiError::not_found("board"));
+    }
+    // Held throughout, so the dispatcher never starts a handler on an item of the board mid-delete.
+    let _busy = state.busy.lock().await;
+    let items: Vec<Workitem> = workitem::list(&workspace).into_iter().filter(|item| item.board == board).collect();
+    let mut worktrees_left = vec![];
+    for item in &items {
+        let path = workitem::path(&workspace, &item.dir).ok_or(ApiError::not_found("workitem"))?;
+        worktrees_left.extend(remove_item(&state, &workspace, &path, item).await?);
+    }
+    state.delete_board(&workspace, &board).map_err(internal)?;
+    crate::watch::forget_board(&state, &workspace, &board).map_err(internal)?;
     state.wake.notify_one();
-    Ok(Json(Removed { worktree_left }))
+    Ok(Json(BoardDeleted { removed: items.len(), worktrees_left }))
 }
 
 #[derive(Deserialize)]
