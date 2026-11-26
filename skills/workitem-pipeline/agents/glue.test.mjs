@@ -143,6 +143,12 @@ test("pi and omp planning: mark working, refuse code edits; omp records its sess
       const [read] = await fire("tool_call", { toolName: "read", input: { path: join(repo, "src", "a.ts") } });
       assert.equal(read, undefined);
     }
+    // An approved tool ran: the record goes back to working.
+    const fire = extension(omp);
+    await fire("tool_approval_requested");
+    assert.match(text(), /^status: waiting$/m);
+    await fire("tool_result");
+    assert.match(text(), /^status: working$/m);
     const handlers = {};
     omp({ on: (name, handler) => (handlers[name] = handler) });
     await handlers.session_start({}, { sessionManager: { getSessionFile: () => "/s/2026_abc.jsonl" } });

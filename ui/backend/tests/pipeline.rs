@@ -19,7 +19,7 @@ use common::{eventually, Tmux};
 const STUB: &str = r#"#!/bin/bash
 repo="$WORKITEM_REPO"
 file="$WORKITEM_FILE"
-{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
+{ echo "argc=$#"; [ -n "$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD" ] && echo "claude_md=$CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"; printf 'last=%s\n' "${@: -1}"; a=("$@"); for i in "${!a[@]}"; do [ "${a[$i]}" = --model ] && echo "model=${a[$((i+1))]}"; [ "${a[$i]}" = --mcp-config ] && echo "mcp=${a[$((i+1))]}"; [ "${a[$i]}" = --settings ] && echo "settings=${a[$((i+1))]}"; done; [ -n "$GH_TOKEN" ] && echo "gh_token=$GH_TOKEN"; } > "$LOGDIR/args-$(date +%s%N)"
 [ -n "$WORKITEM" ] && echo "$PWD|$WORKITEM_REPO" > "$LOGDIR/../cwd-$WORKITEM"
 if [ -n "$WORKITEM" ]; then
   stage=$(perl -ne 'print $1 if /^stage:\s*(\S+)/' "$file")
@@ -2097,6 +2097,11 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
     assert!(log.contains(&format!("- default: repo {}", w.repo.display())), "the prompt lists the boards and their repos: {log}");
     assert!(log.contains(&input), "prompt keeps the text verbatim");
     assert!(!pwn.exists(), "text must never reach a shell");
+    let settings: serde_json::Value = serde_json::from_str(log.lines().find_map(|l| l.strip_prefix("settings=")).unwrap()).unwrap();
+    for event in ["UserPromptSubmit", "PostToolUse"] {
+        let command = settings["hooks"][event][0]["hooks"][0]["command"].as_str().unwrap_or_default();
+        assert!(command.contains("workitem-plan-note' --status working"), "{event} sets the record back to working, also after an approved permission prompt: {settings}");
+    }
 
     let plans = get(&w, "/api/plans").await;
     assert!(plans.contains(r#""status":"working""#) && plans.contains(r#""live":true"#), "{plans}");
@@ -2140,7 +2145,9 @@ async fn a_prompt_over_the_tmux_command_limit_reaches_the_agent_unchanged() {
     let prompt = format!("{}\n'quotes' \"and\" $(no expansion) `here`\n\n", "x".repeat(20_000));
     workitem_ui::launch::spawn(&w.state, "wi-big", &project, workitem_ui::launch::Scope::Workspace, &prompt).await.unwrap();
     eventually("the agent ran", || !args_log(&w).is_empty()).await;
-    assert_eq!(args_log(&w), format!("argc=5\nclaude_md=1\nlast={prompt}\n"), "a workspace session reads the repos' CLAUDE.md");
+    let log = args_log(&w);
+    let (args, _settings) = log.split_once("\nsettings=").unwrap();
+    assert_eq!(args, format!("argc=5\nclaude_md=1\nlast={prompt}"), "a workspace session reads the repos' CLAUDE.md");
     assert!(w.tmux.has("wi-big"));
 }
 
