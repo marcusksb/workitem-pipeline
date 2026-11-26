@@ -228,6 +228,7 @@ impl Job {
             ("WORKITEM_NEXT", stage.map(|s| s.next.join(",")).unwrap_or_default()),
             ("WORKITEM_BUSY", busy.join(",")),
             ("WORKITEM_GH", state.gh.clone()),
+            ("WORKITEM_BKT", state.bkt.clone()),
             ("WORKITEM_ON_MERGE", stage.and_then(|s| s.on_merge.clone()).unwrap_or_default()),
             ("WORKITEM_ONCE", if stage.is_some_and(|s| s.once) { "1" } else { "0" }.to_string()),
             ("WORKITEM_WHEN", stage.and_then(|s| serde_json::to_string(&s.when).ok()).unwrap_or_else(|| "{}".into())),
@@ -237,6 +238,9 @@ impl Job {
         // the workspace folder.
         if let Some(repo) = repo {
             env.push(("WORKITEM_REPO", repo.display().to_string()));
+        }
+        if let Some(context) = &workspace.bkt_context {
+            env.push(("WORKITEM_BKT_CONTEXT", context.clone()));
         }
         let cwd = repo.map_or_else(|| workspace.dir.clone(), Path::to_path_buf);
         Job { script, args: watch.args.clone(), cwd, env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }

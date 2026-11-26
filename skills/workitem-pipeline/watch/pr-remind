@@ -7,15 +7,18 @@ Reads the facts watch/pr-status wrote. An item is reminded when all of these hol
   pr_state open, pr_draft false, pr_merge mergeable, pr_ci_required passing, pr_approval not
   approved; 2 business days (Mon-Fri) since pr_activity_at; pr_reminded_at missing or older than
   pr_activity_at (one reminder per quiet period); now is Mon-Fri 09:00-17:00 local time.
-Then it asks gh who to mention: requested reviewers who have not reviewed, and earlier reviewers
-who commented or requested changes; a requested team only when no person is pending. It posts a PR
-comment marked REMIND_MARKER, which pr-status does not count as activity, and sets pr_reminded_at.
-With nobody to mention it blocks the item instead, so the board alerts, and sets pr_reminded_at.
-A failed post is logged and tried again on the next run. --dry-run prints what it would do, and
-why the other items are not due, and writes nothing.
+Then it asks the host who to mention: GitHub gets requested reviewers who have not reviewed and
+earlier reviewers who commented or requested changes (a requested team only when no person is
+pending); Bitbucket gets the pending reviewers of `bkt pr view --json` (reviewers who have not
+approved — Cloud has no changes-requested verdict). It posts a PR comment marked REMIND_MARKER,
+which pr-status does not count as activity, and sets pr_reminded_at. With nobody to mention it
+blocks the item instead, so the board alerts, and sets pr_reminded_at. A failed post is logged
+and tried again on the next run. --dry-run prints what it would do, and why the other items are
+not due, and writes nothing.
 """
 import json, os, subprocess, sys
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 sys.dont_write_bytecode = True
 # The helpers sit next to workitem-move, which the backend names.
@@ -107,7 +110,43 @@ def gh(args):
     return result.stdout
 
 
+def bkt(args):
+    """The output of one bkt call; RuntimeError with bkt's message on failure."""
+    argv = [os.environ.get("WORKITEM_BKT", "bkt"), *args]
+    if os.environ.get("WORKITEM_BKT_CONTEXT"):
+        argv += ["--context", os.environ["WORKITEM_BKT_CONTEXT"]]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"bkt exited with {result.returncode}")
+    return result.stdout
+
+
+def bb_parts(pr):
+    """The workspace, slug and number of a bitbucket.org URL."""
+    ws, slug, _, number = pr.rstrip("/").split("/")[-4:]
+    return ws, slug, number
+
+
+def bb_mentions(pr):
+    """The pending reviewers of a Cloud PR (bkt pr view --json): reviewers who have not
+    approved. Cloud has no changes-requested verdict, so there is no re-review note."""
+    ws, slug, number = bb_parts(pr)
+    pull = json.loads(bkt(["pr", "view", number, "--workspace", ws, "--repo", slug, "--json"]))
+    approved = {(p.get("user") or {}).get("uuid") for p in pull.get("participants") or [] if p.get("approved")}
+    who = []
+    for r in pull.get("reviewers") or []:
+        user = r.get("user") or r
+        if user.get("uuid") in approved:
+            continue
+        name = user.get("nickname") or user.get("display_name")
+        if name and f"@{name}" not in who:
+            who.append(f"@{name}")
+    return who
+
+
 def mentions(pr):
+    if urlparse(pr).hostname == "bitbucket.org":
+        return bb_mentions(pr)
     owner, repo, _, number = pr.rstrip("/").split("/")[-4:]
     data = json.loads(gh(["api", "graphql", "-f", f"query={MENTION_QUERY}", "-f", f"owner={owner}",
                           "-f", f"repo={repo}", "-F", f"number={number}"]))
@@ -152,7 +191,11 @@ class Reminder:
                 print(f"{name}: would post on PR #{number}:\n{body}")
                 return
             try:
-                gh(["pr", "comment", pr, "--body", body])
+                if urlparse(pr).hostname == "bitbucket.org":
+                    ws, slug, number = bb_parts(pr)
+                    bkt(["pr", "comment", number, "--workspace", ws, "--repo", slug, "--text", body])
+                else:
+                    gh(["pr", "comment", pr, "--body", body])
             except (RuntimeError, subprocess.TimeoutExpired) as e:
                 print(f"cannot post the reminder on PR #{number} of {name}: {e}", file=sys.stderr)
                 return

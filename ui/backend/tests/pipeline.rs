@@ -122,6 +122,16 @@ fn world() -> World {
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
 
+    let bkt = dir.path().join("bkt");
+    let bkt_script = format!(
+        "#!/bin/bash\necho \"$@\" >> {}/.stub-log\nif [ \"$1 $2\" = 'pr view' ]; then cat {}/pr.json\nelif [ \"$1 $2\" = 'pr comments' ]; then cat {}/comments.json\nfi\n",
+        repo.display(),
+        d,
+        d
+    );
+    fs::write(&bkt, bkt_script).unwrap();
+    fs::set_permissions(&bkt, fs::Permissions::from_mode(0o755)).unwrap();
+
     let store = Store::open(dir.path().join("home"), None).unwrap();
     let ws = store.add_workspace("app").unwrap().dir;
     fs::create_dir_all(ws.join("boards/default")).unwrap();
@@ -136,6 +146,7 @@ fn world() -> World {
     state.skills_dir = skills();
     state.claude = stub.display().to_string();
     state.gh = gh.display().to_string();
+    state.bkt = bkt.display().to_string();
     state.ask_wait = std::time::Duration::from_millis(1500);
     let board = workitem_ui::pipeline::NewBoard { name: "default", repo: repo.to_str().unwrap(), issue_project: "", reviewers: "" };
     state.add_board(&state.store.workspace("app").unwrap(), &board).unwrap();

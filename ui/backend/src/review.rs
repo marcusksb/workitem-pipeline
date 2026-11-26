@@ -125,6 +125,89 @@ struct PrReview {
     submitted_at: Option<String>,
 }
 
+/// Bitbucket Cloud, from `bkt pr view --json` and `bkt pr comments --details --json`.
+#[derive(Deserialize)]
+struct BktView {
+    #[serde(default)]
+    pull_request: Option<BktPullRequest>,
+}
+
+#[derive(Deserialize)]
+pub struct BktPullRequest {
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    participants: Vec<BktParticipant>,
+    #[serde(default)]
+    updated_on: String,
+    #[serde(default)]
+    pub source: Option<BktRef>,
+    #[serde(default)]
+    pub destination: Option<BktRef>,
+}
+
+#[derive(Deserialize)]
+pub struct BktRef {
+    #[serde(default)]
+    pub branch: BktBranch,
+}
+
+#[derive(Default, Deserialize)]
+pub struct BktBranch {
+    #[serde(default)]
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+struct BktParticipant {
+    #[serde(default)]
+    user: Option<BktAccount>,
+    #[serde(default)]
+    approved: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct BktAccount {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    nickname: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BktComments {
+    #[serde(default)]
+    comments: Option<Vec<BktComment>>,
+}
+
+#[derive(Deserialize)]
+struct BktComment {
+    #[serde(default)]
+    content: BktContent,
+    #[serde(default)]
+    user: Option<BktAccount>,
+    #[serde(default)]
+    created_on: String,
+    #[serde(default)]
+    inline: Option<BktInline>,
+    #[serde(default)]
+    deleted: bool,
+}
+
+#[derive(Default, Deserialize)]
+struct BktContent {
+    #[serde(default)]
+    raw: String,
+}
+
+#[derive(Deserialize)]
+struct BktInline {
+    #[serde(default)]
+    path: Option<String>,
+}
+
 async fn gh_json<T: serde::de::DeserializeOwned>(state: &AppState, workspace: &Workspace, repo: &Path, args: &[&str]) -> Result<T, String> {
     let mut command = crate::github::command(state, workspace).await?;
     command.args(args).current_dir(repo).kill_on_drop(true);
@@ -136,6 +219,46 @@ async fn gh_json<T: serde::de::DeserializeOwned>(state: &AppState, workspace: &W
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     serde_json::from_slice(&output.stdout).map_err(|e| format!("unreadable gh output: {e}"))
+}
+
+async fn bkt_json<T: serde::de::DeserializeOwned>(state: &AppState, workspace: &Workspace, repo: &Path, args: &[&str]) -> Result<T, String> {
+    let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    if let Some(context) = &workspace.bkt_context {
+        args.push("--context".into());
+        args.push(context.clone());
+    }
+    let mut command = tokio::process::Command::new(&state.bkt);
+    command.args(&args).current_dir(repo).kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| "bkt timed out".to_string())?
+        .map_err(|e| format!("cannot run bkt: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("unreadable bkt output: {e}"))
+}
+
+/// `bitbucket.org/<ws>/<slug>/pull-requests/<id>`.
+pub fn bb_parts(pr: &str) -> Option<(String, String, String)> {
+    let parts: Vec<&str> = pr.rsplit('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() < 4 || parts[1] != "pull-requests" {
+        return None;
+    }
+    Some((parts[3].to_string(), parts[2].to_string(), parts[0].to_string()))
+}
+
+/// The PR's description, participants and branches, from `bkt pr view --json`.
+pub async fn bb_view(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<BktPullRequest, String> {
+    let (ws, slug, number) = bb_parts(pr).ok_or_else(|| "not a Bitbucket PR".to_string())?;
+    let raw: BktView = bkt_json(state, workspace, repo, &["pr", "view", &number, "--json", "--workspace", &ws, "--repo", &slug]).await?;
+    raw.pull_request.ok_or_else(|| "no pull request".to_string())
+}
+
+fn bb_user(user: Option<BktAccount>) -> String {
+    user.map_or_else(|| "ghost".to_string(), |u| {
+        u.display_name.filter(|n| !n.is_empty()).or(u.username).or(u.nickname).unwrap_or_else(|| "ghost".to_string())
+    })
 }
 
 async fn inline_comments(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<Vec<InlineComment>, String> {
@@ -175,6 +298,9 @@ struct RawConversation {
 
 /// The PR description plus its comments, review summaries and inline comments, newest first.
 pub async fn conversation(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<Conversation, String> {
+    if bb_parts(pr).is_some() {
+        return bb_conversation(state, workspace, repo, pr).await;
+    }
     let raw: RawConversation = gh_json(state, workspace, repo, &["pr", "view", pr, "--json", "body,comments,reviews"]).await?;
     let author = |a: Option<Author>| a.map_or_else(|| "ghost".to_string(), |a| a.login);
     let mut notes: Vec<Note> = raw
@@ -207,12 +333,82 @@ pub async fn conversation(state: &AppState, workspace: &Workspace, repo: &Path, 
     Ok(Conversation { body: raw.body, notes })
 }
 
+/// The Bitbucket Cloud variant: `bkt pr view --json` for the description and approvals, `bkt pr
+/// comments --details --json` for the comments and inline threads.
+async fn bb_conversation(state: &AppState, workspace: &Workspace, repo: &Path, pr: &str) -> Result<Conversation, String> {
+    let (ws, slug, number) = bb_parts(pr).ok_or_else(|| "not a Bitbucket PR".to_string())?;
+    let raw: BktView = bkt_json(state, workspace, repo, &["pr", "view", &number, "--json", "--workspace", &ws, "--repo", &slug]).await?;
+    let Some(bb) = raw.pull_request else {
+        return Ok(Conversation { body: String::new(), notes: vec![] });
+    };
+    let mut notes: Vec<Note> = vec![];
+    for p in bb.participants {
+        if p.approved == Some(true) {
+            notes.push(Note {
+                kind: "review",
+                author: bb_user(p.user),
+                body: String::new(),
+                at: bb.updated_on.clone(),
+                state: Some("approved".into()),
+                path: None,
+            });
+        }
+    }
+    let comments: BktComments = bkt_json(state, workspace, repo, &["pr", "comments", &number, "--details", "--json", "--workspace", &ws, "--repo", &slug]).await?;
+    for c in comments.comments.unwrap_or_default() {
+        if c.deleted { continue; }
+        let (kind, path) = c.inline.as_ref().map_or(("comment", None), |i| ("inline", i.path.clone()));
+        notes.push(Note {
+            kind,
+            author: bb_user(c.user),
+            body: c.content.raw,
+            at: c.created_on,
+            state: None,
+            path,
+        });
+    }
+    notes.sort_by(|a, b| b.at.cmp(&a.at));
+    Ok(Conversation { body: bb.description, notes })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, os::unix::fs::PermissionsExt};
 
     fn fields(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[tokio::test]
+    async fn a_bitbucket_pr_conversation_comes_from_bkt() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let bkt = dir.path().join("bkt");
+        fs::write(&bkt, format!(
+            "#!/bin/sh\n\
+             echo \"$@\" >> {}/calls\n\
+             if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
+             echo '{{\"pull_request\": {{\"description\": \"The description\", \"updated_on\": \"2026-01-01\", \"participants\": [{{\"user\": {{\"display_name\": \"Me\"}}, \"approved\": true}}]}}}}'\n\
+             else\n\
+             echo '{{\"comments\": [{{\"id\": 1, \"content\": {{\"raw\": \"A comment\"}}, \"user\": {{\"display_name\": \"You\"}}, \"created_on\": \"2026-01-02\"}}]}}'\n\
+             fi\n",
+            dir.path().display()
+        )).unwrap();
+        fs::set_permissions(&bkt, fs::Permissions::from_mode(0o755)).unwrap();
+        let store = crate::config::Store::open(dir.path().to_path_buf(), None).unwrap();
+        let mut state = AppState::new(store, 0);
+        state.bkt = bkt.display().to_string();
+        let workspace = state.store.add_workspace("w").unwrap();
+        let conversation = conversation(&state, &workspace, &repo, "https://bitbucket.org/ws/repo/pull-requests/42").await.unwrap();
+        assert_eq!(conversation.body, "The description");
+        assert_eq!(conversation.notes.len(), 2);
+        assert_eq!(conversation.notes[0].body, "A comment");
+        assert_eq!(conversation.notes[0].kind, "comment");
+        assert_eq!(conversation.notes[1].state, Some("approved".into()));
+        let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(calls.lines().count(), 2, "pr view and pr comments run");
     }
 
     #[test]

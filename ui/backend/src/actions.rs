@@ -390,11 +390,75 @@ async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &
     Ok(())
 }
 
+/// Runs a `bkt` command for a Bitbucket PR in the board repo.
+async fn bb_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &[&str]) -> Result<()> {
+    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
+        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on Bitbucket"));
+    }
+    let repo = pr_repo_of(state, workspace, item)?;
+    let mut command = tokio::process::Command::new(&state.bkt);
+    let mut args = args.to_vec();
+    if let Some(context) = &workspace.bkt_context {
+        args.push("--context");
+        args.push(context);
+    }
+    command.args(&args).current_dir(&repo).kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| conflict("bkt timed out"))?
+        .map_err(|e| internal(format!("cannot run bkt: {e}")))?;
+    if !output.status.success() {
+        return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    crate::watch::forget_workspace(state, workspace, "pr-status");
+    crate::watch::forget(state, workspace, &item.board, &item.stage);
+    state.wake.notify_one();
+    Ok(())
+}
+
+/// One `git` command in the board repo; a failed one is a conflict.
+async fn run_git(repo: &Path, args: &[&str]) -> Result<()> {
+    let mut command = tokio::process::Command::new("git");
+    command.args(args).current_dir(repo).kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| conflict("git timed out"))?
+        .map_err(|e| internal(format!("cannot run git: {e}")))?;
+    if !output.status.success() {
+        return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(())
+}
+
+/// Rebases the PR branch onto its base locally in the board repo and force-pushes it, since
+/// Cloud has no server-side rebase.
+async fn bb_rebase(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<()> {
+    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
+        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on Bitbucket"));
+    }
+    let repo = pr_repo_of(state, workspace, item)?;
+    let view = crate::review::bb_view(state, workspace, &repo, &item.pr).await.map_err(conflict)?;
+    let Some(source) = view.source else { return Err(conflict("no source branch")) };
+    let Some(destination) = view.destination else { return Err(conflict("no destination branch")) };
+    run_git(&repo, &["fetch", "origin", &destination.branch.name, &source.branch.name]).await?;
+    run_git(&repo, &["rebase", &format!("origin/{}", destination.branch.name), &format!("origin/{}", source.branch.name)]).await?;
+    run_git(&repo, &["push", "--force-with-lease", "origin", &format!("HEAD:{}", source.branch.name)]).await?;
+    crate::watch::forget_workspace(state, workspace, "pr-status");
+    crate::watch::forget(state, workspace, &item.board, &item.stage);
+    state.wake.notify_one();
+    Ok(())
+}
+
 /// Squash-merges the PR with `gh`. Moving the item to `done` is left to the dispatcher's
 /// review pass: the same path also covers a merge queue that lands the PR later.
 pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
     let (workspace, _, item) = find(&state, &workspace, &dir)?;
-    gh_pr(&state, &workspace, &item, &["merge", "--squash"]).await?;
+    if crate::review::bb_parts(&item.pr).is_some() {
+        let (ws, slug, number) = crate::review::bb_parts(&item.pr).unwrap();
+        bb_pr(&state, &workspace, &item, &["pr", "merge", &number, "--strategy", "squash", "--workspace", &ws, "--repo", &slug]).await?;
+    } else {
+        gh_pr(&state, &workspace, &item, &["merge", "--squash"]).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -402,7 +466,11 @@ pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPa
 /// --rebase`), so no local checkout is touched. GitHub refuses when the rebase conflicts.
 pub async fn rebase(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
     let (workspace, _, item) = find(&state, &workspace, &dir)?;
-    gh_pr(&state, &workspace, &item, &["update-branch", "--rebase"]).await?;
+    if crate::review::bb_parts(&item.pr).is_some() {
+        bb_rebase(&state, &workspace, &item).await?;
+    } else {
+        gh_pr(&state, &workspace, &item, &["update-branch", "--rebase"]).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
