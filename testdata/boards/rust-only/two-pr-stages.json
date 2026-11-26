@@ -1,0 +1,46 @@
+{
+  "repo": "/",
+  "brief_sections": [
+    "Plan"
+  ],
+  "entry": "a",
+  "stages": [
+    {
+      "name": "a",
+      "handler": "builtin:pr-review",
+      "auto": true,
+      "next": [
+        "b"
+      ],
+      "on_enter": {
+        "approved": "false"
+      },
+      "on_merge": "b"
+    },
+    {
+      "name": "b",
+      "next": [
+        "c",
+        "a"
+      ],
+      "limit": 1,
+      "require": {
+        "approved": "true"
+      },
+      "gate": {
+        "label": "Approve",
+        "approve_to": "c",
+        "reject_to": "a"
+      },
+      "handler": "builtin:pr-review",
+      "on_merge": "c"
+    },
+    {
+      "name": "c",
+      "issue_state": [
+        "In Progress"
+      ],
+      "next": []
+    }
+  ]
+}

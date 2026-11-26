@@ -12,6 +12,7 @@ BRIEF = "\n## Review brief\n\n" + "".join(
 )
 
 
+BOARDS = Path(__file__).parent / "testdata/boards"
 BUNDLED = json.loads((Path(__file__).parent / "skills/workitem-pipeline/pipeline.json").read_text())
 
 
@@ -170,6 +171,28 @@ class WorkitemMoveTest(unittest.TestCase):
             result = self.run_move(str(self.item), "build")
             self.assertEqual(result.returncode, 1)
             self.assertIn("dev.json", result.stderr)
+
+    def test_shared_board_fixtures(self):
+        """testdata/boards: the backend (`Pipeline::parse`) must reject every file there but
+        valid.json too, and refuses the ones in rust-only/, which hold no rule for moves."""
+        def move_with(fixture):
+            (self.workspace / "boards/dev.json").write_text(fixture.read_text())
+            self.write("a", approved="true")
+            return self.run_move(str(self.item), "b")
+
+        for fixture in [BOARDS / "valid.json", *sorted((BOARDS / "rust-only").glob("*.json"))]:
+            with self.subTest(fixture.name):
+                result = move_with(fixture)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.stage(), "stage: b")
+        for fixture in sorted(BOARDS.glob("*.json")):
+            if fixture.name != "valid.json":
+                with self.subTest(fixture.name):
+                    result = move_with(fixture)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("refused: ", result.stderr)
+                    self.assertIn("dev.json", result.stderr)
+                    self.assertEqual(self.stage(), "stage: a")
 
     def test_next_must_name_a_stage_of_the_board(self):
         self.named_board("dev", stages=[{"name": "idea", "next": ["gone"]}])
