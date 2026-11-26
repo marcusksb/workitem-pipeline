@@ -17,14 +17,21 @@ async fn main() {
     }
 
     let port = std::env::var("WORKITEM_UI_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(store.port());
-    let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap_or_else(|e| {
-        eprintln!("workload: cannot bind 127.0.0.1:{port}: {e}");
+    let host = std::env::var("WORKITEM_UI_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let listener = TcpListener::bind((host.as_str(), port)).await.unwrap_or_else(|e| {
+        eprintln!("workload: cannot bind {host}:{port}: {e}");
         std::process::exit(1);
     });
     let port = listener.local_addr().unwrap().port();
-    println!("workload: http://127.0.0.1:{port}/#token={}", store.token());
+    let state = AppState::new(store, port);
+    let token = state.store.token();
+    // The Host check accepts only loopback and the allowed hosts, so those are the URLs that work.
+    let local = if listener.local_addr().unwrap().ip().is_unspecified() { "127.0.0.1" } else { host.as_str() };
+    for name in std::iter::once(local).chain(state.allowed_hosts.iter().map(String::as_str)) {
+        println!("workload: http://{name}:{port}/#token={token}");
+    }
 
-    let state = Arc::new(AppState::new(store, port));
+    let state = Arc::new(state);
     if std::env::var("WORKITEM_UI_DISPATCH").as_deref() != Ok("off") {
         tokio::spawn(dispatch::run(state.clone()));
     }

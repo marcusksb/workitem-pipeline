@@ -31,6 +31,8 @@ pub struct AppState {
     /// `tmux -L <socket>`; `None` uses the default server.
     pub tmux_socket: Option<String>,
     pub port: u16,
+    /// Host names or IPs (no port) the Host check accepts besides loopback; `WORKITEM_UI_ALLOWED_HOSTS`.
+    pub allowed_hosts: Vec<String>,
     /// Holds `workitem-pipeline/{pipeline.json,hooks.json,bin/workitem-move}`.
     pub skills_dir: PathBuf,
     /// Executable that runs a handler session; `claude` unless a test swaps in a stub.
@@ -63,6 +65,9 @@ impl AppState {
         AppState {
             tmux_socket: env("WORKITEM_UI_TMUX_SOCKET"),
             port,
+            allowed_hosts: env("WORKITEM_UI_ALLOWED_HOSTS")
+                .map(|v| v.split(',').map(str::trim).filter(|h| !h.is_empty()).map(String::from).collect())
+                .unwrap_or_default(),
             skills_dir: env("WORKITEM_UI_SKILLS").map(PathBuf::from).unwrap_or_else(|| home.join(".claude/skills")),
             claude: env("WORKITEM_UI_CLAUDE").unwrap_or_else(|| "claude".into()),
             gh: env("WORKITEM_UI_GH").unwrap_or_else(|| "gh".into()),
