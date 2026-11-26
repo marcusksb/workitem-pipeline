@@ -952,6 +952,7 @@ async fn review_starts_a_fixer_on_red_ci_and_leaves_a_blocked_one_waiting() {
     assert!(items.contains(r#""approval":"review_required","approved_by_me":false,"merge":"mergeable","ci":"failing""#), "{items}");
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("CI is failing on https://github.com/app/pull/7"), "{prompts}");
+    assert!(prompts.contains("gh run view <run> --log-failed"), "the bundled workitem-fix-ci steps: {prompts}");
 
     settle_pr(&w).await;
     settle_pr(&w).await;
@@ -1884,6 +1885,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     .unwrap();
     write_skill(&workitems.join("skills"), "my-qa", "PROJECT QA\n");
     write_skill(&workitems.join("boards/research/skills"), "my-qa", "BOARD QA\n");
+    write_skill(&workitems.join("boards/research/skills"), "workitem-fix-ci", "BOARD CI FIXER\n");
     let source = |stage: &str| {
         let w = &w;
         let uri = format!("/api/workspaces/app/boards/research/stages/{stage}/source");
@@ -1909,6 +1911,10 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     let pr = source("pr").await;
     assert!(pr["prose"].is_null(), "a builtin handler has no skill");
     assert_eq!(pr["scripts"][0]["name"], "pr-review");
+    let fixers: Vec<_> = pr["fixers"].as_array().unwrap().iter().map(|f| (f["name"].as_str().unwrap(), f["origin"].as_str().unwrap())).collect();
+    assert_eq!(fixers, [("workitem-fix-ci", "board"), ("workitem-fix-comments", "bundled"), ("workitem-fix-conflict", "bundled")]);
+    assert!(pr["fixers"][0]["content"].as_str().unwrap().contains("BOARD CI FIXER"));
+    assert!(qa["fixers"].as_array().unwrap().is_empty(), "only the PR stage has fixers");
 
     let gate = source("gate").await;
     assert!(gate["prose"].is_null() && gate["scripts"].as_array().unwrap().is_empty());
