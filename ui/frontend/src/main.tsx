@@ -5,9 +5,11 @@ import "@fontsource-variable/jetbrains-mono";
 import { App, TerminalPage } from "./App";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { installPointerLog } from "./pointerLog";
+import { followOtherTabs } from "./theme";
 import "./styles.css";
 
 installPointerLog();
+followOtherTabs();
 
 const terminal = new URLSearchParams(location.search).get("terminal");
 

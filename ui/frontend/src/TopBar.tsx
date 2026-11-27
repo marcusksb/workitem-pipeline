@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { boardLabel, boardOfWorkspace, repoName } from "./boardState";
 import { BoardSettings } from "./BoardSettings";
-import { IconPlus, IconSearch, IconSettings } from "./icons";
+import { IconMoon, IconPlus, IconSearch, IconSettings, IconSun } from "./icons";
+import { useTheme } from "./theme";
 import { Pipelines, Workspace } from "./types";
 import { NewWorkitemDialog } from "./Workspaces";
 
@@ -33,9 +34,11 @@ type Props = {
   onBoardDeleted: () => void;
 };
 
-/** The bar above the board: which board and repo, Search, Board or List, New workitem, and Board settings. */
+/** The bar above the board: which board and repo, Search, Board or List, New workitem, Board settings, and the light/dark toggle. */
 export function TopBar({ workspace, pipelines, board, view, onView, onSearch, error, creating, onCreating, onCreated, boardItems, onBoardChanged, onBoardDeleted }: Props) {
   const [editing, setEditing] = useState(false);
+  const theme = useTheme();
+  const themeLabel = theme.dark ? "Switch to light mode" : "Switch to dark mode";
   const [draft, setDraft] = useState("");
   const pipeline = workspace && board ? boardOfWorkspace(pipelines, workspace.name, board)?.pipeline : undefined;
   const repo = pipeline?.repo;
@@ -87,6 +90,9 @@ export function TopBar({ workspace, pipelines, board, view, onView, onSearch, er
           <IconSettings />
         </Button>
       )}
+      <Button variant="secondary" className="size-[30px] p-0 text-muted-foreground" aria-label={themeLabel} title={themeLabel} onClick={theme.toggle}>
+        {theme.dark ? <IconSun /> : <IconMoon />}
+      </Button>
       {editing && workspace && board && pipeline && (
         <BoardSettings
           workspace={workspace.name}
