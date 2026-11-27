@@ -70,6 +70,8 @@ function clearPanelWidth() {
 export function SidePanel({ className, children, ...props }: ComponentProps<"aside">) {
   const aside = useRef<HTMLElement>(null);
   const drag = useRef<{ x: number; width: number } | null>(null);
+  /** The width the current drag last produced, saved on release outside a state updater. */
+  const dragged = useRef<number | null>(null);
   const [width, setWidth] = useState(readPanelWidth);
 
   useEffect(() => () => document.body.classList.remove("select-none"), []);
@@ -91,19 +93,21 @@ export function SidePanel({ className, children, ...props }: ComponentProps<"asi
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const start = drag.current;
-    if (!start) return;
-    setWidth(clamp(start.width + start.x - event.clientX));
+    // A capture can be lost without `pointerup` or `pointercancel`; a move without the button
+    // held must not keep resizing, so it is ignored.
+    if (!start || (event.buttons & 1) === 0) return;
+    const next = clamp(start.width + start.x - event.clientX);
+    dragged.current = next;
+    setWidth(next);
   };
 
   const endDrag = () => {
-    const start = drag.current;
-    if (!start) return;
+    if (!drag.current) return;
     drag.current = null;
     document.body.classList.remove("select-none");
-    setWidth((width) => {
-      if (width !== null) savePanelWidth(width);
-      return width;
-    });
+    const latest = dragged.current;
+    dragged.current = null;
+    if (latest !== null) savePanelWidth(latest);
   };
 
   const reset = () => {
@@ -133,6 +137,7 @@ export function SidePanel({ className, children, ...props }: ComponentProps<"asi
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
         onDoubleClick={reset}
       />
       {children}
