@@ -129,6 +129,8 @@ Decisions 62 to 72 let a workspace use GitHub Issues instead of Jira and its own
 
 88. **Escape closes the panel** (built; `App.tsx`, `BriefEditor.tsx`, `Info.tsx`, `DetailPanel.tsx`). Escape closes the item or plan panel like a click on the background, but not while the terminal has focus, a dialog or menu is open or a native select has focus; in the brief editor and Info draft it cancels that edit first, and it asks before closing while a brief or Info edit has unsaved changes, wherever the focus is.
 
+89. **The stage dialog shows the stage's actions** (`api.rs::stage_source`, `StageSource.tsx`). A stage's actions (87) were only visible in its board file. `GET .../stages/{stage}/source` now returns `actions`, each `{label, when, confirm, args, source}` in board order, with `source` resolved by the same `StageFiles` the board problems use (84), so a missing skill or script shows the same message in both. `when` is sorted by key so its chips keep their order. The dialog shows them read-only in a third *What runs* tab, *Actions*, disabled when the stage has none; the tab falls back from skill / prompt to script to actions. Actions are still edited in `boards/<board>.json`.
+
 Build order: (1) `workitem-issue` and the shared tracker module, `issue-status` on top of it, tests with stubbed `gh` and a stub Jira server; (2) `issue_tracker`, `github_account`, `GH_TOKEN` injection and the fail-closed alert; (3) `issue_project`, `reviewers` and `issue_state` (with the `workitem-move` hook) and validation and the *Add board* fields; (4) skills call only `workitem-issue`; (5) one real item in a GitHub workspace from issue to a merged PR that closes it.
 
 ### Build order

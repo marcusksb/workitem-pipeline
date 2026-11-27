@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::{
     extract::{Path, State},
@@ -588,6 +588,19 @@ pub struct StageSource {
     model: Option<String>,
     /// Entering the stage needs a linked issue (`require: {"issue": "linked"}`).
     require_issue: bool,
+    /// The stage's actions in board order, shown read-only (decision 89).
+    actions: Vec<ActionSource>,
+}
+
+/// A configured stage action (decision 87) and the skill or script a click runs.
+#[derive(Serialize)]
+struct ActionSource {
+    label: String,
+    /// Sorted, so the dialog shows the conditions in a stable order.
+    when: BTreeMap<String, String>,
+    confirm: Option<String>,
+    args: Vec<String>,
+    source: Source,
 }
 
 fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static str>) -> Source {
@@ -645,8 +658,8 @@ impl StageFiles {
     }
 }
 
-/// What a stage runs: its watch scripts, the handler skill or inline prompt, and on the PR stage
-/// the fixer skills.
+/// What a stage runs: its watch scripts, the handler skill or inline prompt, on the PR stage the
+/// fixer skills, and its actions.
 pub async fn stage_source(
     State(state): State<Shared>,
     Path((workspace, board, stage)): Path<(String, String, String)>,
@@ -669,7 +682,19 @@ pub async fn stage_source(
         (None, _) => None,
     };
     let fixers = files.fixers.into_iter().map(|(name, found)| file_source(&name, found, None)).collect();
-    Ok(Json(StageSource { scripts, prose, fixers, model: stage.model.clone(), require_issue: stage.requires_issue() }))
+    let actions = files
+        .actions
+        .into_iter()
+        .zip(&stage.actions)
+        .map(|((name, found), action)| ActionSource {
+            label: action.label.clone(),
+            when: action.when.clone().into_iter().collect(),
+            confirm: action.confirm.clone(),
+            args: action.args.clone(),
+            source: file_source(&name, found, None),
+        })
+        .collect();
+    Ok(Json(StageSource { scripts, prose, fixers, model: stage.model.clone(), require_issue: stage.requires_issue(), actions }))
 }
 
 #[derive(Deserialize)]

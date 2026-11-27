@@ -3,13 +3,20 @@ import { FormEvent, useEffect, useState } from "react";
 import { api } from "./api";
 import { Choice, Dialog, DialogForm, Field } from "./Dialog";
 import { ErrorText, Muted } from "./parts";
-import { Source, StageSource as Sources } from "./types";
+import { ActionSource, Source, StageSource as Sources } from "./types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type Props = { label: string; stage: string; board: string; workspaces: string[]; onClose: () => void };
+type Tab = "prose" | "script" | "actions";
+
+/** The "What runs" tab to show: the chosen one while the stage has it, else the first it has; undefined when it has none. */
+export function shownTab(chosen: Tab | undefined, has: Record<Tab, boolean>): Tab | undefined {
+  if (chosen && has[chosen]) return chosen;
+  return (["prose", "script", "actions"] as const).find((tab) => has[tab]);
+}
 
 function File({ source }: { source: Source }) {
   const where = [source.origin, source.note].filter(Boolean).join(", ");
@@ -30,6 +37,26 @@ function File({ source }: { source: Source }) {
         <pre className="max-h-[55vh] overflow-auto rounded-md border border-border bg-muted p-2.5 font-mono text-[14px] whitespace-pre">{source.content}</pre>
       )}
     </div>
+  );
+}
+
+/** A configured stage action (decision 89): when it shows, what it asks and passes, and what it runs. */
+function Action({ action }: { action: ActionSource }) {
+  const when = Object.entries(action.when);
+  return (
+    <section className="grid gap-1.5" aria-label={action.label}>
+      <p className="flex flex-wrap items-center gap-2">
+        <strong className="text-[15px]">{action.label}</strong>
+        {when.length ? when.map(([key, value]) => <Badge key={key} className="font-mono">{`${key}: ${value}`}</Badge>) : <span className="text-muted-foreground">always shown</span>}
+      </p>
+      {action.confirm && <Muted>Asks first: {action.confirm}</Muted>}
+      {action.args.length > 0 && (
+        <Muted>
+          Arguments: <code className="font-mono">{action.args.join(" ")}</code>
+        </Muted>
+      )}
+      <File source={action.source} />
+    </section>
   );
 }
 
@@ -69,13 +96,13 @@ function Settings({ workspace, board, stage, sources, onSaved }: { workspace: st
   );
 }
 
-/** A stage's settings, and what it runs, read-only: its watch scripts and its handler skill (or inline prompt), and on the PR stage the fixer skills. */
+/** A stage's settings, and what it runs, read-only: its watch scripts, its handler skill (or inline prompt), on the PR stage the fixer skills, and its actions. */
 export function StageSource({ label, stage, board, workspaces, onClose }: Props) {
   const [workspace, setWorkspace] = useState(workspaces[0]);
   const [sources, setSources] = useState<Sources>();
   const [error, setError] = useState<string>();
   const [view, setView] = useState<"settings" | "runs">("settings");
-  const [tab, setTab] = useState<"script" | "prose">();
+  const [tab, setTab] = useState<Tab>();
   const [loads, setLoads] = useState(0);
 
   useEffect(() => {
@@ -86,7 +113,8 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
 
   const hasScript = !!sources?.scripts.length;
   const hasProse = !!sources?.prose || !!sources?.fixers.length;
-  const shown = tab === "script" && hasScript ? "script" : tab === "prose" && hasProse ? "prose" : hasProse ? "prose" : "script";
+  const hasActions = !!sources?.actions.length;
+  const shown = shownTab(tab, { prose: hasProse, script: hasScript, actions: hasActions });
   return (
     <Dialog title={`${label}: stage`} onClose={onClose} className="max-w-[760px]">
       {workspaces.length > 1 && (
@@ -107,7 +135,7 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
       )}
       {sources && view === "runs" && (
         <>
-          <Tabs value={shown} onValueChange={(value) => setTab(value as "script" | "prose")}>
+          <Tabs value={shown ?? ""} onValueChange={(value) => setTab(value as Tab)}>
             <TabsList>
               <TabsTrigger value="prose" disabled={!hasProse}>
                 Skill / prompt
@@ -115,12 +143,21 @@ export function StageSource({ label, stage, board, workspaces, onClose }: Props)
               <TabsTrigger value="script" disabled={!hasScript}>
                 Script
               </TabsTrigger>
+              <TabsTrigger value="actions" disabled={!hasActions}>
+                Actions
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           {shown === "prose" && sources.prose && <File source={sources.prose} />}
           {shown === "prose" && sources.fixers.map((fixer) => <File key={fixer.name} source={fixer} />)}
           {shown === "script" && sources.scripts.map((script, i) => <File key={i} source={script} />)}
-          {!hasProse && !hasScript && <Muted>This stage runs nothing.</Muted>}
+          {shown === "actions" && (
+            <>
+              {sources.actions.map((action) => <Action key={action.label} action={action} />)}
+              <Muted>Actions are edited in boards/{board}.json in the workspace folder.</Muted>
+            </>
+          )}
+          {!shown && <Muted>This stage runs nothing.</Muted>}
         </>
       )}
     </Dialog>

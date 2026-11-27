@@ -160,8 +160,11 @@ export type Source = {
   error: string | null;
 };
 
+/** A stage's configured action (decision 89) and the skill or script it runs; `when` is sorted by key. */
+export type ActionSource = { label: string; when: Record<string, string>; confirm: string | null; args: string[]; source: Source };
+
 /** `model`: the `--model` of the stage's item sessions; `null` means the agent's default. */
-export type StageSource = { scripts: Source[]; prose: Source | null; fixers: Source[]; model: string | null; require_issue: boolean };
+export type StageSource = { scripts: Source[]; prose: Source | null; fixers: Source[]; model: string | null; require_issue: boolean; actions: ActionSource[] };
 
 /** What the stage settings dialog saves (decision 76); an empty `model` removes it. */
 export type StageSettings = { model: string; require_issue: boolean };
