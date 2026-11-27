@@ -97,6 +97,7 @@ One workspace in view. The sidebar has the workspace switcher, Search ⌘K, boar
 
 - **Card:** title, issue, `agent_status` chip, session icon, PR chips (from `pr_*`), follow-ups and `depends on N` badges.
 - **Detail panel:** pills, an alert box when blocked (*Start agent*, *Clear*) or at a gate (*Discuss brief*, *Approve*, reject with comment), and tabs *Brief* (view and edit, refused if the file changed), *Info*, *Files*, *PR*, *Depends on*, *Children*, *Terminal*, *Remove*.
+- **Side panels:** the detail and plan panels are overlays; dragging their left edge (an 8 px handle, `md` and up) resizes them between 320 px and the `<main>` width, the integer width is kept in `localStorage["workload.panel.width"]` for both, and double-clicking the handle restores the responsive default. The board never reflows.
 - **Remove** stops the session, removes the worktree (`--force`; uncommitted changes go with it) and deletes the folder; branch and PR stay. A final column's *Clear* removes in bulk.
 - **Alerts:** a toast, beep and browser notification when an item becomes blocked (not for the item open while the page has focus); toasts also for an item done and a PR approved (43).
 - **URL:** `#<workspace>/<dir>[/<tab>]?board=<name>`, `#?workspace=<w>&board=<b>`, `?plan=<workspace>/<id>`.

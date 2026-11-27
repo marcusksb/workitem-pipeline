@@ -1,4 +1,4 @@
-import { ComponentProps } from "react";
+import { ComponentProps, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** Small pieces of text and layout shared by the panels and dialogs. */
@@ -33,18 +33,110 @@ export const prose = [
   "[&_table]:block [&_table]:overflow-auto [&_table]:border-collapse [&_th]:border [&_td]:border [&_th]:border-border [&_td]:border-border [&_th]:px-2 [&_td]:px-2 [&_th]:py-1 [&_td]:py-1 [&_th]:bg-muted [&_th]:text-left [&_td]:align-top",
 ].join(" ");
 
+const PANEL_WIDTH_KEY = "workload.panel.width";
+/** The narrowest a dragged panel may get; below `md` it is full width anyway. */
+const MIN_PANEL_WIDTH = 320;
+
+function readPanelWidth(): number | null {
+  try {
+    const raw = localStorage.getItem(PANEL_WIDTH_KEY);
+    if (raw === null) return null;
+    const width = Number(raw);
+    return Number.isFinite(width) ? Math.max(MIN_PANEL_WIDTH, Math.round(width)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePanelWidth(width: number) {
+  try {
+    localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(width)));
+  } catch {
+    // the width just is not remembered
+  }
+}
+
+function clearPanelWidth() {
+  try {
+    localStorage.removeItem(PANEL_WIDTH_KEY);
+  } catch {
+    // nothing stored to clear
+  }
+}
+
 /** The right-hand panel of an item or a plan. It slides in, and slides out while App's `Leaving`
- * wrapper (class `leaving`) keeps it mounted. */
-export function SidePanel({ className, ...props }: ComponentProps<"aside">) {
+ * wrapper (class `leaving`) keeps it mounted. Its left edge drags to resize it, and the width is
+ * shared with the other panel through localStorage; a double-click restores the responsive default. */
+export function SidePanel({ className, children, ...props }: ComponentProps<"aside">) {
+  const aside = useRef<HTMLElement>(null);
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const [width, setWidth] = useState(readPanelWidth);
+
+  useEffect(() => () => document.body.classList.remove("select-none"), []);
+
+  const clamp = (width: number) => {
+    const room = aside.current?.closest("main")?.clientWidth ?? Number.POSITIVE_INFINITY;
+    return Math.min(Math.max(width, MIN_PANEL_WIDTH), room);
+  };
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const panel = aside.current;
+    if (!panel || event.button !== 0) return;
+    // Keep focus where it was, so a terminal inside the panel keeps receiving keys.
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, width: panel.getBoundingClientRect().width };
+    document.body.classList.add("select-none");
+  };
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = drag.current;
+    if (!start) return;
+    setWidth(clamp(start.width + start.x - event.clientX));
+  };
+
+  const endDrag = () => {
+    const start = drag.current;
+    if (!start) return;
+    drag.current = null;
+    document.body.classList.remove("select-none");
+    setWidth((width) => {
+      if (width !== null) savePanelWidth(width);
+      return width;
+    });
+  };
+
+  const reset = () => {
+    setWidth(null);
+    clearPanelWidth();
+  };
+
   return (
     <aside
+      ref={aside}
+      style={width === null ? undefined : ({ "--panel-width": `${width}px` } as CSSProperties)}
       className={cn(
-        "detail absolute inset-y-0 right-0 z-20 flex w-full min-w-0 flex-col overflow-hidden border-l border-border bg-card shadow-[-12px_0_32px_rgb(16_24_40/0.08)] md:w-[max(640px,50%)]",
+        "detail absolute inset-y-0 right-0 z-20 flex w-full min-w-0 flex-col overflow-hidden border-l border-border bg-card shadow-[-12px_0_32px_rgb(16_24_40/0.08)] md:w-[var(--panel-width,max(640px,50%))]",
+        width !== null && "max-w-full",
         "animate-[detail-in_180ms_ease-out] motion-reduce:[animation-duration:1ms] [.leaving>&]:pointer-events-none [.leaving>&]:animate-[detail-out_180ms_ease-in_forwards] motion-reduce:[.leaving>&]:[animation-duration:1ms]",
         className,
       )}
       {...props}
-    />
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panel"
+        data-panel-handle
+        className="absolute inset-y-0 left-0 z-10 hidden w-2 cursor-col-resize touch-none md:block"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={reset}
+      />
+      {children}
+    </aside>
   );
 }
 
