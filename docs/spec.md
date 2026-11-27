@@ -102,6 +102,7 @@ One workspace in view. The sidebar has the workspace switcher, Search ⌘K, boar
 - **Detail panel:** pills, an alert box when blocked (*Start agent*, *Clear*) or at a gate (*Discuss brief*, *Approve*, reject with comment), the stage's actions that match the item (87; a `skill` one is disabled while the item has a session or is not `ok`, and opens the *Terminal* tab when it starts; the last outcome stays shown after the actions stop matching), and tabs *Brief* (view and edit, refused if the file changed), *Info*, *Files*, *PR*, *Depends on*, *Children*, *Terminal*, *Remove*. Escape closes the panel like a click on the background, except while the terminal has focus, a dialog or menu is open or a native select has focus; in the brief editor and the Info draft it cancels that edit first, and it asks before closing while such an edit has unsaved changes (88).
 - **Remove** stops the session, removes the worktree (`--force`; uncommitted changes go with it) and deletes the folder; branch and PR stay. A final column's *Clear* removes in bulk.
 - **Alerts:** a toast, beep and browser notification when an item becomes blocked (not for the item open while the page has focus); toasts also for an item done and a PR approved (43).
+- **Theme:** follows the OS until the top bar's last button switches light/dark; the choice is kept per browser (89).
 - **URL:** `#<workspace>/<dir>[/<tab>]?board=<name>`, `#?workspace=<w>&board=<b>`, `?plan=<workspace>/<id>`.
 
 ## Backend

@@ -307,6 +307,28 @@ test("the top bar switches Board and List and opens New workitem on the board on
   await expect(dialog).toHaveCount(0);
 });
 
+test("the top bar's toggle switches light and dark and the choice survives a reload", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(base);
+  const html = page.locator("html");
+  const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await expect(html).not.toHaveAttribute("data-theme");
+  expect(await background()).toBe("rgb(251, 251, 252)");
+
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  expect(await background()).toBe("rgb(17, 17, 19)");
+  await page.reload();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(html).toHaveAttribute("data-theme", "light");
+
+  // A picked theme wins over the OS.
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect(await background()).toBe("rgb(251, 251, 252)");
+  await expect(page.getByRole("button", { name: "Switch to dark mode" })).toBeVisible();
+});
+
 test("the sidebar opens the workspace's settings, watchers and a new plan", async ({ page }) => {
   await page.goto(base);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
