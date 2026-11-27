@@ -237,6 +237,28 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.locator(".detail textarea")).toHaveCount(0);
   await expect(page.locator(".detail")).toHaveCount(1);
+
+  // A changed brief asks before Escape from outside the editor closes the panel and drops it.
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.locator(".detail textarea").fill("A change");
+  await page.locator(".detail h2").click();
+  let asked = "";
+  page.once("dialog", (dialog) => {
+    asked = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.keyboard.press("Escape");
+  expect(asked).toContain("Discard");
+  await expect(page.locator(".detail")).toHaveCount(1);
+
+  // The Info draft asks the same way once a field changed.
+  await page.getByRole("tab", { name: "Info", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.locator(".detail input").first().fill("changed");
+  page.once("dialog", (dialog) => void dialog.dismiss());
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".detail input").first()).toBeVisible();
+  await expect(page.locator(".detail")).toHaveCount(1);
 });
 
 test("a workspace's boards are tabs in the sidebar and the chosen board stays in the URL", async ({ page }) => {

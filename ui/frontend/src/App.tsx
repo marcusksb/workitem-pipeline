@@ -144,19 +144,23 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     ? (plans ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
     : null;
   const detailOpen = !!(selected || selectedPlan);
+  /** A brief or Info edit has unsaved changes, so Escape must not drop them by closing the panel. */
+  const [dirtyEdit, setDirtyEdit] = useState(false);
   // Escape closes the panel like a click on the background, except where it is real input: the
-  // terminal's Escape belongs to the agent, and an open dialog, menu or select closes on its own.
+  // terminal's Escape belongs to the agent, a dialog or menu closes on its own, and a native
+  // select keeps the key while it has focus.
   useEffect(() => {
     if (!detailOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       const target = event.target instanceof Element ? event.target : document.activeElement;
       if (target?.closest(".terminal, select, [role=dialog], [role=menu], [role=listbox]")) return;
+      if (dirtyEdit && !confirm("Discard your changes?")) return;
       navigate({});
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [detailOpen, route, workspace]);
+  }, [detailOpen, route, workspace, dirtyEdit]);
   const itemPanel = useLeaving(selected);
   const planPanel = useLeaving(selectedPlan);
   const shown = (items ?? []).filter((item) => item.workspace === workspace);
@@ -257,6 +261,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
                 onTab={onTab}
                 onBoard={(board) => navigate({ ...route, board })}
                 onClose={() => navigate({})}
+                onEditingChange={setDirtyEdit}
                 onUnauthorized={onUnauthorized}
               />
             </Leaving>
