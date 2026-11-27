@@ -34,7 +34,23 @@
       "auto": true,
       "watch": { "every": "5s", "command": "pr-review" },
       "next": ["done"],
-      "on_merge": "done"
+      "on_merge": "done",
+      "actions": [
+        {
+          "label": "Rebase onto base",
+          "script": "pr",
+          "args": ["rebase"],
+          "when": { "pr_state": "open" },
+          "confirm": "Rebase the PR branch onto its base branch? The remote branch is force-pushed."
+        },
+        {
+          "label": "Merge PR",
+          "script": "pr",
+          "args": ["merge"],
+          "when": { "pr_state": "open", "pr_approval": "approved", "pr_ci": "passing", "pr_merge": "mergeable", "pr_draft": "false" },
+          "confirm": "Squash-merge the PR? The workitem moves to done once its host reports it merged."
+        }
+      ]
     },
     {
       "name": "done",

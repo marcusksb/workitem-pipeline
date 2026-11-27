@@ -307,13 +307,29 @@ pub struct Roles {
     pr_watch: bool,
     /// An approved item here can be started.
     develops: bool,
+    /// The stage's actions whose `when` the item matches now (decision 84).
+    actions: Vec<ActionView>,
+}
+
+/// A stage action as a button: `POST .../action/{id}` runs it.
+#[derive(Serialize)]
+pub struct ActionView {
+    id: String,
+    label: String,
+    confirm: Option<String>,
 }
 
 fn roles_of(board: Option<&Pipeline>, item: &Workitem) -> Roles {
     let Some(stage) = board.and_then(|b| b.stage(&item.stage)) else {
         return Roles::default();
     };
-    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops() }
+    let actions = stage
+        .actions
+        .iter()
+        .filter(|a| a.matches(&item.fields))
+        .map(|a| ActionView { id: a.label.clone(), label: a.label.clone(), confirm: a.confirm.clone() })
+        .collect();
+    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops(), actions }
 }
 
 #[derive(Serialize)]

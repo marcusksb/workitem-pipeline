@@ -29,6 +29,11 @@ const PR_STATUS_EVERY: Duration = Duration::from_secs(60);
 /// A script that runs longer than this is killed.
 const TIMEOUT: Duration = Duration::from_secs(600);
 
+/// The same for a stage action: above the sum of the step limits of a Bitbucket rebase through
+/// `workitem-pr` (about 990 s, 600 of them the fresh checkout). Killed earlier, it could not remove
+/// its worktree and its git could still push after the UI gave up.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(1200);
+
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.'))
 }
@@ -148,7 +153,7 @@ pub async fn pass(state: &AppState) {
         let items = workitem::list(&workspace);
         for (index, watch) in workspace_watchers(state, &workspace).iter().enumerate() {
             let key = format!("{}/{WORKSPACE}/{index}", workspace.name);
-            let job = |script| Job::new(state, &workspace, None, None, None, watch, script, &items.iter().collect::<Vec<_>>(), &sessions).with_token(token);
+            let job = |script| Job::new(state, &workspace, None, None, None, &watch.args, script, &items.iter().collect::<Vec<_>>(), &sessions).with_token(token);
             started |= start(state, &mut runs, key, watch, &workspace, "", job);
         }
         for board in state.board_names(&workspace) {
@@ -162,7 +167,7 @@ pub async fn pass(state: &AppState) {
                 let key = format!("{}/{board}/{}/{index}", workspace.name, stage.map_or(BOARD, |s| s.name.as_str()));
                 let job = |script| {
                     let here: Vec<&Workitem> = items.iter().filter(|i| i.board == board && stage.is_none_or(|s| i.stage == s.name)).collect();
-                    Job::new(state, &workspace, Some(&board), pipeline.repo.as_deref(), stage, watch, script, &here, &sessions).with_token(token)
+                    Job::new(state, &workspace, Some(&board), pipeline.repo.as_deref(), stage, &watch.args, script, &here, &sessions).with_token(token)
                 };
                 started |= start(state, &mut runs, key, watch, &workspace, &board, job);
             }
@@ -211,12 +216,15 @@ struct Job {
     cwd: PathBuf,
     env: Vec<(&'static str, String)>,
     items: String,
+    /// Keep stderr and make it the error of a failed run, instead of passing it to the backend's.
+    capture: bool,
+    timeout: Duration,
 }
 
 impl Job {
     /// `board` is `None` for a workspace watcher.
     #[allow(clippy::too_many_arguments)]
-    fn new(state: &AppState, workspace: &Workspace, board: Option<&str>, repo: Option<&Path>, stage: Option<&Stage>, watch: &Watch, script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
+    fn new(state: &AppState, workspace: &Workspace, board: Option<&str>, repo: Option<&Path>, stage: Option<&Stage>, args: &[String], script: PathBuf, items: &[&Workitem], sessions: &[tmux::Session]) -> Job {
         let busy: Vec<&str> = items.iter().filter(|i| tmux::session_for(sessions, workspace, &i.dir).is_some()).map(|i| i.dir.as_str()).collect();
         let mut env = vec![
             ("WORKITEM_DIR_ROOT", workspace.dir.display().to_string()),
@@ -243,7 +251,7 @@ impl Job {
             env.push(("WORKITEM_BKT_CONTEXT", context.clone()));
         }
         let cwd = repo.map_or_else(|| workspace.dir.clone(), Path::to_path_buf);
-        Job { script, args: watch.args.clone(), cwd, env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()) }
+        Job { script, args: args.to_vec(), cwd, env, items: serde_json::to_string(items).unwrap_or_else(|_| "[]".into()), capture: false, timeout: TIMEOUT }
     }
 
     /// The workspace's GitHub token as `GH_TOKEN` (decision 67); the environment does not show in argv.
@@ -259,6 +267,9 @@ impl Job {
     async fn run(self) -> Result<(), String> {
         let mut command = Command::new(&self.script);
         command.args(&self.args).current_dir(&self.cwd).envs(self.env.iter().map(|(k, v)| (*k, v))).stdin(Stdio::piped()).kill_on_drop(true);
+        if self.capture {
+            command.stderr(Stdio::piped());
+        }
         if !self.env.iter().any(|(k, _)| *k == "WORKITEM_REPO") {
             // Not the backend's own, which is the outer item's when it runs in an item session (decision 83).
             command.env_remove("WORKITEM_REPO");
@@ -267,12 +278,33 @@ impl Job {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(self.items.as_bytes()).await;
         }
-        let status = tokio::time::timeout(TIMEOUT, child.wait())
+        let output = tokio::time::timeout(self.timeout, child.wait_with_output())
             .await
-            .map_err(|_| format!("{} ran longer than {}s and was killed", self.script.display(), TIMEOUT.as_secs()))?
+            .map_err(|_| format!("{} ran longer than {}s and was killed", self.script.display(), self.timeout.as_secs()))?
             .map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err(format!("{} exited with {status}", self.script.display())) }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        match output.status {
+            status if status.success() => Ok(()),
+            _ if !stderr.is_empty() => Err(stderr),
+            status => Err(format!("{} exited with {status}", self.script.display())),
+        }
     }
+}
+
+/// Runs the stage action `script` (decision 84) once for `item`, like a watcher of its stage: in
+/// the board's repo (the workspace folder without one), with the same env vars, `GH_TOKEN` and
+/// `args`, but the one item as a JSON object on stdin. The script comes from the `actions/` folders,
+/// resolved like `resolve`. A failed run's error is its stderr.
+pub async fn run_action(state: &AppState, workspace: &Workspace, repo: Option<&Path>, stage: &Stage, item: &Workitem, script: &str, args: &[String]) -> Result<(), String> {
+    let places = locate::places(workspace, &item.board, "actions", state.skills_dir.join("workitem-pipeline/actions"));
+    let found = locate::find(&places, Path::new(script)).ok_or_else(|| format!("action script '{script}' not found in {}", locate::looked(&places)))?;
+    let token = crate::github::token(state, workspace).await?;
+    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
+    let mut job = Job::new(state, workspace, Some(&item.board), repo, Some(stage), args, found.path, &[item], &sessions).with_token(token.as_deref());
+    job.items = serde_json::to_string(item).map_err(|e| e.to_string())?;
+    job.capture = true;
+    job.timeout = ACTION_TIMEOUT;
+    job.run().await
 }
 
 /// Why a script did not start, with the fix when it only lacks the execute bit.
@@ -294,7 +326,7 @@ mod tests {
         let script = dir.path().join("check");
         fs::write(&script, "#!/bin/sh\n").unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o644)).unwrap();
-        let job = Job { script: script.clone(), args: vec![], cwd: dir.path().to_path_buf(), env: vec![], items: "[]".into() };
+        let job = Job { script: script.clone(), args: vec![], cwd: dir.path().to_path_buf(), env: vec![], items: "[]".into(), capture: false, timeout: TIMEOUT };
         assert_eq!(job.run().await.unwrap_err(), format!("{} is not executable, run: chmod +x {}", script.display(), script.display()));
     }
 }

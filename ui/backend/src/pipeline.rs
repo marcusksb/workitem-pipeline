@@ -141,6 +141,53 @@ pub struct Stage {
     #[serde(default, skip_serializing)]
     #[allow(dead_code)]
     on_enter: HashMap<String, String>,
+    /// Buttons of the detail panel for the items here whose frontmatter matches (decision 84).
+    #[serde(default, skip_serializing)]
+    pub actions: Vec<Action>,
+}
+
+/// A button a stage offers on its items: it runs a `skill` as the item's session, or a `script`
+/// once (see `watch::run_action`). Its label is its id, unique within the stage.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Action {
+    pub label: String,
+    #[serde(default)]
+    pub skill: Option<String>,
+    /// Script name (`[a-z0-9._-]+`), looked up in the `actions/` folders like a watcher's.
+    #[serde(default)]
+    pub script: Option<String>,
+    /// Shown only while the item's frontmatter has all of these values, the rule of the stage `when`.
+    #[serde(default)]
+    pub when: HashMap<String, String>,
+    /// Asked before it runs, when set.
+    #[serde(default)]
+    pub confirm: Option<String>,
+    /// Arguments for the script, passed as they are.
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl Action {
+    /// Every `when` key has exactly this value in the raw frontmatter, as `run-items` compares.
+    pub fn matches(&self, fields: &HashMap<String, String>) -> bool {
+        self.when.iter().all(|(key, value)| fields.get(key) == Some(value))
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.label.trim().is_empty() {
+            return Err("an action needs a label".into());
+        }
+        match (&self.skill, &self.script) {
+            (Some(_), None) if !self.args.is_empty() => Err(format!("action '{}': args go with a script only", self.label)),
+            (Some(skill), None) if skill.is_empty() => Err(format!("action '{}' has an empty skill", self.label)),
+            (None, Some(script)) if !crate::watch::valid_name(script) => {
+                Err(format!("action '{}' has script '{script}', which is not a script name (lowercase letters, digits, . _ - only)", self.label))
+            }
+            (Some(_), None) | (None, Some(_)) => Ok(()),
+            _ => Err(format!("action '{}' needs exactly one of skill and script", self.label)),
+        }
+    }
 }
 
 impl Stage {
@@ -288,6 +335,13 @@ impl Pipeline {
             for watch in &stage.watch {
                 if !crate::watch::valid_name(&watch.command) {
                     return Err(format!("'{}' has watch command '{}', which is not a script name (lowercase letters, digits, . _ - only)", stage.name, watch.command));
+                }
+            }
+            let mut labels = HashSet::new();
+            for action in &stage.actions {
+                action.check().map_err(|e| format!("'{}': {e}", stage.name))?;
+                if !labels.insert(action.label.as_str()) {
+                    return Err(format!("'{}' has two actions labelled '{}'", stage.name, action.label));
                 }
             }
             if stage.on_merge.is_some() != stage.watches_prs() {
@@ -750,6 +804,41 @@ mod tests {
         assert!(parse(stray, "a").unwrap_err().contains("on_merge"));
         let two = format!(r#"[{pr},{},{{"name":"b"}}]"#, pr.replace(r#""a""#, r#""c""#));
         assert!(parse(&two, "a").unwrap_err().contains("at most one"));
+    }
+
+    #[test]
+    fn reads_stage_actions_and_rejects_the_board_for_a_bad_one() {
+        let with = |action: &str| parse(&format!(r#"[{{"name":"a","actions":[{action}]}}]"#), "a");
+        let board = with(r#"{"label":"Merge","script":"pr-merge","when":{"pr_ci":"passing"},"confirm":"Sure?","args":["--x"]},{"label":"Ask","skill":"ask"}"#).unwrap();
+        let actions = &board.stage("a").unwrap().actions;
+        assert_eq!((actions[0].script.as_deref(), actions[0].confirm.as_deref(), &actions[0].args[..]), (Some("pr-merge"), Some("Sure?"), &["--x".to_string()][..]));
+        assert_eq!(actions[1].skill.as_deref(), Some("ask"));
+        let fields = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        assert!(actions[0].matches(&fields(&[("pr_ci", "passing"), ("x", "y")])));
+        assert!(!actions[0].matches(&fields(&[("pr_ci", "failing")])) && !actions[0].matches(&fields(&[])));
+        assert!(actions[1].matches(&fields(&[])), "no when matches every item");
+
+        for (bad, why) in [
+            (r#"{"label":"X","skill":"s","script":"s"}"#, "exactly one"),
+            (r#"{"label":"X"}"#, "exactly one"),
+            (r#"{"label":" ","skill":"s"}"#, "label"),
+            (r#"{"skill":"s"}"#, "label"),
+            (r#"{"label":"X","script":"bin/x"}"#, "script name"),
+            (r#"{"label":"X","skill":"s","args":["a"]}"#, "args"),
+            (r#"{"label":"X","skill":"s"},{"label":"X","script":"x"}"#, "two actions"),
+            (r#"{"label":"X","skill":"s","sript":"x"}"#, "sript"),
+        ] {
+            assert!(with(bad).unwrap_err().contains(why), "{bad}: {:?}", with(bad));
+        }
+    }
+
+    #[test]
+    fn the_bundled_board_merges_and_rebases_from_its_pr_stage() {
+        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/workitem-pipeline/pipeline.json")).unwrap();
+        let board = Pipeline::parse(&board_text_with_repo(&text, Path::new("/")).unwrap()).unwrap();
+        let stage = board.stages.iter().find(|s| s.watches_prs()).unwrap();
+        let runs: Vec<_> = stage.actions.iter().map(|a| (a.script.as_deref().unwrap(), a.args.join(" "))).collect();
+        assert_eq!(runs, [("pr", "rebase".to_string()), ("pr", "merge".to_string())]);
     }
 
     #[test]

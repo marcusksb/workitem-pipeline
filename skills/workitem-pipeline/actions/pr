@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Stage action: runs `workitem-pr <verb> <item>` (decision 83) on the item on stdin, so it reaches
+whichever host its `pr:` link names. The board's action passes the verb as its argument: `merge`
+squash-merges, `rebase` rebases the PR branch onto its base.
+
+  pr merge|rebase
+
+Moving a merged item on is left to the pr-review watcher, which also covers a merge queue that
+lands the PR later. workitem-pr's message on stderr is what the UI shows when it fails.
+"""
+import json, os, subprocess, sys
+
+if sys.argv[1:] not in (["merge"], ["rebase"]):
+    sys.exit("usage: pr merge|rebase")
+item = os.path.join(os.environ["WORKITEM_DIR_ROOT"], json.load(sys.stdin)["dir"])
+script = os.path.join(os.path.dirname(os.environ["WORKITEM_MOVE"]), "workitem-pr")
+sys.exit(subprocess.run([sys.executable, script, sys.argv[1], item]).returncode)

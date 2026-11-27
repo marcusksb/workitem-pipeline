@@ -67,8 +67,7 @@ export const api = {
   start: (item: Item) => request<Launched>("POST", `${itemUrl(item)}/start`),
   startSession: (item: Item) => request<Launched>("POST", `${itemUrl(item)}/session`),
   discussBrief: (item: Item) => request<Launched>("POST", `${itemUrl(item)}/discuss`),
-  merge: (item: Item) => request<void>("POST", `${itemUrl(item)}/merge`),
-  rebase: (item: Item) => request<void>("POST", `${itemUrl(item)}/rebase`),
+  runAction: (item: Item, id: string) => request<Launched | void>("POST", `${itemUrl(item)}/action/${segment(id)}`),
   remove: (item: Item) => request<{ worktree_left: string | null }>("POST", `${itemUrl(item)}/remove`),
   create: (workspace: string, input: string, board: string) =>
     request<Launched>("POST", `/api/workspaces/${segment(workspace)}/create`, { input, board }),

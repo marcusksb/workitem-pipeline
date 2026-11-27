@@ -5,6 +5,7 @@ use std::path::Path;
 use axum::{
     extract::{Path as UrlPath, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     Json,
 };
 use rand::Rng;
@@ -252,11 +253,17 @@ pub async fn run_handler(
     let handler = body.and_then(|Json(run)| run.handler);
     let (workspace, path, item) = find(&state, &workspace, &dir)?;
     let stage = stage_of(&state, &workspace, &item)?;
+    start_handler(&state, &workspace, &path, &item, &stage, handler.as_deref()).await
+}
+
+/// `dispatch::run_handler` under `busy`, refused while the item has a session.
+async fn start_handler(state: &AppState, workspace: &Workspace, path: &Path, item: &Workitem, stage: &Stage, handler: Option<&str>) -> Result<(StatusCode, Json<Launched>)> {
+    let dir = &item.dir;
     let _busy = state.busy.lock().await;
-    if has_session(&state, &workspace, &dir).await {
+    if has_session(state, workspace, dir).await {
         return Err(conflict(format!("{dir} already has a session")));
     }
-    crate::dispatch::run_handler(&state, &workspace, &item, &path, &stage, handler.as_deref()).await.map_err(|e| match e {
+    crate::dispatch::run_handler(state, workspace, item, path, stage, handler).await.map_err(|e| match e {
         // The handler itself is unusable: not a state that retrying fixes.
         RunError::Handler(message) => ApiError(StatusCode::UNPROCESSABLE_ENTITY, message),
         RunError::Refused(message) => conflict(message),
@@ -367,35 +374,26 @@ async fn launch_item_session(
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs `workitem-pr <verb>` on an item in the PR stage, then makes the workspace's `pr-status`
-/// and the stage's watchers due and wakes the dispatcher, so the next pass reads the PR at once.
-async fn pr_action(state: &AppState, workspace: &str, dir: &str, verb: &str, timeout: std::time::Duration) -> Result<()> {
-    let (workspace, path, item) = find(state, workspace, dir)?;
-    if !stage_of(state, &workspace, &item)?.watches_prs() || !item.pr.starts_with("http") {
-        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on its PR host"));
+/// Runs a stage action (decision 84) of the item, if its stage still offers it: the item may
+/// have moved, or its frontmatter changed, since the panel showed the button. A `skill` starts as
+/// the item's session like `run_handler`; a `script` runs once and then the workspace's `pr-status`
+/// and the stage's watchers are made due and the dispatcher woken, so the next pass reads what it
+/// changed at once.
+pub async fn run_action(State(state): State<Shared>, UrlPath((workspace, dir, id)): UrlPath<(String, String, String)>) -> Result<Response> {
+    let (workspace, path, item) = find(&state, &workspace, &dir)?;
+    let stage = stage_of(&state, &workspace, &item)?;
+    let action = stage.actions.iter().find(|a| a.label == id && a.matches(&item.fields));
+    let action = action.ok_or_else(|| conflict(format!("{dir} has no action '{id}' in stage {} now", item.stage)))?;
+    if let Some(skill) = &action.skill {
+        return Ok(start_handler(&state, &workspace, &path, &item, &stage, Some(skill)).await?.into_response());
     }
-    pr_repo_of(state, &workspace, &item)?;
-    crate::review::workitem_pr(state, &workspace, &path, verb, &[], timeout).await.map_err(conflict)?;
-    crate::watch::forget_workspace(state, &workspace, "pr-status");
-    crate::watch::forget(state, &workspace, &item.board, &item.stage);
+    let script = action.script.as_deref().unwrap_or_default();
+    let repo = repo_of(&state, &workspace, &item)?;
+    crate::watch::run_action(&state, &workspace, repo.as_deref(), &stage, &item, script, &action.args).await.map_err(conflict)?;
+    crate::watch::forget_workspace(&state, &workspace, "pr-status");
+    crate::watch::forget(&state, &workspace, &item.board, &item.stage);
     state.wake.notify_one();
-    Ok(())
-}
-
-/// Squash-merges the PR. Moving the item to `done` is left to the dispatcher's review pass: the
-/// same path also covers a merge queue that lands the PR later.
-pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    pr_action(&state, &workspace, &dir, "merge", std::time::Duration::from_secs(90)).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// Rebases the PR branch onto its base: server side on GitHub, which refuses when the rebase
-/// conflicts; in a temporary worktree of the board repo on Bitbucket. The limit is above the sum
-/// of that rebase's own step limits (about 990 s, 600 of them the fresh checkout): killed earlier,
-/// `workitem-pr` could not remove its worktree and its git could still push after the UI gave up.
-pub async fn rebase(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    pr_action(&state, &workspace, &dir, "rebase", std::time::Duration::from_secs(1200)).await?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 #[derive(Serialize)]

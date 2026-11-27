@@ -117,7 +117,7 @@ fn world() -> World {
     let d = dir.path().display();
     fs::write(dir.path().join("gh_graphql.py"), GH_GRAPHQL).unwrap();
     let script = format!(
-        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"${{@: -1}}\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ] || [ \"$2\" = /user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ \"$1 $2\" = 'pr merge' ]; then echo \"$GH_TOKEN\" > {d}/merge-token; cat {d}/pr.json\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
+        "#!/bin/bash\necho \"$*\" >> {d}/gh.log\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"${{@: -1}}\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ] || [ \"$2\" = /user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ \"$1 $2\" = 'pr merge' ]; then echo \"$GH_TOKEN\" > {d}/merge-token; cat {d}/pr.json\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
     );
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
@@ -964,38 +964,120 @@ async fn review_shows_pr_status_and_leaves_green_ci_alone() {
     assert!(stub_log(&w.repo).is_empty() && !w.tmux.has("wi-T-20-green"), "nothing to fix");
 }
 
+/// The `actions` of the item in `/api/workitems`, as JSON.
+async fn actions_of(w: &World, dir: &str) -> serde_json::Value {
+    let items: serde_json::Value = serde_json::from_str(&get(w, "/api/workitems").await).unwrap();
+    items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["actions"].clone()
+}
+
+fn gh_log(w: &World) -> String {
+    fs::read_to_string(w.dir.path().join("gh.log")).unwrap_or_default()
+}
+
 #[tokio::test]
-async fn merge_button_merges_in_review_items_and_the_next_pass_moves_them_to_done() {
+async fn the_bundled_pr_stage_offers_merge_only_for_a_green_approved_pr() {
     let w = world();
     write_item(&w.ws, "T-23-early", "in_development", PR);
-    let (status, _) = post(&w, "/api/workitems/app/T-23-early/merge", "").await;
+    assert_eq!(actions_of(&w, "T-23-early").await, serde_json::json!([]));
+    let (status, _) = post(&w, &format!("/api/workitems/app/T-23-early/{MERGE}"), "").await;
     assert_eq!(status, StatusCode::CONFLICT, "only in_review can be merged");
 
     write_item(&w.ws, "T-24-merge", "in_review", PR);
+    set_pr(&w, "OPEN", "REVIEW_REQUIRED", "MERGEABLE", "SUCCESS");
+    settle_pr(&w).await;
+    let labels = |actions: serde_json::Value| actions.as_array().unwrap().iter().map(|a| a["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(labels(actions_of(&w, "T-24-merge").await), ["Rebase onto base"], "not approved: no merge");
+    let (status, _) = post(&w, &format!("/api/workitems/app/T-24-merge/{MERGE}"), "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "the endpoint checks when too");
+    assert!(!gh_log(&w).contains("pr merge"));
+
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
     settle_pr(&w).await;
+    let actions = actions_of(&w, "T-24-merge").await;
+    assert_eq!(labels(actions.clone()), ["Rebase onto base", "Merge PR"]);
+    assert!(actions[1]["confirm"].as_str().unwrap().starts_with("Squash-merge"), "{actions}");
+
     set_pr(&w, "MERGED", "APPROVED", "MERGEABLE", "SUCCESS");
-    let (status, _) = post(&w, "/api/workitems/app/T-24-merge/merge", "").await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = post(&w, &format!("/api/workitems/app/T-24-merge/{MERGE}"), "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert!(gh_log(&w).contains("pr merge https://github.com/o/app/pull/7 --squash"), "{}", gh_log(&w));
     assert_eq!(field(&w.ws, "T-24-merge", "stage"), "in_review", "the dispatcher moves it, not the button");
     settle_pr(&w).await;
     assert_eq!(field(&w.ws, "T-24-merge", "stage"), "done");
 }
 
 #[tokio::test]
-async fn rebase_button_only_works_on_in_review_items_with_a_pr() {
+async fn the_bundled_rebase_action_updates_the_remote_branch() {
     let w = world();
-    write_item(&w.ws, "T-25-early", "in_development", PR);
-    let (status, _) = post(&w, "/api/workitems/app/T-25-early/rebase", "").await;
-    assert_eq!(status, StatusCode::CONFLICT);
-
     write_item(&w.ws, "T-26-rebase", "in_review", PR);
-    set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
-    let (status, _) = post(&w, "/api/workitems/app/T-26-rebase/rebase", "").await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    set_pr(&w, "OPEN", "REVIEW_REQUIRED", "MERGEABLE", "SUCCESS");
+    settle_pr(&w).await;
+    let (status, body) = post(&w, &format!("/api/workitems/app/T-26-rebase/{REBASE}"), "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert!(gh_log(&w).contains("pr update-branch https://github.com/o/app/pull/7 --rebase"), "{}", gh_log(&w));
+}
+
+#[tokio::test]
+async fn a_script_action_gets_the_item_on_stdin_and_fails_with_its_stderr() {
+    let w = world();
+    let out = w.dir.path().join("action-out");
+    let stages = r#"[{"name":"qa","next":[],"actions":[
+        {"label":"Note","script":"note","args":["--flag"],"when":{"ready":"yes"}},
+        {"label":"Fail","script":"fail"}]}]"#;
+    fs::write(w.ws.join("boards/default.json"), board(&w, stages)).unwrap();
+    fs::create_dir_all(w.ws.join("actions")).unwrap();
+    let script = |name: &str, body: &str| {
+        let path = w.ws.join("actions").join(name);
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    script("note", &format!("#!/bin/bash\n{{ echo \"$1|$PWD|$WORKITEM_STAGE|$WORKITEM_BOARD|$WORKITEM_REPO\"; cat; }} > {}\n", out.display()));
+    script("fail", "#!/bin/bash\necho 'gh: nope' >&2\nexit 3\n");
+    write_item(&w.ws, "T-40-qa", "qa", "ready: no\n");
+
+    let (status, _) = post(&w, "/api/workitems/app/T-40-qa/action/Note", "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "not ready");
+    let (status, _) = post(&w, "/api/workitems/app/T-40-qa/action/Nope", "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "unknown");
+    assert!(!out.exists());
+
+    write_item(&w.ws, "T-40-qa", "qa", "ready: yes\n");
+    let (status, body) = post(&w, "/api/workitems/app/T-40-qa/action/Note", "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let text = fs::read_to_string(&out).unwrap();
+    let (env, stdin) = text.split_once('\n').unwrap();
+    let repo = w.repo.display();
+    assert_eq!(env, format!("--flag|{repo}|qa|default|{repo}"));
+    let item: serde_json::Value = serde_json::from_str(stdin).unwrap();
+    assert_eq!(item["dir"], "T-40-qa", "one object, not a list: {stdin}");
+
+    let (status, body) = post(&w, "/api/workitems/app/T-40-qa/action/Fail", "").await;
+    assert_eq!((status, body.as_str()), (StatusCode::CONFLICT, r#"{"error":"gh: nope"}"#));
+}
+
+#[tokio::test]
+async fn a_skill_action_starts_the_item_session_with_that_skill() {
+    let w = world();
+    let stages = r#"[{"name":"qa","next":[],"actions":[{"label":"Check","skill":"my-check"}]}]"#;
+    fs::write(w.ws.join("boards/default.json"), board(&w, stages)).unwrap();
+    write_skill(&w.ws.join("skills"), "my-check", "CHECK STEPS\n");
+    write_item(&w.ws, "T-41-qa", "qa", "");
+
+    let (status, body) = post(&w, "/api/workitems/app/T-41-qa/action/Check", "").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert!(body.contains("wi-T-41-qa"), "{body}");
+    eventually("the session started", || w.tmux.has("wi-T-41-qa")).await;
+    eventually("with the action's skill", || args_log(&w).contains("CHECK STEPS")).await;
+    let (status, _) = post(&w, "/api/workitems/app/T-41-qa/action/Check", "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "the session is the lock");
 }
 
 const BB_PR: &str = "pr: https://bitbucket.org/ws/slug/pull-requests/1\n";
+
+/// What `pr-status` writes for an open, approved, green PR: the bundled Merge action's `when`.
+const MERGEABLE: &str = "pr_state: open\npr_approval: approved\npr_ci: passing\npr_merge: mergeable\npr_draft: false\n";
+const MERGE: &str = "action/Merge%20PR";
+const REBASE: &str = "action/Rebase%20onto%20base";
 
 fn git(args: &[&str], cwd: &Path) {
     let output = std::process::Command::new("git").args(args).current_dir(cwd).output().unwrap();
@@ -1032,8 +1114,8 @@ fn bb_repo(w: &World) {
 #[tokio::test]
 async fn merge_squashes_a_bitbucket_pr_with_bkt() {
     let w = world();
-    write_item(&w.ws, "T-27-bbmerge", "in_review", BB_PR);
-    let (status, _) = post(&w, "/api/workitems/app/T-27-bbmerge/merge", "").await;
+    write_item(&w.ws, "T-27-bbmerge", "in_review", &format!("{BB_PR}{MERGEABLE}"));
+    let (status, _) = post(&w, &format!("/api/workitems/app/T-27-bbmerge/{MERGE}"), "").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let log = stub_log(&w.repo);
     assert!(log.iter().any(|l| l == "pr merge 1 --workspace ws --repo slug --strategy squash"), "{log:?}");
@@ -1043,13 +1125,13 @@ async fn merge_squashes_a_bitbucket_pr_with_bkt() {
 async fn pr_actions_reach_the_host_with_the_workspace_token_and_context() {
     let w = world();
     fs::write(w.ws.join("workspace.toml"), "github_account = \"work-bot\"\nbkt_context = \"work\"\n").unwrap();
-    write_item(&w.ws, "T-29-gh", "in_review", PR);
+    write_item(&w.ws, "T-29-gh", "in_review", &format!("{PR}{MERGEABLE}"));
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
-    let (status, body) = post(&w, "/api/workitems/app/T-29-gh/merge", "").await;
+    let (status, body) = post(&w, &format!("/api/workitems/app/T-29-gh/{MERGE}"), "").await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     assert_eq!(fs::read_to_string(w.dir.path().join("merge-token")).unwrap(), "tok-123\n", "gh got the account's token");
-    write_item(&w.ws, "T-29-bb", "in_review", BB_PR);
-    let (status, body) = post(&w, "/api/workitems/app/T-29-bb/merge", "").await;
+    write_item(&w.ws, "T-29-bb", "in_review", &format!("{BB_PR}{MERGEABLE}"));
+    let (status, body) = post(&w, &format!("/api/workitems/app/T-29-bb/{MERGE}"), "").await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     let log = stub_log(&w.repo);
     assert!(log.iter().any(|l| l == "pr merge 1 --workspace ws --repo slug --strategy squash --context work"), "{log:?}");
@@ -1066,9 +1148,9 @@ async fn rebase_of_a_bitbucket_pr_runs_in_a_temp_worktree() {
                   "source": {"branch": {"name": "feature"}}, "destination": {"branch": {"name": "main"}}})
                   .to_string())
         .unwrap();
-    write_item(&w.ws, "T-28-bbrebase", "in_review", BB_PR);
+    write_item(&w.ws, "T-28-bbrebase", "in_review", &format!("{BB_PR}pr_state: open\n"));
 
-    let (status, _) = post(&w, "/api/workitems/app/T-28-bbrebase/rebase", "").await;
+    let (status, _) = post(&w, &format!("/api/workitems/app/T-28-bbrebase/{REBASE}"), "").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(git_text(&["symbolic-ref", "HEAD"], &w.repo).trim(), "refs/heads/main", "the checkout kept its branch");
     assert_eq!(fs::read_to_string(w.repo.join("dirty")).unwrap(), "uncommitted", "the checkout kept its changes");
@@ -1091,7 +1173,7 @@ async fn rebase_of_a_bitbucket_pr_runs_in_a_temp_worktree() {
     git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature side"], &worktree);
     git(&["push", "-q", "--force", "origin", "feature"], &worktree);
     let before = git_text(&["rev-parse", "origin/feature"], &w.repo);
-    let (status, body) = post(&w, "/api/workitems/app/T-28-bbrebase/rebase", "").await;
+    let (status, body) = post(&w, &format!("/api/workitems/app/T-28-bbrebase/{REBASE}"), "").await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(git_text(&["rev-parse", "origin/feature"], &w.repo).trim(), before.trim(), "the remote branch is untouched");
     assert!(!git_text(&["worktree", "list"], &w.repo).contains("wi-rebase"), "no temp worktree left behind");

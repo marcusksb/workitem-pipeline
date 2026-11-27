@@ -11,6 +11,7 @@ import { Dependencies } from "./Dependencies";
 import { PrActions } from "./PrActions";
 import { PrConversation } from "./PrConversation";
 import { PrStatus } from "./PrStatus";
+import { StageActions } from "./StageActions";
 import { Files } from "./Files";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { Info } from "./Info";
@@ -220,6 +221,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           </Properties>
           {isBlocked(live) && <BlockedBar item={live} runner={runner} onStartAgent={live.session ? undefined : startAgent} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} onDiscuss={live.session ? undefined : discuss} />}
+          <StageActions item={live} onDone={() => void reload()} />
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
         </div>
@@ -324,7 +326,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           </TabsContent>
           {live.pr && (
             <TabsContent value="pr" className={cn("brief", scroll, prose)}>
-              <PrActions item={live} onDone={() => void reload()} />
+              <PrActions item={live} />
               {live.review?.state === "open" && live.review.failed.length > 0 && (
                 <div className="mb-3">
                   <strong>Failing checks</strong>

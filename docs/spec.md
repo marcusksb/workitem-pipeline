@@ -30,11 +30,13 @@ A board file is JSON. Top-level keys:
 - `brief_sections`: the `## Review brief` subsections that `brief: complete` requires.
 - Optional: `label` (tab title), `order` (sort fields, 42), `watch` (board watchers), `issue_project` (64), `reviewers` (`org/team` added when a PR is marked ready, 70).
 
-Stage keys: `name`, `label`, one of `handler` (skill name) or `prompt` (inline string) or neither, `auto`, `next` (first entry is the default forward move), `on_enter` (frontmatter values set on entry), `require`, `gate: {label, approve_to, reject_to}`, `on_merge` (on the PR stage: where a merged PR goes), `limit`, `once`, `when`, `model` (60), `learnings`, `order`, `watch`, `issue_state` (72), `pr_status` (older files).
+Stage keys: `name`, `label`, one of `handler` (skill name) or `prompt` (inline string) or neither, `auto`, `next` (first entry is the default forward move), `on_enter` (frontmatter values set on entry), `require`, `gate: {label, approve_to, reject_to}`, `on_merge` (on the PR stage: where a merged PR goes), `limit`, `once`, `when`, `model` (60), `learnings`, `order`, `watch`, `issue_state` (72), `actions` (84), `pr_status` (older files).
 
-The backend and `workitem-move` know no stage names; roles are keys (16). The API puts `gate`, `pr_watch` and `develops` on each item. An invalid file is rejected whole: the last valid version stays in use (`AppState::pipeline`) and the board shows the error (20). There is no default board and no fallback to the bundled file; *Add board* copies `pipeline.json` with `repo` set and fills in the `issue_state` defaults of the workspace's tracker. The board settings dialog edits `label`, `entry`, `order`, `issue_project`, `reviewers` (73); the stage dialog edits `model` and `require.issue` (76); everything else is a file edit. Deleting a board removes its items first (77).
+The backend and `workitem-move` know no stage names; roles are keys (16). The API puts `gate`, `pr_watch`, `develops` and `actions` on each item. An invalid file is rejected whole: the last valid version stays in use (`AppState::pipeline`) and the board shows the error (20). There is no default board and no fallback to the bundled file; *Add board* copies `pipeline.json` with `repo` set and fills in the `issue_state` defaults of the workspace's tracker. The board settings dialog edits `label`, `entry`, `order`, `issue_project`, `reviewers` (73); the stage dialog edits `model` and `require.issue` (76); everything else is a file edit. Deleting a board removes its items first (77).
 
-The bundled board: `analyze` (auto, `workitem-analyze`) → `ready_for_development` (gate, requires `issue: linked` and `brief: complete`) → `in_development` (auto, `workitem-start`, requires `approved: true`) → `in_review` (PR stage, `pr-review` watcher, `on_merge: done`) → `done`.
+The bundled board: `analyze` (auto, `workitem-analyze`) → `ready_for_development` (gate, requires `issue: linked` and `brief: complete`) → `in_development` (auto, `workitem-start`, requires `approved: true`) → `in_review` (PR stage, `pr-review` watcher, `on_merge: done`, actions *Rebase onto base* and *Merge PR*) → `done`.
+
+A stage's `actions: [{label, skill | script, when, confirm, args}]` are buttons in the detail panel for its items whose frontmatter has every `when` value (raw values, as `run-items` compares). The label is the id, unique within the stage; exactly one of `skill` and `script`; `args` only with a `script`. `POST .../action/{id}` checks stage and `when` again (409 otherwise). A `skill` starts the item's `wi-<dir>` session with that skill, like `/run`. A `script` is resolved in `actions/` folders (board, workspace, bundled) and runs once like a column watcher of the stage, with the one item as a JSON object on stdin and a 20 min limit; a failure is a 409 carrying its stderr. Then `pr-status` and the stage's watchers run on the next pass. The bundled `actions/pr merge|rebase` runs `workitem-pr` on the item; the bundled board's Merge needs `pr_state: open`, `pr_approval: approved`, `pr_ci: passing`, `pr_merge: mergeable`, `pr_draft: false`; Rebase needs `pr_state: open`. Boards made before this have neither until they are added (84).
 
 ## Workitems
 
@@ -96,7 +98,7 @@ Bundled scripts: `run-items` (starts handlers via `bin/workitem-run-item` → `P
 One workspace in view. The sidebar has the workspace switcher, Search ⌘K, board tabs with blocked counts, the Plans list, *Learnings*, *Watchers* and *Settings*. Columns are the board's stages, plus an unknown-stage column for items whose stage or board is missing. No drag and drop: moves happen only through rule-checked actions.
 
 - **Card:** title, issue, `agent_status` chip, session icon, PR chips (from `pr_*`), follow-ups and `depends on N` badges.
-- **Detail panel:** pills, an alert box when blocked (*Start agent*, *Clear*) or at a gate (*Discuss brief*, *Approve*, reject with comment), and tabs *Brief* (view and edit, refused if the file changed), *Info*, *Files*, *PR*, *Depends on*, *Children*, *Terminal*, *Remove*.
+- **Detail panel:** pills, an alert box when blocked (*Start agent*, *Clear*) or at a gate (*Discuss brief*, *Approve*, reject with comment), the stage's actions that match the item (84), and tabs *Brief* (view and edit, refused if the file changed), *Info*, *Files*, *PR*, *Depends on*, *Children*, *Terminal*, *Remove*.
 - **Remove** stops the session, removes the worktree (`--force`; uncommitted changes go with it) and deletes the folder; branch and PR stay. A final column's *Clear* removes in bulk.
 - **Alerts:** a toast, beep and browser notification when an item becomes blocked (not for the item open while the page has focus); toasts also for an item done and a PR approved (43).
 - **URL:** `#<workspace>/<dir>[/<tab>]?board=<name>`, `#?workspace=<w>&board=<b>`, `?plan=<workspace>/<id>`.
@@ -108,7 +110,7 @@ Binds `127.0.0.1` (`WORKITEM_UI_HOST`), port 7373 (`WORKITEM_UI_PORT`). The Host
 The frontend polls; nothing is pushed. Routes (`lib.rs`):
 
 - `/api/workspaces`, `/api/agent`, `/api/pipelines`, boards (`POST`, `PUT`, `DELETE`), stages (`PUT`, `.../source`, `.../paused`), `.../learnings`.
-- `/api/workitems` and `/api/workitems/{workspace}/{dir}` with actions `approve`, `reject`, `brief`, `frontmatter`, `clear-blocked`, `kill-session`, `start`, `run`, `fix`, `session`, `discuss`, `merge`, `rebase`, `remove`, plus `pr`, `files`, `reveal`.
+- `/api/workitems` and `/api/workitems/{workspace}/{dir}` with actions `approve`, `reject`, `brief`, `frontmatter`, `clear-blocked`, `kill-session`, `start`, `run`, `fix`, `session`, `discuss`, `action/{id}`, `remove`, plus `pr`, `files`, `reveal`.
 - `/api/workspaces/{workspace}/create`, `/api/sessions` (and `DELETE .../{workspace}/{name}`), `/api/plans`, `/api/mcp/{workspace}/{dir}`.
 - `/ws/terminal/{workspace}/{dir}`, `/ws/session/{workspace}/{name}`: `tmux attach` on a PTY; closing the socket keeps the session.
 

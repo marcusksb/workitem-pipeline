@@ -1,6 +1,9 @@
 /** A column where a human decides: approving moves the item to `approve_to`, rejecting to `reject_to`. */
 export type Gate = { label: string; approve_to: string; reject_to: string };
 
+/** A button the item's stage offers it now (decision 84); `id` is what `api.runAction` sends. */
+export type StageAction = { id: string; label: string; confirm: string | null };
+
 export type StageConfig = {
   name: string;
   label: string | null;
@@ -66,6 +69,8 @@ export type Item = {
   gate: Gate | null;
   pr_watch: boolean;
   develops: boolean;
+  /** The stage's actions whose conditions the item matches, already filtered by the backend. */
+  actions: StageAction[];
   review: Review | null;
   /** Branch checked out in the item's worktree; null without a worktree. */
   branch: string | null;
