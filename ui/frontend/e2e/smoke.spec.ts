@@ -643,6 +643,45 @@ test("planning sessions show in the sidebar and open in the side panel", async (
   await expect(bar.locator(".plan-card")).toHaveCount(2);
 });
 
+test("the item and plan panels resize with the mouse and remember it", async ({ page }) => {
+  await page.goto(base);
+  await expect(page.locator(".board")).toContainText("Brief waiting");
+  await page.goto(`${base.split("#")[0]}#demo/T-2-gate`);
+  const panel = page.locator(".detail");
+  await expect(panel.getByRole("heading", { name: "Brief waiting" })).toBeVisible();
+  // Let the slide-in settle, so the handle is where it stays.
+  await panel.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
+  const before = (await panel.boundingBox())!;
+  const handle = panel.locator("[data-panel-handle]");
+  const box = (await handle.boundingBox())!;
+
+  // Drag the left edge to the left: the panel grows, and the integer width is stored.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const dragged = (await panel.boundingBox())!;
+  expect(dragged.width).toBeGreaterThan(before.width + 100);
+  const stored = await page.evaluate(() => localStorage.getItem("workload.panel.width"));
+  expect(Number(stored)).toBe(Math.round(dragged.width));
+
+  // The width survives a reload.
+  await page.reload();
+  await expect(page.locator(".detail").getByRole("heading", { name: "Brief waiting" })).toBeVisible();
+  expect((await page.locator(".detail").boundingBox())!.width).toBeCloseTo(dragged.width, 0);
+
+  // The plan panel reads the same width. (The item panel is still sliding out on this hash change.)
+  await page.goto(`${base.split("#")[0]}#?plan=demo%2Fabc123`);
+  const planPanel = page.getByRole("complementary", { name: "Plan" });
+  await expect(planPanel.getByRole("heading", { level: 2, name: "Split the auth module", exact: true })).toBeVisible();
+  expect((await planPanel.boundingBox())!.width).toBeCloseTo(dragged.width, 0);
+
+  // Double-clicking the handle forgets the width and restores the responsive default.
+  await planPanel.locator("[data-panel-handle]").dblclick();
+  await expect.poll(async () => (await planPanel.boundingBox())!.width).toBeCloseTo(before.width, 0);
+  expect(await page.evaluate(() => localStorage.getItem("workload.panel.width"))).toBeNull();
+});
+
 test("moving an item into a final stage shows a toast that opens it", async ({ page }) => {
   await page.goto(base);
   await page.getByRole("tablist", { name: "Boards" }).getByRole("tab", { name: /research/ }).click();
