@@ -1818,6 +1818,8 @@ async fn an_item_on_a_board_without_a_repo_runs_in_its_folder_with_every_repo_ad
     .unwrap();
     write_skill(&w.ws.join("skills"), "my-analyze", "ANALYZE STEPS\n");
     write_item(&w.ws, "T-60-idea", "analyze", "board: intake\n");
+    // A server started from an item session holds that item's vars; a session must not inherit them.
+    w.tmux.run(&["start-server", ";", "set-option", "-g", "exit-empty", "off", ";", "set-environment", "-g", "WORKITEM_REPO", "/leak", ";", "set-environment", "-g", "WORKITEM_WORKTREE", "/leak"]);
 
     let (status, body) = post_bearer(&w, "/api/workitems/app/T-60-idea/run").await;
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");

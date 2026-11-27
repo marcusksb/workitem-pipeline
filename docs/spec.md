@@ -65,7 +65,7 @@ Open follow-ups are unticked `- [ ]` lines under `## Follow-ups`. Agents only ap
 
 Agents run interactively in tmux. The session is the lock: an item has at most one, `wi-<dir>`. Names are global; each session is tagged `@workitem_workspace` when created. Kinds:
 
-- **Item sessions** (`wi-<dir>`): stage handlers, PR fixers, Start session, Discuss brief. They start in the item's worktree (`<workspace>/.worktrees/<repo>-<dir>`, decision 80) when git has one, else in the repo (in the item folder on a board without repo), with `--add-dir` for the workspace (and the repo in a worktree). Env: `WORKITEM`, `WORKITEM_FILE`, `WORKITEM_WORKSPACE`, `WORKITEM_REPO`, and `WORKITEM_WORKTREE` on a board with a repo. A stage's `model` becomes `--model`.
+- **Item sessions** (`wi-<dir>`): stage handlers, PR fixers, Start session, Discuss brief. They start in the item's worktree (`<workspace>/.worktrees/<repo>-<dir>`, decision 80) when git has one, else in the repo (in the item folder on a board without repo), with `--add-dir` for the workspace (and the repo in a worktree). Env: `WORKITEM`, `WORKITEM_FILE`, `WORKITEM_WORKSPACE`, `WORKITEM_REPO`, and `WORKITEM_WORKTREE` on a board with a repo. A launcher var a session does not set is unset in it, never inherited from the tmux server (82). A stage's `model` becomes `--model`.
 - **Create sessions** (`wi-new-<id>`): run `workitem-create` in the workspace folder with every board's repo added. Shown as toasts (75); items they write carry `created_by:`. A dead one is not reaped (its pane keeps the crash output); × on its *Ended* toast kills it (`DELETE /api/sessions/{workspace}/{name}`).
 - **Planning sessions** (`wi-plan-<id>`): a conversation with no item, in the workspace folder. The record `plans/<id>.md` (written only through `bin/workitem-plan-note`) is the source of truth; `bin/workitem-plan-guard` refuses edits outside the workspace folder and in its `.worktrees/`. Resume continues the recorded agent session (36, 49).
 
@@ -79,7 +79,7 @@ Questions to the parent (61): the backend serves an MCP server per item at `/api
 
 ## Dispatcher and watchers
 
-`dispatch.rs` runs every 5s and on every UI action: session housekeeping, then due watchers. A watcher (`{every, command, args}`) is a script run without a shell (one at a time, killed after 10 minutes) with `WORKITEM_*` env vars and items as JSON on stdin. Rules live in the scripts; they change items only through `workitem-move` and frontmatter writes (`bin/workitem_fields.py`, atomic, retried on a concurrent write). Last starts are in `watch.json`.
+`dispatch.rs` runs every 5s and on every UI action: session housekeeping, then due watchers. A watcher (`{every, command, args}`) is a script run without a shell (one at a time, killed after 10 minutes) with `WORKITEM_*` env vars (no `WORKITEM_REPO` without a repo, 82) and items as JSON on stdin. Rules live in the scripts; they change items only through `workitem-move` and frontmatter writes (`bin/workitem_fields.py`, atomic, retried on a concurrent write). Last starts are in `watch.json`.
 
 - **Column** (a stage's `watch`): gets that column's items, runs in the board's repo. Pausable from the column header (`paused.json`).
 - **Board** (top-level `watch`): every item of the board.

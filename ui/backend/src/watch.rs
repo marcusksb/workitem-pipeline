@@ -255,6 +255,10 @@ impl Job {
     async fn run(self) -> Result<(), String> {
         let mut command = Command::new(&self.script);
         command.args(&self.args).current_dir(&self.cwd).envs(self.env.iter().map(|(k, v)| (*k, v))).stdin(Stdio::piped()).kill_on_drop(true);
+        if !self.env.iter().any(|(k, _)| *k == "WORKITEM_REPO") {
+            // Not the backend's own, which is the outer item's when it runs in an item session (decision 82).
+            command.env_remove("WORKITEM_REPO");
+        }
         let mut child = command.spawn().map_err(|e| start_error(&self.script, e))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(self.items.as_bytes()).await;
