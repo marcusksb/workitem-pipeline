@@ -38,7 +38,7 @@ export type Review = {
   approval: "approved" | "changes_requested" | "review_required" | "none";
   /** My latest verdict on the PR is an approval. */
   approved_by_me: boolean;
-  merge: "mergeable" | "conflicting" | "unknown";
+  merge: "mergeable" | "blocked" | "conflicting" | "unknown";
   ci: "passing" | "failing" | "pending" | "none";
   /** Names of the red checks. */
   failed: string[];

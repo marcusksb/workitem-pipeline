@@ -47,7 +47,7 @@
           "label": "Merge PR",
           "script": "pr",
           "args": ["merge"],
-          "when": { "pr_state": "open", "pr_approval": "approved", "pr_ci": "passing", "pr_merge": "mergeable", "pr_draft": "false" },
+          "when": { "pr_state": "open", "pr_merge": "mergeable" },
           "confirm": "Squash-merge the PR? The workitem moves to done once its host reports it merged."
         }
       ]

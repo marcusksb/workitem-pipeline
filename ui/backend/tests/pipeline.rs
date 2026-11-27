@@ -195,6 +195,14 @@ fn set_pr(w: &World, state: &str, decision: &str, mergeable: &str, conclusion: &
     fs::write(w.dir.path().join("pr.json"), json.to_string()).unwrap();
 }
 
+/// GitHub's `mergeStateStatus` on the PR `set_pr` wrote (none there: the PR merges if it does not conflict).
+fn set_merge_state(w: &World, merge_state: &str) {
+    let path = w.dir.path().join("pr.json");
+    let mut json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    json["mergeStateStatus"] = merge_state.into();
+    fs::write(path, json.to_string()).unwrap();
+}
+
 fn field(ws: &Path, dir: &str, key: &str) -> String {
     let text = fs::read_to_string(ws.join(dir).join("workitem.md")).unwrap();
     text.lines().find_map(|l| l.strip_prefix(&format!("{key}:"))).unwrap_or("").trim().to_string()
@@ -975,7 +983,7 @@ fn gh_log(w: &World) -> String {
 }
 
 #[tokio::test]
-async fn the_bundled_pr_stage_offers_merge_only_for_a_green_approved_pr() {
+async fn the_bundled_pr_stage_offers_merge_only_when_the_host_would_merge() {
     let w = world();
     write_item(&w.ws, "T-23-early", "in_development", PR);
     assert_eq!(actions_of(&w, "T-23-early").await, serde_json::json!([]));
@@ -984,14 +992,17 @@ async fn the_bundled_pr_stage_offers_merge_only_for_a_green_approved_pr() {
 
     write_item(&w.ws, "T-24-merge", "in_review", PR);
     set_pr(&w, "OPEN", "REVIEW_REQUIRED", "MERGEABLE", "SUCCESS");
+    set_merge_state(&w, "BLOCKED");
     settle_pr(&w).await;
+    assert_eq!(field(&w.ws, "T-24-merge", "pr_merge"), "blocked");
     let labels = |actions: serde_json::Value| actions.as_array().unwrap().iter().map(|a| a["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-    assert_eq!(labels(actions_of(&w, "T-24-merge").await), ["Rebase onto base"], "not approved: no merge");
+    assert_eq!(labels(actions_of(&w, "T-24-merge").await), ["Rebase onto base"], "a branch rule blocks it: no merge");
     let (status, _) = post(&w, &format!("/api/workitems/app/T-24-merge/{MERGE}"), "").await;
     assert_eq!(status, StatusCode::CONFLICT, "the endpoint checks when too");
     assert!(!gh_log(&w).contains("pr merge"));
 
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
+    set_merge_state(&w, "CLEAN");
     settle_pr(&w).await;
     let actions = actions_of(&w, "T-24-merge").await;
     assert_eq!(labels(actions.clone()), ["Rebase onto base", "Merge PR"]);
@@ -1075,8 +1086,8 @@ async fn a_skill_action_starts_the_item_session_with_that_skill() {
 
 const BB_PR: &str = "pr: https://bitbucket.org/ws/slug/pull-requests/1\n";
 
-/// What `pr-status` writes for an open, approved, green PR: the bundled Merge action's `when`.
-const MERGEABLE: &str = "pr_state: open\npr_approval: approved\npr_ci: passing\npr_merge: mergeable\npr_draft: false\n";
+/// What `pr-status` writes for an open PR its host would merge: the bundled Merge action's `when`.
+const MERGEABLE: &str = "pr_state: open\npr_merge: mergeable\n";
 const MERGE: &str = "action/Merge%20PR";
 const REBASE: &str = "action/Rebase%20onto%20base";
 
