@@ -12,6 +12,7 @@ export function StageActionBar({ item, runner: { busy, message, error, run } }: 
       {item.actions.map((action) => (
         <Button
           key={action.id}
+          variant="primary"
           disabled={busy || (action.starts_session && item.session)}
           title={action.starts_session && item.session ? "The agent is already running" : undefined}
           onClick={() => run(action.label, () => api.runAction(item, action.id), action.confirm ?? undefined)}
