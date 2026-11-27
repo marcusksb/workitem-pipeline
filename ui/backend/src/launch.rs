@@ -393,7 +393,7 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
     }
     command.arg("--");
     // A session also inherits the tmux server's global env, which holds the outer item's vars
-    // when the server was started from an item session (decision 82).
+    // when the server was started from an item session (decision 83).
     command.arg("/usr/bin/env");
     for var in OWN_VARS.iter().filter(|var| !env.iter().any(|e| e.split_once('=').is_some_and(|(name, _)| name == **var))) {
         command.args(["-u", var]);
