@@ -377,7 +377,7 @@ pub struct Cached {
     error: Option<String>,
 }
 
-fn board_path(workspace: &Workspace, board: &str) -> PathBuf {
+pub(crate) fn board_path(workspace: &Workspace, board: &str) -> PathBuf {
     workspace.dir.join("boards").join(format!("{board}.json"))
 }
 

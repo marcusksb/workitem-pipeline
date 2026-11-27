@@ -72,6 +72,7 @@ export const api = {
   remove: (item: Item) => request<{ worktree_left: string | null }>("POST", `${itemUrl(item)}/remove`),
   create: (workspace: string, input: string, board: string) =>
     request<Launched>("POST", `/api/workspaces/${segment(workspace)}/create`, { input, board }),
+  fixBoard: (workspace: string, board: string) => request<Launched>("POST", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/fix`),
   plans: () => request<Plan[]>("GET", "/api/plans"),
   plan: (workspace: string, id: string) => request<PlanDetail>("GET", planUrl(workspace, id)),
   createPlan: (workspace: string, input: string) =>

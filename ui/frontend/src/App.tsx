@@ -230,7 +230,7 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
         )}
         <main className="relative flex min-h-0 flex-1">
           <div className="min-w-0 flex-1 overflow-auto px-6 py-4 max-md:px-4">
-            <Board items={shown} pipelines={pipelines} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} onChanged={reload} />
+            <Board items={shown} pipelines={pipelines} workspaces={inView} board={route.board} view={view} selected={selected && itemKey(selected)} onSelect={open} showWorkspace={false} sessions={sessions} onChanged={reload} />
           </div>
           {itemPanel.shown && (
             <Leaving leaving={itemPanel.leaving} onDone={itemPanel.done}>
