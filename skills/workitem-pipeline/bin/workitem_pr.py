@@ -45,12 +45,10 @@ def parse(url):
         return None
     segments = [s for s in parts.path.split("/") if s]
     marker = "pull-requests" if host == BITBUCKET else "pull"
-    if marker not in segments:
+    # The marker is the third segment, so an owner or repo named `pull` is no marker.
+    if len(segments) < 4 or segments[2] != marker or not re.fullmatch(r"[0-9]+", segments[3]):
         return None
-    i = segments.index(marker)
-    if i < 2 or i + 1 >= len(segments) or not re.fullmatch(r"[0-9]+", segments[i + 1]):
-        return None
-    return Pr(host, segments[i - 2], segments[i - 1], str(int(segments[i + 1])), url)
+    return Pr(host, segments[0], segments[1], str(int(segments[3])), url)
 
 
 def pr_of(url):
@@ -65,19 +63,30 @@ def provider(pr, workspace):
     return (Bitbucket if pr.host == BITBUCKET else GitHub)(workspace)
 
 
-def run(argv, *, env=None, timeout=TIMEOUT, cwd=None, stdin=None, ok=(0,)):
-    """stdout of a command; RuntimeError with its message, never an empty one, when it fails."""
+def call(argv, *, env=None, timeout=TIMEOUT, cwd=None, stdin=None):
+    """The finished command, whatever its exit code; RuntimeError when it cannot run or times out."""
     name = os.path.basename(argv[0])
     try:
         # Without input stdin is /dev/null: a host CLI that prompts must fail, not wait forever.
-        result = subprocess.run(argv, input=stdin, stdin=None if stdin is not None else subprocess.DEVNULL,
-                                capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env)
+        return subprocess.run(argv, input=stdin, stdin=None if stdin is not None else subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env)
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"{name} {argv[1]} timed out after {timeout}s")
     except OSError as e:
         raise RuntimeError(f"cannot run {name}: {e}")
-    if result.returncode not in ok:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"{name} {argv[1]} exited with {result.returncode}")
+
+
+def failure(result):
+    """The message of a failed command, never an empty one."""
+    name = os.path.basename(result.args[0])
+    return RuntimeError(result.stderr.strip() or result.stdout.strip() or f"{name} {result.args[1]} exited with {result.returncode}")
+
+
+def run(argv, *, env=None, timeout=TIMEOUT, cwd=None, stdin=None):
+    """stdout of a command; RuntimeError with its message, never an empty one, when it fails."""
+    result = call(argv, env=env, timeout=timeout, cwd=cwd, stdin=stdin)
+    if result.returncode != 0:
+        raise failure(result)
     return result.stdout
 
 
@@ -103,9 +112,9 @@ def read_pulls(urls, workspace):
     groups, found = by_provider(urls, workspace)
     me = {}
     for cls, host_urls in groups.items():
-        nodes, login = cls(workspace).read_pulls(host_urls)
+        nodes, logins = cls(workspace).read_pulls(host_urls)
         found.update(nodes)
-        me.update({url: login for url in host_urls})
+        me.update(logins)
     return found, me
 
 
@@ -184,19 +193,24 @@ class GitHub:
     def __init__(self, workspace):
         self.workspace = workspace
 
-    def gh(self, *args, timeout=TIMEOUT, stdin=None, ok=(0,)):
-        return run([tracker.gh_path(), *args], env=tracker.gh_env(self.workspace), timeout=timeout, stdin=stdin, ok=ok)
+    def gh_call(self, *args, timeout=TIMEOUT, stdin=None):
+        return call([tracker.gh_path(), *args], env=tracker.gh_env(self.workspace), timeout=timeout, stdin=stdin)
 
-    def graphql(self, query):
+    def gh(self, *args, timeout=TIMEOUT, stdin=None):
+        result = self.gh_call(*args, timeout=timeout, stdin=stdin)
+        if result.returncode != 0:
+            raise failure(result)
+        return result.stdout
+
+    # `gh api` and `gh run` name the PR's host: the cwd is no checkout whose remote gh could read
+    # it from, and a GitHub Enterprise PR must not be looked up on github.com.
+    def api(self, host, endpoint, *args, stdin=None):
+        return self.gh("api", endpoint, "--hostname", host, *args, stdin=stdin)
+
+    def graphql(self, host, query):
         """The data of a GraphQL query and the messages of its partial errors (a missing PR, say):
         gh exits 1 on those but still prints the data it got."""
-        try:
-            result = subprocess.run([tracker.gh_path(), "api", "graphql", "-f", f"query={query}"], stdin=subprocess.DEVNULL,
-                                    capture_output=True, text=True, timeout=60, env=tracker.gh_env(self.workspace))
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("gh api graphql timed out after 60s")
-        except OSError as e:
-            raise RuntimeError(f"cannot run gh: {e}")
+        result = self.gh_call("api", "graphql", "--hostname", host, "-f", f"query={query}", timeout=60)
         try:
             body = json.loads(result.stdout or "{}")
         except ValueError:
@@ -207,24 +221,24 @@ class GitHub:
         return body["data"], errors
 
     def read_nodes(self, urls, fields):
-        """The `fields` of each PR, CHUNK PRs of a repo per query: ({url: node or error}, my login)."""
+        """The `fields` of each PR, CHUNK PRs of a repo per query: ({url: node or error}, {url: my login on its host})."""
         by_repo = {}
         for url in urls:
             pr = pr_of(url)
-            by_repo.setdefault((pr.owner, pr.repo), {}).setdefault(int(pr.number), []).append(url)
-        found, me = {}, None
-        for (owner, repo), prs in by_repo.items():
+            by_repo.setdefault((pr.host, pr.owner, pr.repo), {}).setdefault(int(pr.number), []).append(url)
+        found, me = {}, {}
+        for (host, owner, repo), prs in by_repo.items():
             numbers = sorted(prs)
             for chunk in (numbers[i:i + CHUNK] for i in range(0, len(numbers), CHUNK)):
                 pulls = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields.replace('NUMBER', str(n))} }}" for n in chunk)
                 query = (f"query {{ viewer {{ login }} repository(owner: {json.dumps(owner)}, name: {json.dumps(repo)}) "
                          f"{{ {pulls} }} }}")
                 try:
-                    data, errors = self.graphql(query)
+                    data, errors = self.graphql(host, query)
                 except ERRORS as e:
                     found.update({url: e for n in chunk for url in prs[n]})
                     continue
-                me = data["viewer"]["login"]
+                me.update({url: data["viewer"]["login"] for n in chunk for url in prs[n]})
                 for n in chunk:
                     node = (data.get("repository") or {}).get(f"p{n}")
                     found.update({url: node or RuntimeError("; ".join(errors) or "no such PR") for url in prs[n]})
@@ -257,14 +271,14 @@ class GitHub:
         for r in raw.get("reviews") or []:
             if r.get("state") in ("APPROVED", "CHANGES_REQUESTED") or r.get("body"):
                 notes.append(note("review", f"review-{r.get('id')}", login(r.get("author")), r.get("body"), r.get("submittedAt"), state=r.get("state")))
-        pages = json.loads(self.gh("api", f"repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/comments", "--paginate", "--slurp"))
+        pages = json.loads(self.api(pr.host, f"repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/comments", "--paginate", "--slurp"))
         for c in (c for page in pages for c in page):
             notes.append(note("inline", f"inline-{c.get('id')}", login(c.get("user")), c.get("body"), c.get("created_at"), path=c.get("path")))
         notes.sort(key=lambda n: n["at"], reverse=True)
         return {"body": raw.get("body") or "", "notes": notes}
 
     def mentions(self, pr):
-        out = self.gh("api", "graphql", "-f", f"query={MENTION_QUERY}", "-f", f"owner={pr.owner}",
+        out = self.api(pr.host, "graphql", "-f", f"query={MENTION_QUERY}", "-f", f"owner={pr.owner}",
                       "-f", f"repo={pr.repo}", "-F", f"number={pr.number}")
         return mentions_of(json.loads(out)["data"]["repository"]["pullRequest"])
 
@@ -274,16 +288,25 @@ class GitHub:
     def reply(self, pr, comment_id, body):
         """An inline comment gets a reply in its thread; anything else a new PR comment."""
         if comment_id.startswith("inline-"):
-            self.gh("api", f"repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/comments/{comment_id[len('inline-'):]}/replies",
-                    "-F", "body=@-", stdin=body)
+            self.api(pr.host, f"repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/comments/{comment_id[len('inline-'):]}/replies",
+                     "-F", "body=@-", stdin=body)
         else:
             self.comment(pr, body)
 
     def checks(self, pr):
         """`[{name, state, link}]`, state one of pass, fail, pending, skipping, cancel."""
-        # gh pr checks exits 1 when a check fails and 8 while one is pending.
-        out = self.gh("pr", "checks", pr.url, "--json", "name,bucket,link", ok=(0, 1, 8))
-        return [{"name": c.get("name") or "", "state": c.get("bucket") or "", "link": c.get("link") or ""} for c in json.loads(out or "[]")]
+        # gh pr checks exits 1 when a check fails and 8 while one is pending, but 1 is also any
+        # error (auth, no such PR): only JSON on stdout means the checks were read.
+        result = self.gh_call("pr", "checks", pr.url, "--json", "name,bucket,link")
+        try:
+            found = json.loads(result.stdout) if result.returncode in (0, 1, 8) else None
+        except ValueError:
+            found = None
+        if not isinstance(found, list):
+            if "no checks reported" in result.stderr:
+                return []
+            raise failure(result)
+        return [{"name": c.get("name") or "", "state": c.get("bucket") or "", "link": c.get("link") or ""} for c in found]
 
     def failed_log(self, pr):
         """The failed steps' log of every red workflow run; a red check outside Actions only by its link."""
@@ -297,7 +320,7 @@ class GitHub:
             elif match.group(1) not in runs:
                 runs.append(match.group(1))
         for run_id in runs:
-            log = self.gh("run", "view", run_id, "-R", f"{pr.owner}/{pr.repo}", "--log-failed", timeout=120)
+            log = self.gh("run", "view", run_id, "-R", f"{pr.host}/{pr.owner}/{pr.repo}", "--log-failed", timeout=120)
             parts.append(f"## Run {run_id}\n\n{log}")
         return "\n".join(parts)
 
@@ -428,7 +451,7 @@ class Bitbucket:
 
     def api(self, path, params=()):
         """One Cloud REST call through `bkt api`: the JSON body."""
-        out = self.bkt("api", path, "--json", *[arg for key, value in params for arg in ("--param", f"{key}={value}")], timeout=60)
+        out = self.bkt("api", path, "--json", *[arg for key, value in params for arg in ("--param", f"{key}={value}")])
         try:
             return json.loads(out or "{}")
         except ValueError:
@@ -459,7 +482,7 @@ class Bitbucket:
     def read_pulls(self, urls):
         """One list call per repo for the open PRs, one per-PR call for anything the list lacks
         (merged, declined) or that misses a field the facts need, one per head commit for its
-        date, one per PR for its build statuses. ({url: node or error}, my nickname)."""
+        date, one per PR for its build statuses. ({url: node or error}, {url: my nickname})."""
         found, me = {}, None
         by_repo = {}
         for url in urls:
@@ -508,7 +531,7 @@ class Bitbucket:
                     found.update({url: e for url in urls_of(n)})
                     continue
                 found.update({url: bb_node(values[n], dates.get(head), checks) for url in urls_of(n)})
-        return found, me
+        return found, {url: me for url in urls}
 
     def read_threads(self, urls):
         """The inline comments as one-comment threads (a reply names its parent) and the

@@ -137,8 +137,9 @@ pub async fn workitem_pr(state: &AppState, workspace: &Workspace, item: &Path, v
 }
 
 /// The PR description plus its comments, review summaries and inline comments, newest first.
+/// The limit covers several host calls of 30 s each (the token, the PR, the comment pages).
 pub async fn conversation(state: &AppState, workspace: &Workspace, item: &Path) -> Result<Conversation, String> {
-    let out = workitem_pr(state, workspace, item, "conversation", &["--json"], Duration::from_secs(60)).await?;
+    let out = workitem_pr(state, workspace, item, "conversation", &["--json"], Duration::from_secs(150)).await?;
     serde_json::from_slice(&out).map_err(|e| format!("unreadable workitem-pr output: {e}"))
 }
 

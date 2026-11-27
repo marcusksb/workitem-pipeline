@@ -84,6 +84,10 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(prs.parse("https://GitHub.com/o/r/pull/7")[:4], ("github.com", "o", "r", "7"))
         self.assertEqual(prs.parse("https://ghe.example.com/o/r/pull/7")[:4], ("ghe.example.com", "o", "r", "7"),
                          "any other host is GitHub (Enterprise)")
+        self.assertEqual(prs.parse("https://github.com/acme/pull/pull/12")[:4], ("github.com", "acme", "pull", "12"),
+                         "a repo named pull is no marker")
+        self.assertEqual(prs.parse("https://bitbucket.org/pull-requests/slug/pull-requests/3")[:4],
+                         ("bitbucket.org", "pull-requests", "slug", "3"))
 
     def test_links_that_name_no_pr(self):
         for link in ["", "not a url", "ftp://github.com/o/r/pull/7", "https://bitbucket.org/ws/slug/branch/nope",
@@ -220,7 +224,7 @@ class CallsTest(unittest.TestCase):
             ["pr", "ready", GH.url],
             ["pr", "edit", GH.url, "--add-reviewer", "org/team"],
             ["pr", "comment", GH.url, "--body-file", "-"],
-            ["api", "repos/o/r/pulls/7/comments/5/replies", "-F", "body=@-"],
+            ["api", "repos/o/r/pulls/7/comments/5/replies", "--hostname", "github.com", "-F", "body=@-"],
             ["pr", "comment", GH.url, "--body-file", "-"]])
         self.assertEqual([c["stdin"] for c in self.stubs.calls("gh")][4:], ["hello", "fixed", "noted"])
 
@@ -271,8 +275,36 @@ class CallsTest(unittest.TestCase):
         self.assertIn("ci/ext", log)
         self.assertIn("https://ci.example.com/9", log)
         self.assertIn("rspec failed here", log)
-        self.assertEqual([a for a in self.args("gh") if a[0] == "run"], [["run", "view", "11", "-R", "o/r", "--log-failed"]],
+        self.assertEqual([a for a in self.args("gh") if a[0] == "run"], [["run", "view", "11", "-R", "github.com/o/r", "--log-failed"]],
                          "each red run once")
+
+    def test_checks_fail_on_a_gh_error_and_are_empty_without_checks(self):
+        self.stubs.answer("gh", {"pr checks": "fail: HTTP 401: Bad credentials"})
+        with self.assertRaises(RuntimeError) as e:
+            prs.GitHub(None).failed_log(GH)
+        self.assertEqual(str(e.exception), "HTTP 401: Bad credentials", "exit 1 without JSON is an error, not green")
+        self.stubs.answer("gh", {"pr checks": "fail: no checks reported on the 'feature' branch"})
+        self.assertEqual(prs.GitHub(None).checks(GH), [])
+
+    def test_an_enterprise_pr_is_read_on_its_own_host(self):
+        ghe = prs.parse("https://ghe.example.com/o/r/pull/7")
+        self.stubs.answer("gh", {"api graphql": {"data": {"viewer": {"login": "me"}, "repository": {"p7": {"number": 7, "state": "MERGED", "mergeable": "UNKNOWN"}}}},
+                                 "pr view": {"body": "", "comments": [], "reviews": []},
+                                 "api repos/o/r/pulls/7/comments": [[]]})
+        nodes, me = prs.read_pulls([GH.url, ghe.url], None)
+        prs.GitHub(None).conversation(ghe)
+        hosts = [a[a.index("--hostname") + 1] for a in self.args("gh") if a[0] == "api"]
+        self.assertEqual(sorted(hosts[:2]), ["ghe.example.com", "github.com"], "one query per host")
+        self.assertEqual(hosts[2], "ghe.example.com")
+        self.assertEqual(me, {GH.url: "me", ghe.url: "me"})
+
+    def test_a_hanging_token_read_is_a_problem_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as ws:
+            with open(os.path.join(ws, "workspace.toml"), "w") as f:
+                f.write('github_account = "me"\n')
+            with mock.patch.object(prs.tracker.subprocess, "run", side_effect=subprocess.TimeoutExpired("gh", 30)):
+                with self.assertRaises(prs.ERRORS):
+                    prs.GitHub(ws).merge(GH)
 
 
 def git(cwd, *args):

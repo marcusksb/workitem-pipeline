@@ -390,10 +390,11 @@ pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPa
 }
 
 /// Rebases the PR branch onto its base: server side on GitHub, which refuses when the rebase
-/// conflicts; in a temporary worktree of the board repo on Bitbucket, whose fresh checkout may
-/// take up to 600 s on a large repo.
+/// conflicts; in a temporary worktree of the board repo on Bitbucket. The limit is above the sum
+/// of that rebase's own step limits (about 990 s, 600 of them the fresh checkout): killed earlier,
+/// `workitem-pr` could not remove its worktree and its git could still push after the UI gave up.
 pub async fn rebase(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    pr_action(&state, &workspace, &dir, "rebase", std::time::Duration::from_secs(780)).await?;
+    pr_action(&state, &workspace, &dir, "rebase", std::time::Duration::from_secs(1200)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
