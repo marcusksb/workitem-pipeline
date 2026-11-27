@@ -244,6 +244,12 @@ async fn get(w: &World, uri: &str) -> String {
     String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned()
 }
 
+/// One part of `/api/state` (`workspaces`, `pipelines`, `items`, `sessions` or `plans`), as JSON text.
+async fn state(w: &World, key: &str) -> String {
+    let state: serde_json::Value = serde_json::from_str(&get(w, "/api/state").await).unwrap();
+    state[key].to_string()
+}
+
 #[tokio::test]
 async fn dispatcher_runs_handlers_reaps_finished_sessions_and_leaves_blocked_alone() {
     let w = world();
@@ -285,7 +291,7 @@ async fn project_agent_runs_the_handler_instead_of_the_default() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status, body) = put(&w, "/api/workspaces/app", &serde_json::json!({ "agent": agent }).to_string()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(get(&w, "/api/workspaces").await.contains("my-agent"));
+    assert!(state(&w, "workspaces").await.contains("my-agent"));
 
     write_item(&w.ws, "T-9-agent", "analyze", "");
     fs::write(w.repo.join(".stub-analyze"), "advance").unwrap();
@@ -670,7 +676,7 @@ async fn agent_sessions_start_from_the_ui_and_pass_text_as_one_argument() {
     let session = serde_json::from_str::<serde_json::Value>(&body).unwrap()["session"].as_str().unwrap().to_string();
     assert!(session.starts_with("wi-new-"));
 
-    let sessions = get(&w, "/api/sessions").await;
+    let sessions = state(&w, "sessions").await;
     assert!(sessions.contains(&session), "{sessions}");
 
     let logs = w.dir.path().join("logs");
@@ -698,7 +704,7 @@ async fn create_sessions_report_whether_they_wait_for_input_or_died() {
         String::from_utf8_lossy(&out.stdout).trim() == "1"
     })
     .await;
-    let sessions: serde_json::Value = serde_json::from_str(&get(&w, "/api/sessions").await).unwrap();
+    let sessions: serde_json::Value = serde_json::from_str(&state(&w, "sessions").await).unwrap();
     let of = |name: &str| sessions.as_array().unwrap().iter().find(|s| s["name"] == name).cloned().unwrap();
     assert_eq!((of("wi-new-wait")["waiting"].as_bool(), of("wi-new-wait")["dead"].as_bool()), (Some(true), Some(false)));
     assert_eq!((of("wi-new-dead")["waiting"].as_bool(), of("wi-new-dead")["dead"].as_bool()), (Some(false), Some(true)));
@@ -737,7 +743,7 @@ async fn only_a_dead_create_session_of_the_workspace_can_be_killed() {
 
     assert_eq!(kill_session(&w, "/api/sessions/app/wi-new-dead").await, StatusCode::NO_CONTENT);
     assert!(!w.tmux.has("wi-new-dead"));
-    assert!(!get(&w, "/api/sessions").await.contains("wi-new-dead"));
+    assert!(!state(&w, "sessions").await.contains("wi-new-dead"));
 }
 
 #[tokio::test]
@@ -802,7 +808,7 @@ async fn a_session_starts_in_the_worktree_and_still_belongs_to_the_workspace() {
     let worktree = w.ws.join(".worktrees/repo-T-15-wt");
     git(&["worktree", "add", "-q", "-b", "wt", worktree.to_str().unwrap()], &w.repo);
     let worktree = worktree.canonicalize().unwrap();
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     assert_eq!(items.as_array().unwrap().len(), 1, ".worktrees is not an item");
 
     let (status, _) = post(&w, "/api/workitems/app/T-15-wt/session", "").await;
@@ -819,7 +825,7 @@ async fn a_session_starts_in_the_worktree_and_still_belongs_to_the_workspace() {
     })
     .await;
 
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     assert_eq!(items[0]["session"], true, "the session is the item's although it runs in the worktree");
     settle(&w).await;
     assert_eq!(field(&w.ws, "T-15-wt", "agent_status"), "working", "not taken for a working item without a session");
@@ -842,7 +848,7 @@ async fn items_report_branch_and_unpushed_commits_of_their_worktree() {
     git(&["commit", "-q", "--allow-empty", "-m", "a"], &worktree);
 
     async fn field_of(w: &World, dir: &str, name: &str) -> serde_json::Value {
-        let items: serde_json::Value = serde_json::from_str(&get(w, "/api/workitems").await).unwrap();
+        let items: serde_json::Value = serde_json::from_str(&state(w, "items").await).unwrap();
         items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()[name].clone()
     }
     async fn unpushed(w: &World, dir: &str) -> serde_json::Value {
@@ -931,7 +937,7 @@ async fn deleting_a_board_removes_its_items_and_files() {
     workitem_ui::watch::set_paused(&w.state, &workspace, "side", "analyze", true).unwrap();
     workitem_ui::watch::set_paused(&w.state, &workspace, "default", "analyze", true).unwrap();
     fs::write(w.state.store.sibling("watch.json"), r#"{"app/side/analyze/0": 1, "app/default/analyze/0": 1}"#).unwrap();
-    assert!(get(&w, "/api/pipelines").await.contains(r#""name":"side""#));
+    assert!(state(&w, "pipelines").await.contains(r#""name":"side""#));
 
     assert_eq!(delete_board(&w, "nope").await.0, StatusCode::NOT_FOUND);
     assert_eq!(delete_board(&w, "..").await.0, StatusCode::NOT_FOUND);
@@ -943,7 +949,7 @@ async fn deleting_a_board_removes_its_items_and_files() {
     assert!(!w.ws.join("T-13-side").exists() && !w.ws.join("T-14-side").exists(), "items removed");
     assert!(!w.ws.join("boards/side.json").exists() && !w.ws.join("boards/side").exists(), "board removed");
     assert!(w.ws.join("T-12-keep").exists() && w.ws.join("boards/default.json").exists(), "other board kept");
-    assert!(!get(&w, "/api/pipelines").await.contains(r#""name":"side""#), "not served from the cache");
+    assert!(!state(&w, "pipelines").await.contains(r#""name":"side""#), "not served from the cache");
     let paused = fs::read_to_string(w.state.store.sibling("paused.json")).unwrap();
     assert!(!paused.contains("app/side/") && paused.contains("app/default/analyze"), "{paused}");
     let runs = fs::read_to_string(w.state.store.sibling("watch.json")).unwrap();
@@ -959,7 +965,7 @@ async fn review_shows_pr_status_and_leaves_green_ci_alone() {
     set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
 
     settle_pr(&w).await;
-    let items = get(&w, "/api/workitems").await;
+    let items = state(&w, "items").await;
     assert!(items.contains(r#""review":{"state":"open","approval":"approved","approved_by_me":false,"merge":"mergeable","ci":"passing","failed":[]}"#), "{items}");
     assert!(stub_log(&w.repo).is_empty() && !w.tmux.has("wi-T-20-green"), "nothing to fix");
 }
@@ -1107,7 +1113,7 @@ async fn review_starts_a_fixer_on_red_ci_and_leaves_a_blocked_one_waiting() {
 
     settle_pr(&w).await;
     eventually("fixer could not fix it and blocked", || field(&w.ws, "T-21-red", "agent_status").starts_with("blocked")).await;
-    let items = get(&w, "/api/workitems").await;
+    let items = state(&w, "items").await;
     assert!(items.contains(r#""approval":"review_required","approved_by_me":false,"merge":"mergeable","ci":"failing""#), "{items}");
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
     assert!(prompts.contains("CI is failing on https://github.com/o/app/pull/7"), "{prompts}");
@@ -1413,7 +1419,7 @@ async fn project_board_decides_which_stages_the_dispatcher_runs() {
 }
 
 #[tokio::test]
-async fn state_is_the_five_board_endpoints_in_one_response() {
+async fn state_serves_items_sessions_and_plans_in_one_response() {
     let w = world();
     write_item(&w.ws, "T-1-live", "analyze", "");
     write_item(&w.ws, "T-2-idle", "ready_for_development", "");
@@ -1423,11 +1429,9 @@ async fn state_is_the_five_board_endpoints_in_one_response() {
         own_session(&w, name);
     }
 
-    let json = |body: String| serde_json::from_str::<serde_json::Value>(&body).unwrap();
-    let state = json(get(&w, "/api/state").await);
-    for (key, uri) in [("workspaces", "/api/workspaces"), ("pipelines", "/api/pipelines"), ("items", "/api/workitems"), ("sessions", "/api/sessions"), ("plans", "/api/plans")] {
-        assert_eq!(state[key], json(get(&w, uri).await), "{key}");
-    }
+    let state: serde_json::Value = serde_json::from_str(&get(&w, "/api/state").await).unwrap();
+    assert_eq!(state["workspaces"][0]["name"], "app");
+    assert!(state["pipelines"]["app"].is_array());
     assert_eq!(state["items"].as_array().unwrap().len(), 2);
     assert_eq!(state["items"].as_array().unwrap().iter().filter(|i| i["session"] == true).count(), 1);
     assert_eq!(state["sessions"][0]["name"], "wi-new-a");
@@ -1444,22 +1448,22 @@ async fn invalid_board_file_keeps_the_last_valid_board_and_is_reported() {
     let file = w.ws.join("boards/default.json");
     fs::create_dir_all(file.parent().unwrap()).unwrap();
 
-    let bundled = stages(&get(&w, "/api/pipelines").await);
+    let bundled = stages(&state(&w, "pipelines").await);
     assert_eq!(bundled["error"], serde_json::Value::Null);
     assert_eq!(bundled["pipeline"]["stages"][0]["name"], "analyze");
 
     fs::write(&file, board(&w, r#"[{"name":"qa","next":["shipped"]},{"name":"shipped"}]"#)).unwrap();
-    let own = stages(&get(&w, "/api/pipelines").await);
+    let own = stages(&state(&w, "pipelines").await);
     assert_eq!(own["pipeline"]["stages"][0]["name"], "qa");
     assert_eq!(own["pipeline"]["entry"], "qa");
 
     fs::write(&file, board(&w, r#"[{"name":"qa","next":["gone"]}]"#)).unwrap();
-    let broken = stages(&get(&w, "/api/pipelines").await);
+    let broken = stages(&state(&w, "pipelines").await);
     assert!(broken["error"].as_str().unwrap().contains("gone"), "{broken}");
     assert_eq!(broken["pipeline"]["stages"][0]["name"], "qa", "the last valid board stays");
 
     fs::write(&file, board(&w, r#"[{"name":"qa"}]"#)).unwrap();
-    assert_eq!(stages(&get(&w, "/api/pipelines").await)["error"], serde_json::Value::Null);
+    assert_eq!(stages(&state(&w, "pipelines").await)["error"], serde_json::Value::Null);
 }
 
 /// A board with its own names: a gate, a development stage and a PR stage under other names.
@@ -1485,7 +1489,7 @@ async fn gates_and_the_pr_stage_follow_the_project_board_not_stage_names() {
     write_item(&w.ws, "T-42-not-a-gate", "idea", "");
     write_item(&w.ws, "T-43-merged", "waiting", PR);
 
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     let role = |dir: &str, key: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()[key].clone();
     assert_eq!(role("T-41-approve", "gate")["label"], "Implementation approved");
     assert_eq!(role("T-42-not-a-gate", "gate"), serde_json::Value::Null);
@@ -1551,12 +1555,12 @@ async fn items_follow_the_board_they_name_and_boards_are_listed_by_name() {
     write_item(&w.ws, "T-51-lost", "qa", "board: gone\n");
     write_item(&w.ws, "T-52-default", "analyze", "");
 
-    let listed: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&state(&w, "pipelines").await).unwrap();
     let names: Vec<&str> = listed["app"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["a-first", "default", "research"]);
     assert_eq!(listed["app"][0]["pipeline"]["repo"], w.repo.display().to_string(), "each board names its repo");
 
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     let board_of = |dir: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["board"].clone();
     assert_eq!(board_of("T-50-research"), "research");
     assert_eq!(board_of("T-51-lost"), "gone", "an item on a board without a file is still listed");
@@ -1713,7 +1717,7 @@ async fn a_pr_status_board_shows_the_pr_chips_and_starts_nothing() {
     set_pr(&w, "OPEN", "CHANGES_REQUESTED", "CONFLICTING", "FAILURE");
 
     settle_pr(&w).await;
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     let review = |dir: &str| items.as_array().unwrap().iter().find(|i| i["dir"] == dir).unwrap()["review"].clone();
     assert_eq!(review("T-30-waiting")["approval"], "changes_requested");
     assert_eq!(review("T-31-queued")["merge"], "conflicting", "the board's reader reads every item with a PR");
@@ -1725,7 +1729,7 @@ async fn a_pr_status_board_shows_the_pr_chips_and_starts_nothing() {
     pr["reviews"] = serde_json::json!([{ "id": "r1", "state": "APPROVED", "author": { "login": "me" } }]);
     fs::write(w.dir.path().join("pr.json"), pr.to_string()).unwrap();
     settle(&w).await;
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     let mine = items.as_array().unwrap().iter().find(|i| i["dir"] == "T-30-waiting").unwrap()["review"]["approved_by_me"].clone();
     assert_eq!(mine, true);
 }
@@ -1801,7 +1805,7 @@ async fn a_workspace_watcher_runs_once_for_every_board_in_the_workspace_folder()
     assert_eq!(fs::read_to_string(w.ws.join(".watch-log")).unwrap(), "[] [] [unset] hi\n", "once, not per board or pass");
     let items = fs::read_to_string(w.ws.join(".watch-items")).unwrap();
     assert!(items.contains("T-37-default") && items.contains("T-38-side"), "every board: {items}");
-    let workspaces: serde_json::Value = serde_json::from_str(&get(&w, "/api/workspaces").await).unwrap();
+    let workspaces: serde_json::Value = serde_json::from_str(&state(&w, "workspaces").await).unwrap();
     assert_eq!(workspaces[0]["watch"], serde_json::json!([{ "every": "1d", "command": "record", "args": ["hi"], "implicit": false }]), "no board reads PRs");
 }
 
@@ -1810,12 +1814,12 @@ async fn a_board_with_a_pr_stage_gives_the_workspace_one_pr_status_unless_it_lis
     let w = world();
     let template = fs::read_to_string(w.ws.join("boards/default.json")).unwrap();
     fs::write(w.ws.join("boards/second.json"), &template).unwrap();
-    let watch = || async { serde_json::from_str::<serde_json::Value>(&get(&w, "/api/workspaces").await).unwrap()[0]["watch"].clone() };
+    let watch = || async { serde_json::from_str::<serde_json::Value>(&state(&w, "workspaces").await).unwrap()[0]["watch"].clone() };
     assert_eq!(watch().await, serde_json::json!([{ "every": "1m", "command": "pr-status", "args": [], "implicit": true }]), "one for both boards");
     fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"2m\"\ncommand = \"pr-status\"\n").unwrap();
     assert_eq!(watch().await, serde_json::json!([{ "every": "2m", "command": "pr-status", "args": [], "implicit": false }]));
     fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"oops\"\n").unwrap();
-    let workspaces: serde_json::Value = serde_json::from_str(&get(&w, "/api/workspaces").await).unwrap();
+    let workspaces: serde_json::Value = serde_json::from_str(&state(&w, "workspaces").await).unwrap();
     assert!(workspaces[0]["error"].as_str().unwrap().contains("workspace.toml"));
     assert_eq!(workspaces[0]["watch"][0]["every"], "2m", "the last valid file stays in use");
 }
@@ -1843,7 +1847,7 @@ async fn a_paused_column_starts_no_watcher_until_it_is_resumed() {
     assert_eq!(pause(true).await.unwrap().status(), StatusCode::NO_CONTENT);
     settle(&w).await;
     assert!(!w.repo.join(".watch-log").exists(), "a paused watcher does not run");
-    let boards = get(&w, "/api/pipelines").await;
+    let boards = state(&w, "pipelines").await;
     assert!(boards.contains(r#""watched":["queue"]"#) && boards.contains(r#""paused":["queue"]"#), "{boards}");
     let stored = fs::read_to_string(w.state.store.sibling("paused.json")).unwrap();
     assert!(stored.contains("app/default/queue"), "the pause survives a restart: {stored}");
@@ -1851,7 +1855,7 @@ async fn a_paused_column_starts_no_watcher_until_it_is_resumed() {
     assert_eq!(pause(false).await.unwrap().status(), StatusCode::NO_CONTENT);
     settle(&w).await;
     eventually("the resumed watcher ran", || w.repo.join(".watch-log").exists()).await;
-    assert!(get(&w, "/api/pipelines").await.contains(r#""paused":[]"#));
+    assert!(state(&w, "pipelines").await.contains(r#""paused":[]"#));
 }
 
 #[tokio::test]
@@ -1950,7 +1954,7 @@ async fn an_item_on_a_board_without_a_repo_runs_in_its_folder_with_every_repo_ad
     let log = args_log(&w);
     assert!(log.starts_with("argc=8\nclaude_md=1\n"), "--add-dir, workspace, the other boards' repo, --mcp-config, its file, --settings, hooks, prompt: {log}");
     assert!(log.contains("ANALYZE STEPS") && log.contains("board without a repo"), "{log}");
-    let pipelines = get(&w, "/api/pipelines").await;
+    let pipelines = state(&w, "pipelines").await;
     assert!(pipelines.contains(r#""name":"intake""#) && !pipelines.contains(r#""repo":null"#), "{pipelines}");
 }
 
@@ -2108,7 +2112,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     let lost = source("lost").await;
     assert!(lost["prose"]["error"].as_str().unwrap().contains("not found"));
 
-    let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let boards: serde_json::Value = serde_json::from_str(&state(&w, "pipelines").await).unwrap();
     let research = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "research").unwrap();
     let problems = research["problems"].as_object().unwrap();
     assert_eq!(problems.keys().collect::<std::collections::BTreeSet<_>>(), [&"lost".to_string(), &"watched".to_string()].into(), "builtin, inline and resolvable stages have none: {research}");
@@ -2142,7 +2146,7 @@ async fn fix_board_starts_an_agent_with_the_board_problems() {
     let session = serde_json::from_str::<serde_json::Value>(&body).unwrap()["session"].as_str().unwrap().to_string();
     assert!(session.starts_with("wi-new-fix-"), "{session}");
 
-    let sessions: serde_json::Value = serde_json::from_str(&get(&w, "/api/sessions").await).unwrap();
+    let sessions: serde_json::Value = serde_json::from_str(&state(&w, "sessions").await).unwrap();
     let listed = sessions.as_array().unwrap().iter().find(|s| s["name"] == session.as_str()).cloned().unwrap();
     assert_eq!(listed["purpose"], "fix");
 
@@ -2240,7 +2244,7 @@ async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_
     assert_eq!(fs::read_to_string(&probe).unwrap().lines().count(), runs, "no watcher runs");
     let (status, body) = post(&w, "/api/workitems/app/T-40-gh/session", "").await;
     assert!(!status.is_success() && body.contains("GitHub account gone is not logged in"), "{status} {body}");
-    assert!(get(&w, "/api/workspaces").await.contains("GitHub account gone is not logged in"), "the header says why");
+    assert!(state(&w, "workspaces").await.contains("GitHub account gone is not logged in"), "the header says why");
     let (status, body) = put(&w, "/api/workspaces/app", r#"{"agent":null,"issue_tracker":"jira","github_account":"gone"}"#).await;
     assert_eq!(status, StatusCode::OK, "a broken saved account does not block the other settings: {body}");
     let (status, body) = put(&w, "/api/workspaces/app", r#"{"issue_tracker":"github"}"#).await;
@@ -2249,7 +2253,7 @@ async fn a_workspace_github_account_reaches_sessions_and_watchers_and_a_missing_
     assert!(!fs::read_to_string(w.ws.join("workspace.toml")).unwrap().contains("github\""), "nothing was written");
     fs::write(w.ws.join("workspace.toml"), "[[watch]]\nevery = \"1m\"\ncommand = \"token-probe\"\n").unwrap();
     settle(&w).await;
-    assert!(!get(&w, "/api/workspaces").await.contains("account_error"));
+    assert!(!state(&w, "workspaces").await.contains("account_error"));
     assert_eq!(fs::read_to_string(&probe).unwrap().lines().last(), Some("token="), "without an account gh's own applies");
 }
 
@@ -2275,7 +2279,7 @@ async fn a_bkt_context_is_checked_against_bkt() {
     // Clearing an already-saved context does not probe.
     let (status, _) = put(&w, "/api/workspaces/app", r#"{"bkt_context":""}"#).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(!get(&w, "/api/workspaces").await.contains("bkt_context"));
+    assert!(!state(&w, "workspaces").await.contains("bkt_context"));
 }
 
 fn stub_logs(w: &World) -> Vec<String> {
@@ -2320,9 +2324,9 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
         assert!(command.contains("workitem-plan-note' --status working"), "{event} sets the record back to working, also after an approved permission prompt: {settings}");
     }
 
-    let plans = get(&w, "/api/plans").await;
+    let plans = state(&w, "plans").await;
     assert!(plans.contains(r#""status":"working""#) && plans.contains(r#""live":true"#), "{plans}");
-    assert!(get(&w, "/api/sessions").await == "[]", "plan sessions are not create sessions");
+    assert!(state(&w, "sessions").await == "[]", "plan sessions are not create sessions");
 
     // The agent saves a plan; the detail endpoint returns it apart from the prompt.
     fs::write(&record, format!("{text}\n## Plan\n\n1. Do it\n")).unwrap();
@@ -2351,7 +2355,7 @@ async fn a_plan_runs_in_the_workspace_ends_with_its_session_resumes_and_is_delet
     assert_eq!(router(w.state.clone()).oneshot(request).await.unwrap().status(), StatusCode::NO_CONTENT);
     assert!(!record.exists());
     assert!(!w.tmux.has(&session));
-    assert_eq!(get(&w, "/api/plans").await, "[]");
+    assert_eq!(state(&w, "plans").await, "[]");
 }
 
 #[tokio::test]
@@ -2422,7 +2426,7 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(post(&w, "/api/workspaces", r#"{"name":"web"}"#).await.0, StatusCode::BAD_REQUEST, "taken");
     assert_eq!(post(&w, "/api/workspaces", r#"{"name":"../x"}"#).await.0, StatusCode::BAD_REQUEST);
-    let listed = get(&w, "/api/workspaces").await;
+    let listed = state(&w, "workspaces").await;
     assert!(listed.contains(r#""name":"app""#) && listed.contains(r#""name":"web""#), "{listed}");
 
     let repo = serde_json::to_string(&w.repo.display().to_string()).unwrap();
@@ -2430,7 +2434,7 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     assert_eq!(post(&w, "/api/workspaces/app/boards", &format!(r#"{{"name":"ui","repo":{repo}}}"#)).await.0, StatusCode::BAD_REQUEST, "taken");
     assert_eq!(post(&w, "/api/workspaces/app/boards", r#"{"name":"x","repo":"/no/such/repo"}"#).await.0, StatusCode::BAD_REQUEST);
-    let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let boards: serde_json::Value = serde_json::from_str(&state(&w, "pipelines").await).unwrap();
     let ui = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "ui").unwrap().clone();
     assert_eq!(ui["pipeline"]["entry"], "analyze", "a copy of the bundled board");
     assert_eq!(ui["pipeline"]["repo"], w.repo.display().to_string());
@@ -2443,7 +2447,7 @@ async fn workspaces_and_boards_are_added_from_the_ui_and_depends_on_names_items_
     assert!(body.contains("T-99-gone"), "{body}");
     assert_eq!(post(&w, "/api/workitems/app/T-71-ui/frontmatter", &edit("T-71-ui")).await.0, StatusCode::BAD_REQUEST, "not itself");
     assert_eq!(post(&w, "/api/workitems/app/T-71-ui/frontmatter", &edit("T-70-api")).await.0, StatusCode::NO_CONTENT, "added although the key was missing");
-    let items: serde_json::Value = serde_json::from_str(&get(&w, "/api/workitems").await).unwrap();
+    let items: serde_json::Value = serde_json::from_str(&state(&w, "items").await).unwrap();
     let ui_item = items.as_array().unwrap().iter().find(|i| i["dir"] == "T-71-ui").unwrap();
     assert_eq!((&ui_item["workspace"], &ui_item["depends_on"]), (&serde_json::json!("app"), &serde_json::json!(["T-70-api"])));
 }
@@ -2455,7 +2459,7 @@ async fn board_settings_are_edited_from_the_ui_and_checked_before_the_file_is_wr
     let settings = r#"{"label":"Backend","entry":"analyze","order":["created desc"],"issue_project":"MNT","reviewers":"acme/web"}"#;
     let (status, body) = put(&w, "/api/workspaces/app/boards/default", settings).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
-    let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let boards: serde_json::Value = serde_json::from_str(&state(&w, "pipelines").await).unwrap();
     let board = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "default").unwrap()["pipeline"].clone();
     assert_eq!((&board["label"], &board["entry"], &board["order"]), (&serde_json::json!("Backend"), &serde_json::json!("analyze"), &serde_json::json!(["created desc"])));
     assert_eq!((&board["issue_project"], &board["reviewers"]), (&serde_json::json!("MNT"), &serde_json::json!("acme/web")));
