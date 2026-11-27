@@ -265,6 +265,19 @@ fn write_mcp_file(state: &AppState, name: &str, text: &str) -> Result<PathBuf, S
 
 /// A workspace, plan or repo-less item session starts outside every repo, so Claude Code would not read the repos'
 /// `CLAUDE.md` files; this makes it read them from the `--add-dir` folders too.
+/// The vars the launcher sets on some sessions; a session that does not set one gets it unset.
+const OWN_VARS: [&str; 9] = [
+    "WORKITEM",
+    "WORKITEM_FILE",
+    "WORKITEM_REPO",
+    "WORKITEM_WORKTREE",
+    "WORKITEM_CREATE",
+    "WORKITEM_PLAN",
+    "WORKITEM_MCP",
+    "OPENCODE_CONFIG_CONTENT",
+    "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
+];
+
 const CLAUDE_MD_OF_ADDED_DIRS: &str = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1";
 
 /// `--add-dir` with every folder, or nothing. It takes several values, so `--settings` must
@@ -379,6 +392,12 @@ async fn start(state: &AppState, session: &str, workspace: &Workspace, cwd: &Pat
         command.arg("-e").arg(var);
     }
     command.arg("--");
+    // A session also inherits the tmux server's global env, which holds the outer item's vars
+    // when the server was started from an item session (decision 83).
+    command.arg("/usr/bin/env");
+    for var in OWN_VARS.iter().filter(|var| !env.iter().any(|e| e.split_once('=').is_some_and(|(name, _)| name == **var))) {
+        command.args(["-u", var]);
+    }
     let token_file = token.map(|t| write_private(session, "token", &t)).transpose()?;
     let file = match prompt.map(|text| write_private(session, "prompt", text)).transpose() {
         Ok(file) => file,
