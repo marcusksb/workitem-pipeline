@@ -1,10 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMedia } from "./useMedia";
 
-/** A theme the user picked; none picked means the page follows the OS. Kept per browser. */
+/** A theme the user picked; none picked means the page follows the OS. Kept per browser.
+ * index.html applies the stored one before the first paint, with its own copy of the key. */
 export type Theme = "light" | "dark";
 
 const THEME_KEY = "workload.theme";
+
+/** Calls `onChange` when another tab of this browser changes the stored theme. */
+function onOtherTab(onChange: () => void) {
+  const listener = (event: StorageEvent) => {
+    if (event.key === THEME_KEY || event.key === null) onChange();
+  };
+  window.addEventListener("storage", listener);
+  return () => window.removeEventListener("storage", listener);
+}
+
+/** Keeps data-theme in step with a toggle in another tab, on every page (the terminal page too). */
+export function followOtherTabs() {
+  onOtherTab(() => applyTheme(storedTheme()));
+}
 
 export function storedTheme(): Theme | undefined {
   try {
@@ -30,6 +45,7 @@ export function nextTheme(current: Theme | undefined, osDark: boolean): Theme {
 export function useTheme(): { dark: boolean; toggle: () => void } {
   const [theme, setTheme] = useState(storedTheme);
   const osDark = useMedia("(prefers-color-scheme: dark)");
+  useEffect(() => onOtherTab(() => setTheme(storedTheme())), []);
   const toggle = () => {
     const next = nextTheme(theme, osDark);
     setTheme(next);

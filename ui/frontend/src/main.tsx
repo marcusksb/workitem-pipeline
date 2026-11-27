@@ -5,12 +5,11 @@ import "@fontsource-variable/jetbrains-mono";
 import { App, TerminalPage } from "./App";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { installPointerLog } from "./pointerLog";
-import { applyTheme, storedTheme } from "./theme";
+import { followOtherTabs } from "./theme";
 import "./styles.css";
 
 installPointerLog();
-// Before the first render, so the page never paints in the other theme.
-applyTheme(storedTheme());
+followOtherTabs();
 
 const terminal = new URLSearchParams(location.search).get("terminal");
 
