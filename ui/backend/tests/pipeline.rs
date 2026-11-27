@@ -2164,7 +2164,7 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
                 {"name":"gate"},
                 {"name":"lost","handler":"nope","auto":true},
                 {"name":"watched","watch":{"every":"1d","command":"no-such-script"}},
-                {"name":"acting","actions":[{"label":"Merge","script":"pr","args":["merge"]},{"label":"Deploy","script":"no-such-action"},{"label":"Check","skill":"no-such-skill"},{"label":"QA","skill":"my-qa"}]}]"#,
+                {"name":"acting","actions":[{"label":"Merge","script":"pr","args":["merge"],"when":{"pr_state":"open","pr_merge":"mergeable"},"confirm":"Merge it?"},{"label":"Deploy","script":"no-such-action"},{"label":"Check","skill":"no-such-skill"},{"label":"QA","skill":"my-qa"}]}]"#,
         ),
     )
     .unwrap();
@@ -2219,6 +2219,30 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
     assert_eq!(acting.len(), 2, "resolvable actions are no problem: {acting:?}");
     assert!(acting[0].contains("action script 'no-such-action' not found"), "{acting:?}");
     assert!(acting[1].contains("handler 'no-such-skill' not found"), "{acting:?}");
+
+    let acting = source("acting").await;
+    let actions = acting["actions"].as_array().unwrap();
+    let labels: Vec<_> = actions.iter().map(|a| a["label"].as_str().unwrap()).collect();
+    assert_eq!(labels, ["Merge", "Deploy", "Check", "QA"], "board order");
+    assert_eq!(actions[0]["when"], serde_json::json!({"pr_merge": "mergeable", "pr_state": "open"}));
+    assert_eq!(serde_json::to_string(&actions[0]["when"]).unwrap(), r#"{"pr_merge":"mergeable","pr_state":"open"}"#, "sorted by key");
+    assert_eq!(actions[0]["confirm"], "Merge it?");
+    assert_eq!(actions[0]["args"], serde_json::json!(["merge"]));
+    assert_eq!(actions[0]["source"]["name"], "pr");
+    assert!(actions[0]["source"]["path"].as_str().unwrap().ends_with("/pr"), "{}", actions[0]["source"]);
+    assert!(actions[1]["confirm"].is_null() && actions[1]["when"].as_object().unwrap().is_empty());
+    assert_eq!(actions[1]["source"]["error"], problems["acting"][0], "the dialog says what the board says");
+    assert_eq!(actions[2]["source"]["error"], problems["acting"][1]);
+    assert_eq!(actions[3]["source"]["origin"], "board");
+    assert!(actions[3]["source"]["content"].as_str().unwrap().contains("BOARD QA"));
+    assert!(qa["actions"].as_array().unwrap().is_empty());
+
+    let bundled: serde_json::Value = serde_json::from_str(&get(&w, "/api/workspaces/app/boards/default/stages/in_review/source").await).unwrap();
+    let bundled: Vec<_> = bundled["actions"].as_array().unwrap().iter().map(|a| (a["label"].as_str().unwrap(), a["when"].clone(), a["source"]["error"].is_null())).collect();
+    assert_eq!(
+        bundled,
+        [("Rebase onto base", serde_json::json!({"pr_state": "open"}), true), ("Merge PR", serde_json::json!({"pr_merge": "mergeable", "pr_state": "open"}), true)]
+    );
 
     for uri in [
         "/api/workspaces/app/boards/research/stages/nope/source",
