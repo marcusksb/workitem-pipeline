@@ -1,5 +1,5 @@
-/* Tailwind with preflight. Design tokens live here: raw values on :root (light)
-   and under prefers-color-scheme (dark), exposed to utilities through
+/* Tailwind with preflight. Design tokens live here: raw values on :root, one
+   light-dark() pair each, exposed to utilities through
    @theme inline (bg-primary, text-muted-foreground, bg-stage-done, ...).
    Components style themselves with utilities; the only rules left below are
    the page basics, the detail panel's slide, the terminal around xterm and
@@ -61,87 +61,52 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Each token is light-dark(light, dark): color-scheme picks the side. It follows
+   the OS, unless the top bar's toggle set data-theme on <html> (theme.ts). */
 :root {
-  --radius: 0.5rem;
-  --background: #fbfbfc;
-  --foreground: #18181b;
-  --card: #ffffff;
-  --popover: #ffffff;
-  --primary: #5e6ad2;
-  --primary-foreground: #ffffff;
-  --secondary: #f4f4f5;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
-  --accent: #f4f4f5;
-  --destructive: #b91c1c;
-  --destructive-foreground: #ffffff;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #5e6ad2;
-  /* Status: agent_status, the gate, a merged PR. */
-  --working: #b45309;
-  --blocked: #b91c1c;
-  --waiting: #eab308;
-  --gate: #1d4ed8;
-  --merged: #6d28d9;
-  --good: #15803d;
-  /* Stage tints, by the stage's role on the bundled board. */
-  --stage-backlog: #b45309;
-  --stage-analyze: #7c3aed;
-  --stage-ready: #2563eb;
-  --stage-development: #db2777;
-  --stage-review: #ea580c;
-  --stage-done: #16a34a;
-  /* Board icons, picked by a hash of the board name (boardColor); no red, that means blocked. */
-  --board-1: #5e6ad2;
-  --board-2: #64748b;
-  --board-3: #d97706;
-  --board-4: #db2777;
-  --board-5: #0891b2;
-  --board-6: #16a34a;
-  --board-7: #7c3aed;
-  --board-8: #ea580c;
   color-scheme: light dark;
+  --radius: 0.5rem;
+  --background: light-dark(#fbfbfc, #111113);
+  --foreground: light-dark(#18181b, #e4e4e7);
+  --card: light-dark(#ffffff, #1a1a1d);
+  --popover: light-dark(#ffffff, #1f1f23);
+  --primary: light-dark(#5e6ad2, #8f98f0);
+  --primary-foreground: light-dark(#ffffff, #111113);
+  --secondary: light-dark(#f4f4f5, #27272a);
+  --muted: light-dark(#f4f4f5, #27272a);
+  --muted-foreground: light-dark(#71717a, #a1a1aa);
+  --accent: light-dark(#f4f4f5, #27272a);
+  --destructive: light-dark(#b91c1c, #f87171);
+  --destructive-foreground: light-dark(#ffffff, #111113);
+  --border: light-dark(#e4e4e7, #2e2e33);
+  --input: light-dark(#e4e4e7, #3f3f46);
+  --ring: light-dark(#5e6ad2, #8f98f0);
+  /* Status: agent_status, the gate, a merged PR. */
+  --working: light-dark(#b45309, #fbbf24);
+  --blocked: light-dark(#b91c1c, #f87171);
+  --waiting: light-dark(#eab308, #facc15);
+  --gate: light-dark(#1d4ed8, #60a5fa);
+  --merged: light-dark(#6d28d9, #a78bfa);
+  --good: light-dark(#15803d, #4ade80);
+  /* Stage tints, by the stage's role on the bundled board. */
+  --stage-backlog: light-dark(#b45309, #fbbf24);
+  --stage-analyze: light-dark(#7c3aed, #c4b5fd);
+  --stage-ready: light-dark(#2563eb, #93c5fd);
+  --stage-development: light-dark(#db2777, #f9a8d4);
+  --stage-review: light-dark(#ea580c, #fdba74);
+  --stage-done: light-dark(#16a34a, #86efac);
+  /* Board icons, picked by a hash of the board name (boardColor); no red, that means blocked. */
+  --board-1: light-dark(#5e6ad2, #8f98f0);
+  --board-2: light-dark(#64748b, #94a3b8);
+  --board-3: light-dark(#d97706, #fbbf24);
+  --board-4: light-dark(#db2777, #f472b6);
+  --board-5: light-dark(#0891b2, #22d3ee);
+  --board-6: light-dark(#16a34a, #4ade80);
+  --board-7: light-dark(#7c3aed, #a78bfa);
+  --board-8: light-dark(#ea580c, #fb923c);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #111113;
-    --foreground: #e4e4e7;
-    --card: #1a1a1d;
-    --popover: #1f1f23;
-    --primary: #8f98f0;
-    --primary-foreground: #111113;
-    --secondary: #27272a;
-    --muted: #27272a;
-    --muted-foreground: #a1a1aa;
-    --accent: #27272a;
-    --destructive: #f87171;
-    --destructive-foreground: #111113;
-    --border: #2e2e33;
-    --input: #3f3f46;
-    --ring: #8f98f0;
-    --working: #fbbf24;
-    --blocked: #f87171;
-    --waiting: #facc15;
-    --gate: #60a5fa;
-    --merged: #a78bfa;
-    --good: #4ade80;
-    --stage-backlog: #fbbf24;
-    --stage-analyze: #c4b5fd;
-    --stage-ready: #93c5fd;
-    --stage-development: #f9a8d4;
-    --stage-review: #fdba74;
-    --stage-done: #86efac;
-    --board-1: #8f98f0;
-    --board-2: #94a3b8;
-    --board-3: #fbbf24;
-    --board-4: #f472b6;
-    --board-5: #22d3ee;
-    --board-6: #4ade80;
-    --board-7: #a78bfa;
-    --board-8: #fb923c;
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 @layer base {
   body { background: var(--background); color: var(--foreground); font: 16px/1.4 var(--font-sans); }

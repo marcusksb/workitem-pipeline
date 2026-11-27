@@ -1,4 +1,4 @@
-import { ReactNode, useRef, useState, useSyncExternalStore } from "react";
+import { ReactNode, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -7,6 +7,7 @@ import { blockedByBoard, boardColors, boardLabel, boardNames, itemsByBoard } fro
 import { IconBoard, IconBook, IconChevronDown, IconEye, IconPanelLeft, IconPointer, IconPlus, IconSliders } from "./icons";
 import { Learnings } from "./Learnings";
 import { Item, Pipelines, Workspace } from "./types";
+import { useMedia } from "./useMedia";
 import { AddBoardDialog, AddWorkspaceDialog, agentLabel, SettingsDialog, trackerName, WatchersDialog } from "./Workspaces";
 
 /** A full-width row of the sidebar; only its icon in the rail. */
@@ -40,17 +41,6 @@ function saveHover(hover: boolean) {
     localStorage.setItem(HOVER_KEY, hover ? "1" : "0");
   } catch {
   }
-}
-
-function useMedia(query: string): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const list = matchMedia(query);
-      list.addEventListener("change", onChange);
-      return () => list.removeEventListener("change", onChange);
-    },
-    () => matchMedia(query).matches,
-  );
 }
 
 
