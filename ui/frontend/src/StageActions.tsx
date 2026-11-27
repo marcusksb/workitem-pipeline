@@ -10,7 +10,12 @@ export function StageActionBar({ item, runner: { busy, message, error, run } }: 
   return (
     <div className="flex flex-wrap items-center gap-2 text-[15px]">
       {item.actions.map((action) => (
-        <Button key={action.id} disabled={busy} onClick={() => run(action.label, () => api.runAction(item, action.id), action.confirm ?? undefined)}>
+        <Button
+          key={action.id}
+          disabled={busy || (action.starts_session && item.session)}
+          title={action.starts_session && item.session ? "The agent is already running" : undefined}
+          onClick={() => run(action.label, () => api.runAction(item, action.id), action.confirm ?? undefined)}
+        >
           {action.label}
         </Button>
       ))}

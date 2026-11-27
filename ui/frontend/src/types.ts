@@ -1,8 +1,9 @@
 /** A column where a human decides: approving moves the item to `approve_to`, rejecting to `reject_to`. */
 export type Gate = { label: string; approve_to: string; reject_to: string };
 
-/** A button the item's stage offers it now (decision 84); `id` is what `api.runAction` sends. */
-export type StageAction = { id: string; label: string; confirm: string | null };
+/** A button the item's stage offers it now (decision 84); `id` is what `api.runAction` sends.
+ * `starts_session`: it runs a skill as the item's session, so it cannot start while one runs. */
+export type StageAction = { id: string; label: string; confirm: string | null; starts_session: boolean };
 
 export type StageConfig = {
   name: string;

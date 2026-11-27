@@ -311,12 +311,14 @@ pub struct Roles {
     actions: Vec<ActionView>,
 }
 
-/// A stage action as a button: `POST .../action/{id}` runs it.
+/// A stage action as a button: `POST .../action/{id}` runs it. `starts_session`: a `skill`
+/// action, refused while the item has a session, so the panel disables it then.
 #[derive(Serialize)]
 pub struct ActionView {
     id: String,
     label: String,
     confirm: Option<String>,
+    starts_session: bool,
 }
 
 fn roles_of(board: Option<&Pipeline>, item: &Workitem) -> Roles {
@@ -327,7 +329,7 @@ fn roles_of(board: Option<&Pipeline>, item: &Workitem) -> Roles {
         .actions
         .iter()
         .filter(|a| a.matches(&item.fields))
-        .map(|a| ActionView { id: a.label.clone(), label: a.label.clone(), confirm: a.confirm.clone() })
+        .map(|a| ActionView { id: a.label.clone(), label: a.label.clone(), confirm: a.confirm.clone(), starts_session: a.skill.is_some() })
         .collect();
     Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops(), actions }
 }

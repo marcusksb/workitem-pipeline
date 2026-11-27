@@ -1062,6 +1062,7 @@ async fn a_skill_action_starts_the_item_session_with_that_skill() {
     fs::write(w.ws.join("boards/default.json"), board(&w, stages)).unwrap();
     write_skill(&w.ws.join("skills"), "my-check", "CHECK STEPS\n");
     write_item(&w.ws, "T-41-qa", "qa", "");
+    assert_eq!(actions_of(&w, "T-41-qa").await[0]["starts_session"], true, "the panel disables it while a session runs");
 
     let (status, body) = post(&w, "/api/workitems/app/T-41-qa/action/Check", "").await;
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");

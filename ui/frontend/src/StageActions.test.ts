@@ -12,8 +12,8 @@ const buttons = (bar: ReactElement) => ((bar.props as Props).children as unknown
 
 describe("stage actions", () => {
   const actions = [
-    { id: "Rebase onto base", label: "Rebase onto base", confirm: null },
-    { id: "Merge PR", label: "Merge PR", confirm: "Squash-merge the PR?" },
+    { id: "Rebase onto base", label: "Rebase onto base", confirm: null, starts_session: false },
+    { id: "Merge PR", label: "Merge PR", confirm: "Squash-merge the PR?", starts_session: false },
   ];
   const runner = (over = {}) => ({ busy: false, message: undefined, error: undefined, run: vi.fn(), ...over });
 
@@ -36,5 +36,12 @@ describe("stage actions", () => {
 
   it("disables the buttons while one runs", () => {
     expect(buttons(StageActionBar({ item: item({ actions }), runner: runner({ busy: true }) })).every((b) => b.props.disabled)).toBe(true);
+  });
+
+  it("disables only a session-starting action while the item has a session", () => {
+    const withSkill = [...actions, { id: "Check", label: "Check", confirm: null, starts_session: true }];
+    const disabled = (session: boolean) => buttons(StageActionBar({ item: item({ actions: withSkill, session }), runner: runner() })).map((b) => b.props.disabled);
+    expect(disabled(true)).toEqual([false, false, true]);
+    expect(disabled(false)).toEqual([false, false, false]);
   });
 });
