@@ -144,6 +144,19 @@ function Main({ onUnauthorized }: { onUnauthorized: () => void }) {
     ? (plans ?? []).find((p) => p.workspace === route.plan!.workspace && p.id === route.plan!.id) ?? null
     : null;
   const detailOpen = !!(selected || selectedPlan);
+  // Escape closes the panel like a click on the background, except where it is real input: the
+  // terminal's Escape belongs to the agent, and an open dialog, menu or select closes on its own.
+  useEffect(() => {
+    if (!detailOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      const target = event.target instanceof Element ? event.target : document.activeElement;
+      if (target?.closest(".terminal, select, [role=dialog], [role=menu], [role=listbox]")) return;
+      navigate({});
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [detailOpen, route, workspace]);
   const itemPanel = useLeaving(selected);
   const planPanel = useLeaving(selectedPlan);
   const shown = (items ?? []).filter((item) => item.workspace === workspace);

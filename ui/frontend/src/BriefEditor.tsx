@@ -31,7 +31,15 @@ export function BriefEditor({ item, base, onClose }: Props) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-4">
+    <div
+      className="flex min-h-0 flex-1 flex-col pb-4"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        // Escape cancels the edit (asking before discarding) instead of closing the panel.
+        e.stopPropagation();
+        cancel();
+      }}
+    >
       <ActionBar>
         <Button variant="primary" disabled={busy || text === base} onClick={() => void save()}>
           <IconCheck />

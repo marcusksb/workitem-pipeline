@@ -57,7 +57,15 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
   };
 
   return (
-    <>
+    <div
+      className="contents"
+      onKeyDown={(e) => {
+        // Escape drops the draft (the Cancel path) instead of closing the panel.
+        if (e.key !== "Escape" || !draft) return;
+        e.stopPropagation();
+        close();
+      }}
+    >
       <ActionBar>
         {draft ? (
           <>
@@ -98,6 +106,6 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
           </div>
         ))}
       </dl>
-    </>
+    </div>
   );
 }
