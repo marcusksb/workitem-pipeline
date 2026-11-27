@@ -307,13 +307,19 @@ export type Tone = "good" | "bad" | "wait" | "merged" | "gate" | "idle";
 /** In a gate stage and not approved yet. */
 export const needsApproval = (item: Pick<Item, "gate" | "approved">) => !!item.gate && !item.approved;
 
-/** What the agent is doing, for the card's status line: blocked, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say. */
-export function agentLine(item: Pick<Item, "agent_status" | "gate" | "approved">): { label: string; tone: Tone } | undefined {
+/**
+ * What the agent is doing, for the card's status line: blocked, waiting (for what) or a gate that waits for a human; undefined when there is nothing to say.
+ * Waiting on CI (the reason starts with the word `CI`) is shown as the spinning CI icon (`ci: true`), and not at all while the PR's own CI icon spins (decision 86).
+ */
+export function agentLine(item: Pick<Item, "agent_status" | "gate" | "approved" | "review">): { label: string; tone: Tone; ci?: true } | undefined {
   const status = item.agent_status;
   if (status.startsWith("blocked")) return { label: "Blocked", tone: "bad" };
   if (status.startsWith("waiting")) {
     const what = status.replace(/^waiting:?\s*/, "");
-    return { label: what ? `Waiting · ${what}` : "Waiting", tone: "idle" };
+    const label = what ? `Waiting · ${what}` : "Waiting";
+    if (!/^ci\b/i.test(what)) return { label, tone: "idle" };
+    if (item.review?.state === "open" && item.review.ci === "pending") return undefined;
+    return { label, tone: "wait", ci: true };
   }
   if (needsApproval(item)) return { label: "Needs approval", tone: "gate" };
 }
