@@ -56,6 +56,8 @@ type Props = {
   /** Shows a board of the item's workspace, keeping the item open. */
   onBoard: (board: string) => void;
   onClose: () => void;
+  /** Whether the open brief or Info edit has unsaved changes; App asks before Escape closes the panel. */
+  onEditingChange: (dirty: boolean) => void;
   onUnauthorized: () => void;
 };
 
@@ -131,7 +133,7 @@ function Properties({ item, pipelines, onBoard, children }: { item: Item; pipeli
   );
 }
 
-export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, onTab, onBoard, onClose, onUnauthorized }: Props) {
+export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, onTab, onBoard, onClose, onEditingChange, onUnauthorized }: Props) {
   const key = `${item.workspace}/${item.dir}`;
   const {
     data: detail,
@@ -295,6 +297,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
               <BriefEditor
                 item={live}
                 base={editing}
+                onDirtyChange={onEditingChange}
                 onClose={(saved) => {
                   setEditing(undefined);
                   if (saved) void reload();
@@ -319,7 +322,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
             )}
           </TabsContent>
           <TabsContent value="info" className={scroll}>
-            {detail ? <Info item={live} content={detail.content} onSaved={() => void reload()} /> : <Muted>Loading…</Muted>}
+            {detail ? <Info item={live} content={detail.content} onSaved={() => void reload()} onDirtyChange={onEditingChange} /> : <Muted>Loading…</Muted>}
           </TabsContent>
           <TabsContent value="files" className="flex min-h-0 flex-col">
             <Files item={live} onUnauthorized={onUnauthorized} />

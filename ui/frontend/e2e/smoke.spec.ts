@@ -199,6 +199,11 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await page.goto(`${base.split("#")[0]}#demo/T-1-demo/terminal`);
   await expect(page.locator(".detail .xterm-rows")).toBeVisible();
 
+  // Escape belongs to the agent while the terminal has focus, so the item stays open.
+  await page.locator(".detail .xterm").click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".detail")).toHaveCount(1);
+
   // A dialog opened from the board renders outside it, but a click in it does not close the item.
   await page.getByRole("button", { name: "analyze settings" }).click();
   const source = page.getByRole("dialog", { name: "analyze: stage" });
@@ -216,6 +221,44 @@ test("deep links and history navigate items and tabs", async ({ page }) => {
   await expect(page.locator(".detail")).toHaveCount(1);
   await page.locator("nav").first().click({ position: { x: 2, y: 2 } });
   await expect(page.locator(".detail")).toHaveCount(0);
+
+  // Escape closes the item like a background click, once the terminal no longer has focus.
+  await page.locator(".card").first().click();
+  await expect(page.locator(".detail")).toHaveCount(1);
+  await page.locator(".detail h2").click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".detail")).toHaveCount(0);
+
+  // In the brief editor it cancels the edit first: with no changes it just leaves the editor.
+  await page.locator(".card").first().click();
+  await page.getByRole("tab", { name: "Brief", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.locator(".detail textarea")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".detail textarea")).toHaveCount(0);
+  await expect(page.locator(".detail")).toHaveCount(1);
+
+  // A changed brief asks before Escape from outside the editor closes the panel and drops it.
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.locator(".detail textarea").fill("A change");
+  await page.locator(".detail h2").click();
+  let asked = "";
+  page.once("dialog", (dialog) => {
+    asked = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.keyboard.press("Escape");
+  expect(asked).toContain("Discard");
+  await expect(page.locator(".detail")).toHaveCount(1);
+
+  // The Info draft asks the same way once a field changed.
+  await page.getByRole("tab", { name: "Info", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.locator(".detail input").first().fill("changed");
+  page.once("dialog", (dialog) => void dialog.dismiss());
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".detail input").first()).toBeVisible();
+  await expect(page.locator(".detail")).toHaveCount(1);
 });
 
 test("a workspace's boards are tabs in the sidebar and the chosen board stays in the URL", async ({ page }) => {

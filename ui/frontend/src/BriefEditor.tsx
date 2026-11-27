@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Item } from "./types";
 import { IconCheck, IconX } from "./icons";
@@ -6,14 +6,19 @@ import { ActionBar } from "./parts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 
-type Props = { item: Item; base: string; onClose: (saved: boolean) => void };
+type Props = { item: Item; base: string; onClose: (saved: boolean) => void; onDirtyChange: (dirty: boolean) => void };
 
 /** Edits the markdown after the frontmatter. `base` is the body it started from; the backend
  * refuses the save if the file changed since, so an agent's edit is never overwritten. */
-export function BriefEditor({ item, base, onClose }: Props) {
+export function BriefEditor({ item, base, onClose, onDirtyChange }: Props) {
   const [text, setText] = useState(base);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  useEffect(() => {
+    onDirtyChange(text !== base);
+  }, [text, base, onDirtyChange]);
+  // The editor may go away while App still thinks it is dirty.
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const save = async () => {
     setBusy(true);
@@ -31,7 +36,16 @@ export function BriefEditor({ item, base, onClose }: Props) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-4">
+    <div
+      className="flex min-h-0 flex-1 flex-col pb-4"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing) return;
+        // Escape cancels the edit (asking before discarding) instead of closing the panel.
+        e.stopPropagation();
+        // A save is not interruptible, like the disabled Cancel button; the outcome is the saved brief.
+        if (!busy) cancel();
+      }}
+    >
       <ActionBar>
         <Button variant="primary" disabled={busy || text === base} onClick={() => void save()}>
           <IconCheck />
