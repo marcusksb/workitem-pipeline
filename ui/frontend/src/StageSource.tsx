@@ -45,9 +45,10 @@ function Action({ action }: { action: ActionSource }) {
   const when = Object.entries(action.when);
   return (
     <section className="grid gap-1.5" aria-label={action.label}>
+      <strong className="text-[15px]">{action.label}</strong>
       <p className="flex flex-wrap items-center gap-2">
-        <strong className="text-[15px]">{action.label}</strong>
-        {when.length ? when.map(([key, value]) => <Badge key={key} className="font-mono">{`${key}: ${value}`}</Badge>) : <span className="text-muted-foreground">always shown</span>}
+        <span className="text-muted-foreground">Shown when</span>
+        {when.length ? when.map(([key, value]) => <Badge key={key} className="font-mono">{`${key}: ${value}`}</Badge>) : <span>always</span>}
       </p>
       {action.confirm && <Muted>Asks first: {action.confirm}</Muted>}
       {action.args.length > 0 && (
