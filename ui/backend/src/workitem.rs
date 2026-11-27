@@ -225,7 +225,7 @@ mod tests {
     use super::*;
 
     fn workspace(dir: &std::path::Path) -> Workspace {
-        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None, issue_tracker: "jira".into(), github_account: None, watch: vec![], error: None }
+        Workspace { name: "app".into(), dir: dir.to_path_buf(), agent: None, issue_tracker: "jira".into(), github_account: None, bkt_context: None, watch: vec![], error: None }
     }
 
     #[test]

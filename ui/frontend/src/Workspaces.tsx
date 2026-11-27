@@ -92,6 +92,7 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
   const [editingDefault, setEditingDefault] = useState(false);
   const [tracker, setTracker] = useState(workspace.issue_tracker);
   const [account, setAccount] = useState(workspace.github_account ?? "");
+  const [context, setContext] = useState(workspace.bkt_context ?? "");
   const [error, setError] = useState<string>();
   useEffect(() => {
     if (!editingDefault) api.agentSettings().then(setSettings, (e) => setError(message(e)));
@@ -99,7 +100,7 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
   const save = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await api.updateWorkspace(workspace.name, { agent: agentOf(kind, command), issue_tracker: tracker, github_account: account });
+      await api.updateWorkspace(workspace.name, { agent: agentOf(kind, command), issue_tracker: tracker, github_account: account, bkt_context: context });
       onSaved();
     } catch (e) {
       setError(message(e));
@@ -131,6 +132,13 @@ export function SettingsDialog({ workspace, onClose, onSaved }: { workspace: Wor
         <Muted>
           A login gh is signed in to (gh auth login). Its token goes to this workspace's sessions, watchers and PR actions. Empty uses
           gh's active account.
+        </Muted>
+        <Field label="bkt context">
+          <Input value={context} onChange={(e) => setContext(e.target.value)} placeholder="bkt's active context" />
+        </Field>
+        <Muted>
+          The bkt context (from <code>bkt context create</code>) this workspace's Bitbucket calls run with, checked against bkt when
+          saved. Empty uses bkt's active context; only for boards whose PRs live on Bitbucket.
         </Muted>
         <Button type="submit" variant="primary">
           Save

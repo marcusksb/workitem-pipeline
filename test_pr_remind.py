@@ -192,5 +192,132 @@ class ReminderTest(unittest.TestCase):
         self.assertIn("skip, active", self.run_script("--dry-run", now=at("Thu 2026-11-05 12:00")))
 
 
+BKT_STUB = """#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["STUB_BKT_CALLS"], "a") as f:
+    f.write(json.dumps(args) + "\\n")
+data = json.load(open(os.environ["STUB_BKT"]))
+if args[:2] == ["pr", "view"]:
+    print(json.dumps(data["view"]))
+elif args[:2] == ["pr", "comment"]:
+    if data.get("post_fails"):
+        print("HTTP 502", file=sys.stderr)
+        sys.exit(1)
+"""
+
+
+def bb_view(reviewers=(), participants=()):
+    """`bkt pr view --json`: the PR under pull_request, next to workspace and repo."""
+    return {"workspace": "ws", "repo": "slug", "pull_request": {"participants": list(participants),
+                                                               "reviewers": list(reviewers)}}
+
+
+def bb_user(uuid, nickname, account_id=None):
+    return {"uuid": uuid, "nickname": nickname, "account_id": account_id}
+
+
+def bb_reviewer(uuid, nickname, account_id=None):
+    return {"user": bb_user(uuid, nickname, account_id)}
+
+
+class BitbucketReminderTest(unittest.TestCase):
+    """The whole script against a stub bkt, with an injected clock."""
+
+    NOW = at("Fri 2026-11-06 12:00")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = self.tmp.name
+        self.bkt = os.path.join(root, "bkt")
+        with open(self.bkt, "w") as f:
+            f.write(BKT_STUB)
+        os.chmod(self.bkt, os.stat(self.bkt).st_mode | stat.S_IEXEC)
+        self.stub = os.path.join(root, "stub.json")
+        self.calls_path = os.path.join(root, "bkt.calls")
+        self.path = os.path.join(root, "item", "workitem.md")
+        os.makedirs(os.path.dirname(self.path))
+        facts = "".join(f"{k}: {v}\n" for k, v in READY.items())
+        with open(self.path, "w") as f:
+            f.write(f"---\ntitle: t\nstage: in_review\npr: https://bitbucket.org/ws/slug/pull-requests/1\n"
+                    f"agent_status: ok\n{facts}---\n\n# body\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def stub_bkt(self, view, post_fails=False):
+        with open(self.stub, "w") as f:
+            json.dump({"view": view, "post_fails": post_fails}, f)
+
+    def run_script(self, *argv, now=NOW, link="https://bitbucket.org/ws/slug/pull-requests/1"):
+        env = {"WORKITEM_BKT": self.bkt, "WORKITEM_DIR_ROOT": self.tmp.name, "STUB_BKT": self.stub,
+               "STUB_BKT_CALLS": self.calls_path}
+        items = json.dumps([{"dir": "item", "pr": link},
+                            {"dir": "other", "pr": ""}])
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), mock.patch("sys.stdin", io.StringIO(items)), redirect_stdout(out):
+            pr.main(list(argv), now=now)
+        return out.getvalue()
+
+    def calls(self):
+        if not os.path.exists(self.calls_path):
+            return []
+        with open(self.calls_path) as f:
+            return [json.loads(line) for line in f]
+
+    def fields(self):
+        return pr.read_fields(self.path)
+
+    def text(self):
+        with open(self.path) as f:
+            return f.read()
+
+    def test_mentions_the_pending_reviewers_and_posts_once(self):
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice", account_id="aid-alice"), bb_reviewer("u2", "bob", account_id="aid-bob")],
+                              participants=[{"user": bb_user("u2", "bob", account_id="aid-bob"), "approved": True}]))
+        self.run_script()
+        self.assertIn("pr view", " ".join(self.calls()[0]), "the reviewers come from bkt pr view")
+        posts = [c for c in self.calls() if c[:2] == ["pr", "comment"]]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0][-1], pr.comment_of(["@{aid-alice}"]), "the mention carries the account id")
+        self.assertEqual(self.fields()["pr_reminded_at"], "2026-11-06T11:00:00.000Z")
+        self.run_script(now=at("Mon 2026-11-09 12:00"))
+        self.assertEqual(len([c for c in self.calls() if c[:2] == ["pr", "comment"]]), 1,
+                         "no second reminder without new activity")
+
+    def test_nobody_to_mention_blocks_the_item_once(self):
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")],
+                              participants=[{"user": bb_user("u1", "alice"), "approved": True}]))
+        self.run_script()
+        f = self.fields()
+        self.assertEqual(f["agent_status"], "blocked: PR #1 is ready but has no reviewer to remind")
+        self.assertIn("pr_reminded_at", f)
+        self.assertFalse(any(c[:2] == ["pr", "comment"] for c in self.calls()))
+
+    def test_a_suffix_link_reports_the_pr_number(self):
+        self.stub_bkt(bb_view())
+        self.run_script(link="https://bitbucket.org/ws/slug/pull-requests/1/diff")
+        f = self.fields()
+        self.assertEqual(f["agent_status"], "blocked: PR #1 is ready but has no reviewer to remind",
+                         "the number comes from bb_parts, not the last path segment")
+
+    def test_a_failed_post_is_retried_on_the_next_run(self):
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]), post_fails=True)
+        self.run_script()
+        self.assertNotIn("pr_reminded_at", self.fields())
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]))
+        self.run_script()
+        self.assertIn("pr_reminded_at", self.fields())
+
+    def test_dry_run_prints_and_writes_nothing(self):
+        self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice", account_id="aid-alice")]))
+        before = self.text()
+        out = self.run_script("--dry-run")
+        self.assertIn("would post on PR #1", out)
+        self.assertIn("@{aid-alice} friendly nudge", out)
+        self.assertEqual(self.text(), before)
+        self.assertFalse(any(c[:2] == ["pr", "comment"] for c in self.calls()))
+
+
 if __name__ == "__main__":
     unittest.main()

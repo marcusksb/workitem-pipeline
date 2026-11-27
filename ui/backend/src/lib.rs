@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod api;
 pub mod auth;
+pub mod bkt;
 pub mod config;
 pub mod dispatch;
 pub mod files;
@@ -55,6 +56,8 @@ pub struct AppState {
     pub account_errors: std::sync::Mutex<HashMap<String, String>>,
     /// GitHub tokens by login, with when gh gave them (`github.rs`).
     pub tokens: std::sync::Mutex<HashMap<String, (std::time::Instant, String)>>,
+    /// Where the `bkt` binary is; Bitbucket Cloud runs through it (`watch.rs`, `review.rs`).
+    pub bkt: String,
 }
 
 impl AppState {
@@ -71,6 +74,7 @@ impl AppState {
             skills_dir: env("WORKITEM_UI_SKILLS").map(PathBuf::from).unwrap_or_else(|| home.join(".claude/skills")),
             claude: env("WORKITEM_UI_CLAUDE").unwrap_or_else(|| "claude".into()),
             gh: env("WORKITEM_UI_GH").unwrap_or_else(|| "gh".into()),
+            bkt: env("WORKITEM_UI_BKT").unwrap_or_else(|| "bkt".into()),
             pipelines: Default::default(),
             busy: Default::default(),
             watching: Default::default(),

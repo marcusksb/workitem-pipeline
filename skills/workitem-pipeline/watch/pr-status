@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
-"""Board watcher: read the PR of every item with gh and write what it found into the item.
+"""Board watcher: read the PR of every item with gh or bkt and write what it found into the item.
 
   pr-status [--ignore dockerized,e2e,playwright]
+
+The host of the `pr:` URL picks the reader: github.com goes through gh GraphQL, bitbucket.org
+through the bkt CLI's Cloud REST (`bkt api`, WORKITEM_BKT and WORKITEM_BKT_CONTEXT override the
+binary and the context). Both readers produce the same node shape, so the facts below mean the
+same on both hosts — except where Cloud has no counterpart: pr_approval is approved | none (Cloud
+has no changes-requested verdict) and every build status counts as required, so pr_ci_required
+equals pr_ci.
 
 For each item on stdin with a PR link whose PR is not already recorded as merged (a closed one
 can be reopened, so it is still read), it writes these frontmatter keys, only when they change:
@@ -31,9 +38,12 @@ ones are unseen. It starts nothing; watch/pr-review reacts to these keys.
 It reads every PR of a repo in one GraphQL query per CHUNK PRs: GitHub charges a query by the
 connections it asks for, not per PR, so a whole board costs about a point a run. Review threads
 are the expensive part (a connection per thread), hence the second query only for moved PRs.
+Bitbucket batches differently: one REST list call per repo for the open PRs, one per head commit
+for its date, one per PR for its build statuses, and the comments only for moved PRs.
 """
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlparse
 
 sys.dont_write_bytecode = True
 # The helpers sit next to workitem-move, which the backend names.
@@ -58,6 +68,12 @@ THREAD_FIELDS = """reviewThreads(first: 100) { nodes { comments(first: 100) { no
 CHUNK = 25
 UNKNOWN_RETRIES = 3
 UNKNOWN_RETRY_WAIT = 2
+# Bitbucket Cloud's REST states, mapped onto the GitHub node's vocabulary. "conflicted" and
+# "not_mergeable" are the only merge states that mean a git conflict; the others are approvals
+# or branch settings, not something a rebase fixes.
+BB_STATES = {"OPEN": "OPEN", "MERGED": "MERGED", "DECLINED": "CLOSED", "SUPERSEDED": "CLOSED"}
+BB_CHECKS = {"SUCCESSFUL": "SUCCESS", "FAILED": "FAILURE", "INPROGRESS": "IN_PROGRESS", "STOPPED": "CANCELLED"}
+BB_CONFLICTS = ("conflicted", "not_mergeable")
 
 
 def check_name(check):
@@ -197,7 +213,7 @@ def graphql(query):
     return body["data"], errors
 
 
-def read_pulls(urls, fields):
+def read_gh_pulls(urls, fields):
     """The `fields` of each PR, CHUNK PRs of a repo per query: ({url: node or error}, my login)."""
     by_repo = {}
     for url in urls:
@@ -226,7 +242,8 @@ def read_open_pulls(urls):
     """GitHub says UNKNOWN while it computes mergeability; asking again a moment later helps."""
     pulls, me = read_pulls(urls, PULL_FIELDS)
     for _ in range(UNKNOWN_RETRIES):
-        computing = [u for u, n in pulls.items() if isinstance(n, dict) and n["state"] == "OPEN" and n["mergeable"] == "UNKNOWN"]
+        computing = [u for u, n in pulls.items() if isinstance(n, dict) and n["state"] == "OPEN"
+                     and n["mergeable"] == "UNKNOWN" and urlparse(u).hostname == "github.com"]
         if not computing:
             break
         time.sleep(UNKNOWN_RETRY_WAIT)
@@ -235,12 +252,238 @@ def read_open_pulls(urls):
     return pulls, me
 
 
+def bb_api(path, params=()):
+    """One bkt api call: the JSON body, or RuntimeError with bkt's message."""
+    args = [os.environ.get("WORKITEM_BKT", "bkt"), "api", path, "--json"]
+    if os.environ.get("WORKITEM_BKT_CONTEXT"):
+        args += ["--context", os.environ["WORKITEM_BKT_CONTEXT"]]
+    args += [arg for key, value in params for arg in ("--param", f"{key}={value}")]
+    result = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"bkt exited with {result.returncode}")
+    try:
+        return json.loads(result.stdout or "{}")
+    except ValueError:
+        raise RuntimeError(result.stderr.strip() or f"bkt printed no JSON for {path}")
+
+
+def bb_parts(url):
+    """(workspace, slug, number) of a bitbucket.org pull-requests link, else None. Any suffix
+    after the number (/diff) is ignored, so a link copied from the browser still works."""
+    if urlparse(url).hostname != "bitbucket.org":
+        return None
+    segments = [s for s in urlparse(url).path.split("/") if s]
+    try:
+        i = segments.index("pull-requests")
+        return segments[i - 2], segments[i - 1], str(int(segments[i + 1]))
+    except (IndexError, ValueError):
+        return None
+
+
+def bb_paged(path, params):
+    """Every value of a paginated Bitbucket list endpoint, following its next links."""
+    values = []
+    while path:
+        data = bb_api(path, params)
+        values += data.get("values") or []
+        next_url = data.get("next") or ""
+        path = urlparse(next_url).path if next_url else ""
+        params = parse_qsl(urlparse(next_url).query) if next_url else []
+    return values
+
+
+def bb_login(user):
+    """A Cloud user's @-handle: the nickname, else the display name."""
+    return (user or {}).get("nickname") or (user or {}).get("display_name") or ""
+
+
+def bb_checks(statuses):
+    """Cloud build statuses as check nodes, each grouped by its name so a re-run replaces the
+    older result. Every status counts as required: Cloud has no per-check required flag, so
+    pr_ci_required equals pr_ci."""
+    checks = []
+    for s in statuses or []:
+        state = s.get("state")
+        checks.append({"name": s.get("name") or s.get("key") or "",
+                       "status": "COMPLETED" if state != "INPROGRESS" else "IN_PROGRESS",
+                       "conclusion": BB_CHECKS.get(state) or ("FAILURE" if state else None),
+                       "startedAt": s.get("created_on") or "", "completedAt": s.get("updated_on") or "",
+                       "isRequired": True,
+                       "checkSuite": {"workflowRun": {"workflow": {"name": s.get("name") or s.get("key") or ""}}}})
+    return checks
+
+
+def bb_node(value, commit_date, checks):
+    """A Cloud pull request as a PULL_FIELDS node: approvals become the reviews (Cloud has no
+    changes-requested verdict), build statuses the checks. A comment-free pull (None) tells
+    updates_of to leave the comment lists alone."""
+    author = ((value.get("author") or {}).get("user") or {}).get("uuid")
+    reviews = []
+    for p in value.get("participants") or []:
+        user = p.get("user") or {}
+        if user.get("uuid") == author or not p.get("approved"):
+            continue
+        reviews.append({"id": f"approval-{user.get('uuid')}", "state": "APPROVED",
+                        "submittedAt": p.get("participated_on") or "", "author": {"__typename": "User", "login": bb_login(user)}})
+    return {
+        "number": value["id"],
+        "state": BB_STATES.get(value.get("state"), value.get("state")),
+        "isDraft": bool(value.get("draft")),
+        "mergeable": "CONFLICTING" if value.get("merge_state") in BB_CONFLICTS else
+                     ("MERGEABLE" if value.get("merge_state") else "UNKNOWN"),
+        "reviewDecision": "APPROVED" if reviews else "",
+        "headRefOid": ((value.get("source") or {}).get("commit") or {}).get("hash") or "",
+        "createdAt": value.get("created_on") or "",
+        "updatedAt": value.get("updated_on") or "",
+        "commits": {"nodes": [{"commit": {"committedDate": commit_date or "",
+                                          "statusCheckRollup": {"contexts": {"nodes": checks}} if checks else None}}]},
+        "comments": None,
+        "reviews": {"nodes": reviews},
+    }
+
+
+def read_bb_pulls(urls):
+    """The PULL_FIELDS of each Bitbucket PR: one list call per repo for the open PRs, one
+    per-PR call for anything the list lacks (merged, declined) or that misses a field the
+    facts need, one per head commit for its date, one per PR for its build statuses.
+    ({url: node or error}, my nickname)."""
+    found, me = {}, None
+    by_repo = {}
+    for url in urls:
+        parts = bb_parts(url)
+        if parts is None:
+            found[url] = RuntimeError(f"{url} is not a bitbucket.org pull-requests link")
+            continue
+        ws, slug, number = parts
+        # One PR can sit behind two links (a query or /diff suffix): both get the same reading.
+        by_repo.setdefault((ws, slug), {}).setdefault(int(number), []).append(url)
+    for (ws, slug), prs in by_repo.items():
+        try:
+            if me is None:
+                me = bb_login(bb_api("/user"))
+            listed = {p["id"]: p for p in bb_paged(f"/repositories/{ws}/{slug}/pullrequests",
+                                                   [("state", "OPEN"), ("pagelen", "50")])}
+        except (RuntimeError, subprocess.TimeoutExpired) as e:
+            found.update({url: e for urls in prs.values() for url in urls})
+            continue
+        values = {}
+        for n, urls_of in prs.items():
+            value = listed.get(n)
+            if value is None or not value.get("participants") or "merge_state" not in value:
+                try:
+                    value = bb_api(f"/repositories/{ws}/{slug}/pullrequests/{n}")
+                except (RuntimeError, subprocess.TimeoutExpired) as e:
+                    found.update({url: e for url in urls_of})
+                    continue
+            values[n] = value
+        open_ns = [n for n, v in values.items() if v.get("state") == "OPEN"]
+        heads = sorted({((values[n].get("source") or {}).get("commit") or {}).get("hash") or ""
+                        for n in open_ns} - {""})
+        dates = {}
+        # One call per head: a `commits?include=` list would page through the repo's whole
+        # history, hundreds of calls on a large repo.
+        for head in heads:
+            try:
+                dates[head] = bb_api(f"/repositories/{ws}/{slug}/commit/{head}").get("date")
+            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                dates[head] = e
+        bad = {head for head, date in dates.items() if isinstance(date, Exception)}
+        for n, urls_of in prs.items():
+            if n not in values:
+                continue
+            head = ((values[n].get("source") or {}).get("commit") or {}).get("hash")
+            if head in bad:
+                found.update({url: dates[head] for url in urls_of})
+                continue
+            if values[n].get("state") != "OPEN":
+                found.update({url: bb_node(values[n], None, []) for url in urls_of})
+                continue
+            checks = []
+            if head:
+                try:
+                    checks = bb_checks(bb_paged(f"/repositories/{ws}/{slug}/commit/{head}/statuses", [("pagelen", "100")]))
+                except (RuntimeError, subprocess.TimeoutExpired) as e:
+                    found.update({url: e for url in urls_of})
+                    continue
+            found.update({url: bb_node(values[n], dates.get(head), checks) for url in urls_of})
+    return found, me
+
+
+def read_bb_comments(urls):
+    """The inline-comment threads and the PR-level comments of each Bitbucket PR, split from
+    the comments endpoint: ({url: threads node or error}, {url: [comment nodes]})."""
+    threads, comments = {}, {}
+    for url in urls:
+        parts = bb_parts(url)
+        if parts is None:
+            threads[url] = RuntimeError(f"{url} is not a bitbucket.org pull-requests link")
+            continue
+        ws, slug, number = parts
+        try:
+            values = bb_paged(f"/repositories/{ws}/{slug}/pullrequests/{number}/comments", [("pagelen", "100")])
+        except (RuntimeError, subprocess.TimeoutExpired) as e:
+            threads[url] = e
+            continue
+        top, inline = [], []
+        for c in values:
+            if c.get("deleted"):
+                continue
+            login = bb_login(c.get("user"))
+            body = (c.get("content") or {}).get("raw") or ""
+            if c.get("inline"):
+                inline.append({"databaseId": c["id"], "body": body, "author": {"login": login},
+                               "replyTo": {"databaseId": (c.get("parent") or {}).get("id")} if c.get("parent") else None})
+            else:
+                top.append({"id": str(c["id"]), "createdAt": c.get("created_on") or "", "body": body,
+                            "author": {"__typename": "User", "login": login}})
+        threads[url] = {"reviewThreads": {"nodes": [{"comments": {"nodes": [c]}} for c in inline]}}
+        comments[url] = top
+    return threads, comments
+
+
+def by_host(urls):
+    grouped = {}
+    for url in urls:
+        grouped.setdefault(urlparse(url).hostname, []).append(url)
+    return grouped
+
+
+def read_pulls(urls, fields):
+    """The `fields` of each PR and my login per host: ({url: node or error}, {host: login})."""
+    found, me = {}, {}
+    for host, host_urls in by_host(urls).items():
+        if host == "bitbucket.org":
+            nodes, login = read_bb_pulls(host_urls)
+        else:
+            nodes, login = read_gh_pulls(host_urls, fields)
+        found.update(nodes)
+        me[host] = login
+    return found, me
+
+
+def read_threads(urls):
+    """The threads of each moved PR and, when the host does not carry the PR-level comments in
+    the pull read, those too: ({url: threads node or error}, {url: [comment nodes]})."""
+    threads, comments = {}, {}
+    for host, host_urls in by_host(urls).items():
+        if host == "bitbucket.org":
+            found, tops = read_bb_comments(host_urls)
+            threads.update(found)
+            comments.update({url: tops[url] for url, node in found.items() if not isinstance(node, Exception)})
+        else:
+            found, _ = read_gh_pulls(host_urls, THREAD_FIELDS)
+            threads.update(found)
+    return threads, comments
+
+
 def view_of(pull):
-    """A PULL_FIELDS node with its connections as plain lists, the newest checks of the head commit."""
+    """A PULL_FIELDS node with its connections as plain lists, the newest checks of the head commit.
+    A Bitbucket node whose comments were not read in this pass (None) keeps its lists as they are."""
     commits = pull["commits"]["nodes"]
     rollup = commits[0]["commit"].get("statusCheckRollup") if commits else None
+    comments = pull["comments"] if pull["comments"] is None else pull["comments"]["nodes"]
     return {**pull, "statusCheckRollup": latest_checks(rollup["contexts"]["nodes"]) if rollup else [],
-            "comments": pull["comments"]["nodes"], "reviews": pull["reviews"]["nodes"]}
+            "comments": comments, "reviews": pull["reviews"]["nodes"]}
 
 
 def inline_comments(threads, me):
@@ -261,9 +504,10 @@ def change_comments(raw, me):
     return ids + review_comments(raw, me)
 
 
-def updates_of(pull, threads, fields, me, ignore):
+def updates_of(pull, threads, fields, me, ignore, comments=()):
     """The frontmatter of one PR. `threads` is None when the PR has not moved since the last
-    reading; the inline comments still unseen then stay so."""
+    reading; the inline comments still unseen then stay so. `comments` are the PR-level comments
+    read apart from the pull (Bitbucket), whose node carries none. `me` is my login per host."""
     for found in (pull, threads):
         if isinstance(found, Exception):
             raise found
@@ -272,13 +516,23 @@ def updates_of(pull, threads, fields, me, ignore):
     if pull["state"] != "OPEN":
         raise RuntimeError(f"unknown PR state {pull['state']}")
     raw = view_of(pull)
+    mine = me[urlparse(fields["pr"]).hostname]
+    extra = comments if pull["comments"] is None else []
+    unseen = id_list(fields.get("pr_unseen_comments"))
     if threads is None:
-        inline = [i for i in id_list(fields.get("pr_unseen_comments")) if i.startswith("inline-")]
+        inline = [i for i in unseen if i.startswith("inline-")]
     else:
-        inline = inline_comments(threads, me)
-    return {**facts_of(raw, me, ignore), "pr_ci_required": ci_of([c for c in raw["statusCheckRollup"] if c.get("isRequired")]),
-            "pr_activity_at": activity_of(pull), "pr_updated_at": pull["updatedAt"],
-            **comment_updates(fields, inline + change_comments(raw, me))}
+        inline = inline_comments(threads, mine)
+    # The host reads the PR-level comments apart from the pull (Bitbucket) and the PR has not
+    # moved, so they were not read: the non-inline unseen ids are carried forward, like the
+    # inline ones, and the stored activity time stays (the comments it counted are not here).
+    carried = [i for i in unseen if not i.startswith("inline-")] if pull["comments"] is None and threads is None else []
+    updates = {**facts_of(raw, mine, ignore), "pr_ci_required": ci_of([c for c in raw["statusCheckRollup"] if c.get("isRequired")]),
+               "pr_updated_at": pull["updatedAt"],
+               **comment_updates(fields, inline + carried + change_comments({**raw, "comments": list(extra) + (raw["comments"] or [])}, mine))}
+    if pull["comments"] is not None or threads is not None:
+        updates["pr_activity_at"] = activity_of({**pull, "comments": {"nodes": list(extra) + (raw["comments"] or [])}})
+    return updates
 
 
 def id_list(value):
@@ -357,10 +611,10 @@ def main(argv):
     pulls, me = read_open_pulls({pr for *_, pr in items})
     moved = {pr for _, _, fields, pr in items
              if isinstance(pulls[pr], dict) and pulls[pr]["state"] == "OPEN" and fields.get("pr_updated_at") != pulls[pr]["updatedAt"]}
-    threads, _ = read_pulls(moved, THREAD_FIELDS) if moved else ({}, None)
+    threads, bb_comments = read_threads(moved) if moved else ({}, {})
     for name, path, fields, pr in items:
         try:
-            updates = updates_of(pulls[pr], threads.get(pr), fields, me, ignore)
+            updates = updates_of(pulls[pr], threads.get(pr), fields, me, ignore, bb_comments.get(pr, ()))
         except (RuntimeError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as e:
             print(f"cannot read the PR of {name}: {e}", file=sys.stderr)
             continue

@@ -99,6 +99,10 @@ pub struct Workspace {
     /// account when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_account: Option<String>,
+    /// The bkt context every bkt call of the workspace gets `--context` (decision 82); bkt's
+    /// active context when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bkt_context: Option<String>,
     /// Scripts that run once for the whole workspace on a timer (`watch.rs`), from `workspace.toml`.
     #[serde(skip)]
     pub watch: Vec<Watch>,
@@ -126,6 +130,8 @@ struct Settings {
     issue_tracker: Option<String>,
     #[serde(default)]
     github_account: Option<String>,
+    #[serde(default)]
+    bkt_context: Option<String>,
     /// `[[watch]]` tables (or one `[watch]`), each with `every`, `command` and optional `args`.
     #[serde(default, deserialize_with = "crate::pipeline::watchers")]
     watch: Vec<Watch>,
@@ -142,6 +148,9 @@ impl Settings {
         }
         if let Some(login) = settings.github_account.as_deref().filter(|l| !valid_login(l)) {
             return Err(format!("github_account '{login}' is not a GitHub login"));
+        }
+        if let Some(context) = settings.bkt_context.as_deref().filter(|c| !valid_name(c)) {
+            return Err(format!("bkt_context '{context}' is not a bkt context name"));
         }
         Ok(settings)
     }
@@ -260,6 +269,7 @@ impl Store {
             agent: settings.agent,
             issue_tracker: settings.issue_tracker.unwrap_or_else(|| ISSUE_TRACKERS[0].into()),
             github_account: settings.github_account,
+            bkt_context: settings.bkt_context,
             watch: settings.watch,
             error,
         }
@@ -333,15 +343,19 @@ impl Store {
     /// a bad one changes nothing. An empty value (or `Some(None)` for the agent) removes its key.
     /// Only these keys change; the rest of the file (its watchers) stays, though not its comments.
     /// `None` when there is no such workspace. Whether gh knows a GitHub account is the caller's
-    /// check (`github.rs`).
+    /// check (`github.rs`); whether bkt knows the context is the caller's too (`bkt.rs`).
     pub fn update(&self, name: &str, change: SettingsChange) -> Result<Option<Workspace>, String> {
         let (tracker, login) = (change.issue_tracker.map(str::trim), change.github_account.map(str::trim));
+        let context = change.bkt_context.map(str::trim);
         let agent = change.agent.map(|agent| agent.map(Agent::checked).transpose()).transpose()?;
         if let Some(tracker) = tracker.filter(|t| !t.is_empty() && !ISSUE_TRACKERS.contains(t)) {
             return Err(format!("issue tracker '{tracker}' is not one of {}", ISSUE_TRACKERS.join(", ")));
         }
         if let Some(login) = login.filter(|l| !l.is_empty() && !valid_login(l)) {
             return Err(format!("'{login}' is not a GitHub login"));
+        }
+        if let Some(context) = context.filter(|c| !c.is_empty() && !valid_name(c)) {
+            return Err(format!("'{context}' is not a bkt context name"));
         }
         let Some(workspace) = self.workspace(name) else {
             return Ok(None);
@@ -356,7 +370,7 @@ impl Store {
             Some(Some(agent)) => drop(table.insert("agent".into(), toml::Value::try_from(agent).map_err(|e| e.to_string())?)),
             None => {}
         }
-        for (key, value) in [("issue_tracker", tracker), ("github_account", login)] {
+        for (key, value) in [("issue_tracker", tracker), ("github_account", login), ("bkt_context", context)] {
             match value {
                 Some("") => drop(table.remove(key)),
                 Some(value) => drop(table.insert(key.into(), value.into())),
@@ -374,6 +388,7 @@ pub struct SettingsChange<'a> {
     pub agent: Option<Option<Agent>>,
     pub issue_tracker: Option<&'a str>,
     pub github_account: Option<&'a str>,
+    pub bkt_context: Option<&'a str>,
 }
 
 /// Absolute path of executable `name`: an absolute path as is, a bare name looked up on `PATH`.
@@ -525,16 +540,19 @@ mod tests {
         let store = Store::open(dir.path().to_path_buf(), None).unwrap();
         store.add_workspace("app").unwrap();
         let app = store.workspace("app").unwrap();
-        assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None));
+        assert_eq!((app.issue_tracker.as_str(), app.github_account, app.bkt_context), ("jira", None, None));
         store.set_agent("app", claude("/bin/sh")).unwrap();
-        let change = |tracker, login| SettingsChange { issue_tracker: Some(tracker), github_account: Some(login), ..Default::default() };
-        let app = store.update("app", change("github", " work-bot ")).unwrap().unwrap();
-        assert_eq!((app.issue_tracker.as_str(), app.github_account.as_deref(), app.agent), ("github", Some("work-bot"), claude("/bin/sh")), "other keys stay");
-        assert!(store.update("app", change("jira", "a b")).is_err());
+        let change = |tracker, login, context| SettingsChange {
+            issue_tracker: Some(tracker), github_account: Some(login), bkt_context: Some(context), ..Default::default()
+        };
+        let app = store.update("app", change("github", " work-bot ", " work ")).unwrap().unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account.as_deref(), app.bkt_context.as_deref(), app.agent),
+                   ("github", Some("work-bot"), Some("work"), claude("/bin/sh")), "other keys stay");
+        assert!(store.update("app", change("jira", "a b", "work")).is_err());
         assert_eq!(store.workspace("app").unwrap().issue_tracker, "github", "a bad key changes nothing");
-        assert!(store.update("app", change("gitlab", "")).is_err());
-        let app = store.update("app", change("", "")).unwrap().unwrap();
-        assert_eq!((app.issue_tracker.as_str(), app.github_account), ("jira", None), "empty goes back to the defaults");
+        assert!(store.update("app", change("gitlab", "", "a b")).is_err());
+        let app = store.update("app", change("", "", "")).unwrap().unwrap();
+        assert_eq!((app.issue_tracker.as_str(), app.github_account, app.bkt_context), ("jira", None, None), "empty goes back to the defaults");
         let file = dir.path().join("workspaces/app/workspace.toml");
         fs::write(&file, "issue_tracker = \"linear\"\n").unwrap();
         assert!(store.workspace("app").unwrap().error.unwrap().contains("issue_tracker 'linear'"));

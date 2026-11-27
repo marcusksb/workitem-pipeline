@@ -72,6 +72,18 @@ class FixerTest(unittest.TestCase):
         self.assertEqual(decide(pr_seen_comments="a,b", pr_unseen_comments="a,b"), ({}, None), "a stale list starts nothing")
 
 
+    def test_bitbucket_facts_trigger_the_same_actions(self):
+        """Cloud has no changes-requested verdict, so pr_approval is approved | none; every
+        other fact means the same, and the fixers fire the same way."""
+        self.assertEqual(decide(pr_merge="conflicting", pr_approval="none"),
+                         ({"pr_conflict_head": "h1", "pr_conflict_attempts": "1", "pr_fix_attempts": None,
+                           "pr_fixing": "conflict"}, ("fix", "conflict")))
+        self.assertEqual(decide(pr_ci_fix="failing", pr_approval="approved"),
+                         ({"pr_ci_head": "h1", "pr_fix_attempts": "1", "pr_fixing": "ci"}, ("fix", "ci")))
+        self.assertEqual(decide(pr_unseen_comments="c1", pr_approval="none"),
+                         ({"pr_seen_comments": "c1", "pr_unseen_comments": "", "pr_fixing": "comments"}, ("fix", "comments")))
+
+
 class FreshnessTest(unittest.TestCase):
     def test_after_a_fixer_it_waits_for_a_reading_newer_than_its_end(self):
         self.assertEqual(decide(pr_fixing="ci", pr_ci_fix="failing"), ({"pr_fixing": None, "pr_fix_ended_at": NOW}, None))

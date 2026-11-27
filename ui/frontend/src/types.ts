@@ -93,6 +93,7 @@ export type WorkspaceWatch = { every: string; command: string; args: string[]; i
 
 /** A folder in `~/.workitems-pipeline/workspaces`. `agent`: executable that runs its sessions instead of the default `claude`.
  * `issue_tracker`: `jira` or `github`. `github_account`: the gh login its processes use, else gh's active one.
+ * `bkt_context`: the bkt context its Bitbucket calls run with, else bkt's active one.
  * `watch`: its watchers (only in the list). `error`: why `workspace.toml` is not in use; its last valid version is.
  * `account_error`: why the workspace is stopped, its GitHub account not being readable (only in the list). */
 export type Workspace = {
@@ -101,6 +102,7 @@ export type Workspace = {
   agent?: Agent;
   issue_tracker: string;
   github_account?: string;
+  bkt_context?: string;
   watch?: WorkspaceWatch[];
   error?: string;
   account_error?: string;
@@ -114,7 +116,7 @@ export type Agent = { kind: AgentKind; command?: string };
 export type AgentSettings = { agent: Agent | null; kinds: { kind: AgentKind; installed: boolean }[] };
 
 /** What the workspace settings dialog changes; an empty value clears it. */
-export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; github_account?: string };
+export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; github_account?: string; bkt_context?: string };
 
 /** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
 export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };
