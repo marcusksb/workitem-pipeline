@@ -23,8 +23,9 @@ export type BoardSettings = { label: string; entry: string; order: string[]; iss
 /**
  * A board of a workspace: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.
  * `watched` are the stages with a watcher, `paused` the ones whose watchers are paused.
+ * `problems` lists, per stage, the files it runs that do not resolve (handler, fixer skills, watch scripts); only stages with any.
  */
-export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[] };
+export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[]; problems: Record<string, string[]> };
 
 /** Boards of every workspace, by workspace name, by board name. */
 export type Pipelines = Record<string, BoardInfo[]>;

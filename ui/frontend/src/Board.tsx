@@ -2,12 +2,12 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, boardOfWorkspace, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, stageProblems, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { Choice, Dialog, DialogForm } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
 import { PrStatus } from "./PrStatus";
-import { IconPause, IconPlay, IconSettings, IconTrash } from "./icons";
+import { IconAlert, IconPause, IconPlay, IconSettings, IconTrash } from "./icons";
 import { ErrorText, Muted } from "./parts";
 import { StageSource } from "./StageSource";
 import { STAGE_DOT } from "./tone";
@@ -191,9 +191,9 @@ function Card({ item, selected, onSelect, showWorkspace, waitsOn, onDependencies
 }
 
 /**
- * A stage: header (dot, name, count, info, pause, clear) and its cards.
+ * A stage: header (dot, name, problems, count, info, pause, clear) and its cards.
  */
-function Column({ name, label, final, items, board, pause, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
+function Column({ name, label, final, items, board, pause, problems, onInspect, onChanged, children }: { name: string; label: string; final: boolean; items: Item[]; board: string; pause: { workspaces: string[]; paused: boolean }; problems: string[]; onInspect: () => void; onChanged: () => void; children: ReactNode }) {
   const clear = useRun(onChanged);
   const pauser = useRun(onChanged);
   const errors = [
@@ -210,6 +210,11 @@ function Column({ name, label, final, items, board, pause, onInspect, onChanged,
         <span className="min-w-0 truncate" title={label}>
           {label}
         </span>
+        {problems.length > 0 && (
+          <span className="flex-none text-blocked" role="img" title={problems.join("\n")} aria-label={`${label} problems: ${problems.join("; ")}`}>
+            <IconAlert />
+          </span>
+        )}
         {pause.paused && <Badge>Paused</Badge>}
         <span className="text-xs font-normal text-muted-foreground">{items.length}</span>
         <span className="ml-auto flex items-center">
@@ -244,6 +249,12 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
     const found = pipelines?.[name]?.find((b) => b.name === active);
     return found?.error ? [{ workspace: name, pipeline: found.pipeline, error: found.error }] : [];
   });
+  const problems = workspaces.flatMap((workspace) =>
+    Object.entries(boardOfWorkspace(pipelines, workspace, active)?.problems ?? {}).flatMap(([stage, messages]) => {
+      const label = shown.find((c) => c.name === stage)?.label ?? stage;
+      return messages.map((message) => `${workspace}: stage "${label}": ${message}`);
+    }),
+  );
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
   const card = (item: Item, depth = 0, where?: string) => {
     const parent = item.parent ? items.find((p) => p.workspace === item.workspace && p.dir === item.parent) : undefined;
@@ -269,6 +280,11 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
           {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}
         </ErrorText>
       ))}
+      {problems.map((problem) => (
+        <ErrorText className="mb-2" key={problem}>
+          {problem}
+        </ErrorText>
+      ))}
       <div
         data-view={view}
         className={cn("board group/board gap-2.5", view === "list" ? "list flex flex-col" : "grid auto-cols-[minmax(240px,1fr)] grid-flow-col")}
@@ -277,7 +293,7 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
           const inColumn = columns[name] ?? [];
           const pause = pauseState(pipelines, workspaces, active, name);
           return (
-            <Column key={name} name={name} label={label} final={final} items={inColumn} board={active} pause={pause} onInspect={() => setInspected({ name, label })} onChanged={onChanged}>
+            <Column key={name} name={name} label={label} final={final} items={inColumn} board={active} pause={pause} problems={stageProblems(pipelines, workspaces, active, name)} onInspect={() => setInspected({ name, label })} onChanged={onChanged}>
               {treeOrder(inColumn, orderFor(pipelines, workspaces, active, name)).flatMap(({ item, depth }) => [
                 card(item, depth),
                 ...cardChildren(item, items).map((child) => card(child, depth + 1, `${boardLabel(pipelines, child.workspace, child.board)} · ${stageTitle(child, pipelines)}`)),

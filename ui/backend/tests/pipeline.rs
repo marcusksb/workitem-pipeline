@@ -1949,7 +1949,8 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
                 {"name":"inline","prompt":"Do the thing."},
                 {"name":"pr","handler":"builtin:pr-review","auto":true,"next":["gate"],"on_merge":"gate"},
                 {"name":"gate"},
-                {"name":"lost","handler":"nope","auto":true}]"#,
+                {"name":"lost","handler":"nope","auto":true},
+                {"name":"watched","watch":{"every":"1d","command":"no-such-script"}}]"#,
         ),
     )
     .unwrap();
@@ -1991,6 +1992,15 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
 
     let lost = source("lost").await;
     assert!(lost["prose"]["error"].as_str().unwrap().contains("not found"));
+
+    let boards: serde_json::Value = serde_json::from_str(&get(&w, "/api/pipelines").await).unwrap();
+    let research = boards["app"].as_array().unwrap().iter().find(|b| b["name"] == "research").unwrap();
+    let problems = research["problems"].as_object().unwrap();
+    assert_eq!(problems.keys().collect::<std::collections::BTreeSet<_>>(), [&"lost".to_string(), &"watched".to_string()].into(), "builtin, inline and resolvable stages have none: {research}");
+    assert_eq!(problems["lost"], serde_json::json!([lost["prose"]["error"]]), "the board says what the stage dialog says");
+    let watched = source("watched").await;
+    assert_eq!(problems["watched"], serde_json::json!([watched["scripts"][0]["error"]]));
+    assert!(problems["watched"][0].as_str().unwrap().contains("watch script 'no-such-script' not found"));
 
     for uri in [
         "/api/workspaces/app/boards/research/stages/nope/source",

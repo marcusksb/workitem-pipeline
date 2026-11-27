@@ -65,6 +65,16 @@ export function pauseState(pipelines: Pipelines | undefined, workspaces: string[
   return { workspaces: watching.map((w) => w.workspace), paused: watching.length > 0 && watching.every((w) => w.paused) };
 }
 
+/**
+ * The files stage `stage` of board `board` runs that do not resolve, over `workspaces`. A column shows
+ * these workspaces merged, so with more than one each message names its workspace.
+ */
+export function stageProblems(pipelines: Pipelines | undefined, workspaces: string[], board: string, stage: string): string[] {
+  return workspaces.flatMap((workspace) =>
+    (boardOfWorkspace(pipelines, workspace, board)?.problems[stage] ?? []).map((problem) => (workspaces.length > 1 ? `${workspace}: ${problem}` : problem)),
+  );
+}
+
 /** Board names of `workspaces`, by name. */
 export function boardNames(pipelines: Pipelines | undefined, workspaces: string[]): string[] {
   const names = new Set<string>();

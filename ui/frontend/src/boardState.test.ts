@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, alertsFor, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, alertsFor, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, stageProblems, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -26,7 +26,7 @@ describe("alertsFor", () => {
   });
 });
 
-const board = (name: string, ...stages: string[]) => ({ name, pipeline: { repo: "/r/app", order: [], entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [] });
+const board = (name: string, ...stages: string[]) => ({ name, pipeline: { repo: "/r/app", order: [], entry: stages[0], stages: stages.map((n) => stage(n)) }, error: null, watched: [], paused: [], problems: {} });
 const pipelines: Pipelines = {
   app: [board("default", "todo", "doing", "done"), board("research", "idea", "done")],
   lib: [board("default", "todo", "review", "done")],
@@ -39,6 +39,21 @@ describe("pauseState", () => {
     expect(pauseState(some, ["app", "lib", "doc"], "default", "doing")).toEqual({ workspaces: ["app", "lib"], paused: false });
     expect(pauseState(some, ["app", "doc"], "default", "doing")).toEqual({ workspaces: ["app"], paused: true });
     expect(pauseState(some, ["app", "lib"], "default", "todo")).toEqual({ workspaces: [], paused: false });
+  });
+});
+
+describe("stageProblems", () => {
+  const broken = (problems: Record<string, string[]>) => ({ ...board("default", "todo", "doing"), problems });
+  const some: Pipelines = { app: [broken({ doing: ["handler 'x' not found"] })], lib: [broken({ doing: ["watch script 'y' not found"] })], doc: [board("default", "doing")] };
+  it("returns the stage's messages as they are for one workspace", () => {
+    expect(stageProblems(some, ["app"], "default", "doing")).toEqual(["handler 'x' not found"]);
+  });
+  it("names the workspace of each message when several are shown", () => {
+    expect(stageProblems(some, ["app", "lib", "doc"], "default", "doing")).toEqual(["app: handler 'x' not found", "lib: watch script 'y' not found"]);
+  });
+  it("is empty for a stage without problems or an unknown board", () => {
+    expect(stageProblems(some, ["app", "lib"], "default", "todo")).toEqual([]);
+    expect(stageProblems(some, ["app"], "nope", "doing")).toEqual([]);
   });
 });
 
@@ -60,8 +75,8 @@ describe("columnsFor", () => {
 
   it("uses the label, else the name with spaces, and skips workspaces without a valid file", () => {
     const labelled: Pipelines = {
-      app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null, watched: [], paused: [] }],
-      bad: [{ name: "default", pipeline: null, error: "broken", watched: [], paused: [] }],
+      app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "a_b", stages: [stage("a_b"), stage("c", "See")] }, error: null, watched: [], paused: [], problems: {} }],
+      bad: [{ name: "default", pipeline: null, error: "broken", watched: [], paused: [], problems: {} }],
     };
     expect(columnsFor(labelled, ["app", "bad", "missing"], "default")).toEqual([
       { name: "a_b", label: "a b", final: true },
@@ -72,8 +87,8 @@ describe("columnsFor", () => {
 
   it("marks a column final only when no workspace has a next stage for it", () => {
     const flow: Pipelines = {
-      app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null, watched: [], paused: [] }],
-      lib: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null, watched: [], paused: [] }],
+      app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "a", stages: [{ ...stage("a"), next: ["b"] }, stage("b")] }, error: null, watched: [], paused: [], problems: {} }],
+      lib: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "b", stages: [{ ...stage("b"), next: ["c"] }, stage("c")] }, error: null, watched: [], paused: [], problems: {} }],
     };
     expect(columnsFor(flow, ["app"], "default").map((c) => c.final)).toEqual([false, true]);
     expect(columnsFor(flow, ["app", "lib"], "default").map((c) => c.final)).toEqual([false, false, true]);
@@ -92,7 +107,7 @@ describe("shownBoard", () => {
 
 describe("openDependencies", () => {
   const flow: Pipelines = {
-    app: [{ name: "api", pipeline: { repo: "/r/api", order: [], entry: "dev", stages: [{ ...stage("dev"), next: ["pr"] }, { ...stage("pr"), next: ["done"], on_merge: "done" }, stage("done")] }, error: null, watched: [], paused: [] }],
+    app: [{ name: "api", pipeline: { repo: "/r/api", order: [], entry: "dev", stages: [{ ...stage("dev"), next: ["pr"] }, { ...stage("pr"), next: ["done"], on_merge: "done" }, stage("done")] }, error: null, watched: [], paused: [], problems: {} }],
   };
   it("lists the dependencies that are neither merged nor in their board's on_merge stage", () => {
     const items = [
@@ -226,7 +241,7 @@ describe("cardChildren", () => {
 describe("orderFor", () => {
   it("uses the stage's order, else the board's", () => {
     const pipelines: Pipelines = {
-      app: [{ name: "default", pipeline: { repo: "/r/app", order: ["title desc"], entry: "a", stages: [{ ...stage("a"), order: ["issue_status desc"] }, stage("b")] }, error: null, watched: [], paused: [] }],
+      app: [{ name: "default", pipeline: { repo: "/r/app", order: ["title desc"], entry: "a", stages: [{ ...stage("a"), order: ["issue_status desc"] }, stage("b")] }, error: null, watched: [], paused: [], problems: {} }],
     };
     expect(orderFor(pipelines, ["app"], "default", "a")).toEqual(["issue_status desc"]);
     expect(orderFor(pipelines, ["app"], "default", "b")).toEqual(["title desc"]);

@@ -15,7 +15,7 @@ use crate::{
     git,
     launch,
     locate::{Found, Origin},
-    pipeline::{Gate, Pipeline, Resolved},
+    pipeline::{Gate, Pipeline, Resolved, Stage},
     review::{self, Conversation},
     tmux,
     workitem::{self, Workitem},
@@ -269,6 +269,9 @@ pub struct BoardInfo {
     watched: Vec<String>,
     /// Stages whose watchers are paused.
     paused: Vec<String>,
+    /// Per stage, the files it runs that do not resolve (handler, fixer skills, watch scripts);
+    /// only stages with problems (decision 83).
+    problems: HashMap<String, Vec<String>>,
     #[serde(flatten)]
     resolved: Resolved,
 }
@@ -279,8 +282,12 @@ fn boards(state: &AppState, workspaces: &[Workspace]) -> HashMap<String, Vec<Boa
         let info = |name: String| {
             let resolved = state.pipeline(workspace, &name);
             let stages = resolved.pipeline.iter().flat_map(|p| &p.stages);
-            let watched = stages.filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
-            BoardInfo { watched, paused: crate::watch::paused_stages(state, workspace, &name), resolved, name }
+            let watched = stages.clone().filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
+            let problems = stages
+                .map(|s| (s.name.clone(), StageFiles::of(state, workspace, &name, s).problems()))
+                .filter(|(_, problems)| !problems.is_empty())
+                .collect();
+            BoardInfo { watched, paused: crate::watch::paused_stages(state, workspace, &name), problems, resolved, name }
         };
         state.board_names(workspace).into_iter().map(info).collect()
     };
@@ -574,8 +581,38 @@ fn file_source(name: &str, found: Result<Found, String>, note: Option<&'static s
     source
 }
 
-/// What a stage runs, resolved the way the dispatcher resolves it: its watch scripts, the
-/// handler skill or inline prompt, and on the PR stage the fixer skills.
+/// A file a stage runs, by name, and where it resolved.
+type Resolution = (String, Result<Found, String>);
+
+/// The files a stage runs, resolved the way the dispatcher resolves them: its watch scripts, the
+/// handler skill (a `builtin:` one has none) and on a PR stage the fixer skills. The stage dialog
+/// shows them and the board lists the ones that do not resolve, so both agree (decision 83).
+struct StageFiles {
+    scripts: Vec<Resolution>,
+    handler: Option<Resolution>,
+    fixers: Vec<Resolution>,
+}
+
+impl StageFiles {
+    fn of(state: &AppState, workspace: &Workspace, board: &str, stage: &Stage) -> Self {
+        let skill = |name: &str| (name.to_string(), launch::handler_file(state, workspace, board, name));
+        StageFiles {
+            scripts: stage.watch.iter().map(|w| (w.command.clone(), crate::watch::resolve(state, workspace, board, &w.command))).collect(),
+            handler: stage.handler.as_deref().filter(|h| !h.starts_with("builtin:")).map(skill),
+            fixers: match stage.watches_prs() {
+                true => launch::Fixer::ALL.iter().map(|f| skill(f.skill())).collect(),
+                false => Vec::new(),
+            },
+        }
+    }
+
+    fn problems(self) -> Vec<String> {
+        self.handler.into_iter().chain(self.fixers).chain(self.scripts).filter_map(|(_, found)| found.err()).collect()
+    }
+}
+
+/// What a stage runs: its watch scripts, the handler skill or inline prompt, and on the PR stage
+/// the fixer skills.
 pub async fn stage_source(
     State(state): State<Shared>,
     Path((workspace, board, stage)): Path<(String, String, String)>,
@@ -583,15 +620,11 @@ pub async fn stage_source(
     let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     let pipeline = state.pipeline(&workspace, &board).pipeline.ok_or(ApiError::not_found("board"))?;
     let stage = pipeline.stage(&stage).ok_or(ApiError::not_found("stage"))?;
-    let scripts = stage
-        .watch
-        .iter()
-        .map(|w| file_source(&w.command, crate::watch::resolve(&state, &workspace, &board, &w.command), w.implicit.then_some("implicit")))
-        .collect();
-    let prose = match (stage.handler.as_deref(), stage.prompt.as_deref()) {
-        (Some(handler), _) if handler.starts_with("builtin:") => None,
-        (Some(handler), _) => Some(file_source(handler, launch::handler_file(&state, &workspace, &board, handler), None)),
-        (None, Some(prompt)) => Some(Source {
+    let files = StageFiles::of(&state, &workspace, &board, stage);
+    let scripts = files.scripts.into_iter().zip(&stage.watch).map(|((name, found), w)| file_source(&name, found, w.implicit.then_some("implicit"))).collect();
+    let prose = match (files.handler, stage.prompt.as_deref()) {
+        (Some((name, found)), _) => Some(file_source(&name, found, None)),
+        (None, Some(prompt)) if stage.handler.is_none() => Some(Source {
             name: "prompt".into(),
             path: None,
             origin: None,
@@ -599,12 +632,9 @@ pub async fn stage_source(
             note: Some("inline in pipeline.json"),
             error: None,
         }),
-        (None, None) => None,
+        (None, _) => None,
     };
-    let fixers = match stage.watches_prs() {
-        true => launch::Fixer::ALL.iter().map(|f| file_source(f.skill(), launch::handler_file(&state, &workspace, &board, f.skill()), None)).collect(),
-        false => Vec::new(),
-    };
+    let fixers = files.fixers.into_iter().map(|(name, found)| file_source(&name, found, None)).collect();
     Ok(Json(StageSource { scripts, prose, fixers, model: stage.model.clone(), require_issue: stage.requires_issue() }))
 }
 
