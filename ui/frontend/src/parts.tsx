@@ -93,9 +93,13 @@ export function SidePanel({ className, children, ...props }: ComponentProps<"asi
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const start = drag.current;
+    if (!start) return;
     // A capture can be lost without `pointerup` or `pointercancel`; a move without the button
-    // held must not keep resizing, so it is ignored.
-    if (!start || (event.buttons & 1) === 0) return;
+    // held ends the drag, so it cannot leave the panel resizing or `select-none` on the body.
+    if ((event.buttons & 1) === 0) {
+      endDrag();
+      return;
+    }
     const next = clamp(start.width + start.x - event.clientX);
     dragged.current = next;
     setWidth(next);
