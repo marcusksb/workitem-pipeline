@@ -522,7 +522,7 @@ impl AppState {
     }
 
     /// Deletes `boards/<name>.json`, the board's `boards/<name>/` folder (skills, watchers,
-    /// learnings) and its last valid file, so `/api/pipelines` stops serving it.
+    /// learnings) and its last valid file, so `/api/state` stops serving it.
     pub fn delete_board(&self, workspace: &Workspace, name: &str) -> Result<(), String> {
         if !valid_board_name(name) {
             return Err(format!("'{name}' is not a board name"));
