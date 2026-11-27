@@ -57,13 +57,13 @@ async fn api_requires_host_and_cookie_and_reports_sessions() {
     let host = format!("127.0.0.1:{}", f.state.port);
     let cookie = format!("wi_session={}", f.token);
 
-    assert_eq!(get(&f, "/api/workitems", &host, None).await.0, StatusCode::UNAUTHORIZED);
-    assert_eq!(get(&f, "/api/workitems", "evil.example:80", Some(&cookie)).await.0, StatusCode::FORBIDDEN);
-    assert_eq!(get(&f, "/api/workitems", &host, Some("wi_session=wrong")).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(get(&f, "/api/state", &host, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(get(&f, "/api/state", "evil.example:80", Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(get(&f, "/api/state", &host, Some("wi_session=wrong")).await.0, StatusCode::UNAUTHORIZED);
 
-    let (status, body) = get(&f, "/api/workitems", &host, Some(&cookie)).await;
+    let (status, body) = get(&f, "/api/state", &host, Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    let items: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let items = &serde_json::from_str::<serde_json::Value>(&body).unwrap()["items"];
     assert_eq!(items[0]["dir"], "T-1");
     assert_eq!(items[0]["agent_status"], "blocked: need input");
     assert_eq!(items[0]["session"], true);
@@ -73,6 +73,7 @@ async fn api_requires_host_and_cookie_and_reports_sessions() {
     assert!(body.contains("\"content\""));
     assert_eq!(get(&f, "/api/workitems/app/..", &host, Some(&cookie)).await.0, StatusCode::NOT_FOUND);
     assert_eq!(get(&f, "/api/nope", &host, Some(&cookie)).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(get(&f, "/api/workitems", &host, Some(&cookie)).await.0, StatusCode::NOT_FOUND, "the old list endpoint is gone");
 }
 
 #[tokio::test]
@@ -152,10 +153,10 @@ async fn allowed_hosts_pass_the_host_check_for_api_and_ws() {
     let port = f.state.port;
     let lan = format!("my-mac.local:{port}");
     let cookie = format!("wi_session={}", f.token);
-    assert_eq!(get(&f, "/api/workitems", &lan, Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(get(&f, "/api/state", &lan, Some(&cookie)).await.0, StatusCode::FORBIDDEN);
 
     Arc::get_mut(&mut f.state).unwrap().allowed_hosts = vec!["my-mac.local".into()];
-    assert_eq!(get(&f, "/api/workitems", &lan, Some(&cookie)).await.0, StatusCode::OK);
+    assert_eq!(get(&f, "/api/state", &lan, Some(&cookie)).await.0, StatusCode::OK);
 
     tokio::spawn(axum::serve(listener, router(f.state.clone())).into_future());
     let mut request = ws_request(port, "/ws/terminal/app/T-1?cols=80&rows=24", Some(&cookie), Some(&format!("http://{lan}")));
@@ -169,8 +170,8 @@ async fn a_reverse_proxy_url_passes_with_its_host_and_https_origin() {
     let port = f.state.port;
     let cookie = format!("wi_session={}", f.token);
     Arc::get_mut(&mut f.state).unwrap().allowed_hosts = vec!["https://foo.bar.com/".into()];
-    assert_eq!(get(&f, "/api/workitems", "foo.bar.com", Some(&cookie)).await.0, StatusCode::OK);
-    assert_eq!(get(&f, "/api/workitems", "evil.example", Some(&cookie)).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(get(&f, "/api/state", "foo.bar.com", Some(&cookie)).await.0, StatusCode::OK);
+    assert_eq!(get(&f, "/api/state", "evil.example", Some(&cookie)).await.0, StatusCode::FORBIDDEN);
 
     tokio::spawn(axum::serve(listener, router(f.state.clone())).into_future());
     let ws = |origin: &str| {
