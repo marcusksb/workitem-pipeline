@@ -123,7 +123,7 @@ Read `pr_mode` from the frontmatter.
 
 Other handlers (self-review, QA) point here, so this is written once.
 
-1. `gh pr ready {pr}`. Then, if the board file (`<workspace>/boards/<board>.json`) has `"reviewers"` (an `org/team`), `gh pr edit {pr} --add-reviewer <reviewers>`; without it, add no reviewer. If adding the team fails, say so in your report but still move on.
+1. `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-pr ready <workitem file>`. Then, if the board file (`<workspace>/boards/<board>.json`) has `"reviewers"` (an `org/team`), `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-pr add-reviewer <workitem file> <reviewers>`; without it, add no reviewer. If adding the team fails, say so in your report but still move on.
 2. Do not touch the issue: entering the PR stage moves it (see Step 3).
 
 ### Step 8 — Report

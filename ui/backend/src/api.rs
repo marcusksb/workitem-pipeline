@@ -403,22 +403,22 @@ pub async fn item(
     Ok(Json(Detail { item: Item { item, session, roles, branch, unpushed }, content }))
 }
 
-/// The PR description and comments of a workitem, read live with `gh`.
+/// The PR description and comments of a workitem, read live through `workitem-pr`.
 pub async fn pr_conversation(
     State(state): State<Shared>,
     Path((workspace, dir)): Path<(String, String)>,
 ) -> Result<Json<Conversation>, ApiError> {
     let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
     let (item, _) = workitem::read(&workspace, &dir).ok_or(ApiError::not_found("workitem"))?;
-    // `gh` takes a URL; anything else (or an option-looking value) is not a PR link.
     if !item.pr.starts_with("http") {
         return Err(ApiError::not_found("pull request"));
     }
-    let repo = state
+    state
         .repo_of(&workspace, &item.board)
         .and_then(|repo| repo.ok_or_else(|| format!("board {} has no repo, so no PRs", item.board)))
         .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
-    let conversation = review::conversation(&state, &workspace, &repo, &item.pr)
+    let path = workitem::path(&workspace, &dir).ok_or(ApiError::not_found("workitem"))?;
+    let conversation = review::conversation(&state, &workspace, &path)
         .await
         .map_err(|e| ApiError(StatusCode::BAD_GATEWAY, e))?;
     Ok(Json(conversation))

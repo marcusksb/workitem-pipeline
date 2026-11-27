@@ -367,132 +367,33 @@ async fn launch_item_session(
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs `gh pr <subcommand> <pr url> <args>` in the repo of the item's board, then makes the
-/// workspace's `pr-status` and the stage's watchers due and wakes the dispatcher, so the next pass
-/// reads the PR at once.
-async fn gh_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &[&str]) -> Result<()> {
-    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
-        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on GitHub"));
+/// Runs `workitem-pr <verb>` on an item in the PR stage, then makes the workspace's `pr-status`
+/// and the stage's watchers due and wakes the dispatcher, so the next pass reads the PR at once.
+async fn pr_action(state: &AppState, workspace: &str, dir: &str, verb: &str, timeout: std::time::Duration) -> Result<()> {
+    let (workspace, path, item) = find(state, workspace, dir)?;
+    if !stage_of(state, &workspace, &item)?.watches_prs() || !item.pr.starts_with("http") {
+        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on its PR host"));
     }
-    let repo = pr_repo_of(state, workspace, item)?;
-    let mut command = crate::github::command(state, workspace).await.map_err(conflict)?;
-    command.arg("pr").arg(args[0]).arg(&item.pr).args(&args[1..]).current_dir(&repo).kill_on_drop(true);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
-        .await
-        .map_err(|_| conflict("gh timed out"))?
-        .map_err(|e| internal(format!("cannot run gh: {e}")))?;
-    if !output.status.success() {
-        return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
-    }
-    crate::watch::forget_workspace(state, workspace, "pr-status");
-    crate::watch::forget(state, workspace, &item.board, &item.stage);
+    pr_repo_of(state, &workspace, &item)?;
+    crate::review::workitem_pr(state, &workspace, &path, verb, &[], timeout).await.map_err(conflict)?;
+    crate::watch::forget_workspace(state, &workspace, "pr-status");
+    crate::watch::forget(state, &workspace, &item.board, &item.stage);
     state.wake.notify_one();
     Ok(())
 }
 
-/// Runs a `bkt` command for a Bitbucket PR in the board repo.
-async fn bb_pr(state: &AppState, workspace: &Workspace, item: &Workitem, args: &[&str]) -> Result<()> {
-    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
-        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on Bitbucket"));
-    }
-    let repo = pr_repo_of(state, workspace, item)?;
-    let mut command = tokio::process::Command::new(&state.bkt);
-    let mut args = args.to_vec();
-    if let Some(context) = &workspace.bkt_context {
-        args.push("--context");
-        args.push(context);
-    }
-    command.args(&args).current_dir(&repo).kill_on_drop(true);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
-        .await
-        .map_err(|_| conflict("bkt timed out"))?
-        .map_err(|e| internal(format!("cannot run bkt: {e}")))?;
-    if !output.status.success() {
-        return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
-    }
-    crate::watch::forget_workspace(state, workspace, "pr-status");
-    crate::watch::forget(state, workspace, &item.board, &item.stage);
-    state.wake.notify_one();
-    Ok(())
-}
-
-/// One `git` command in the board repo; a failed one is a conflict.
-async fn run_git(repo: &Path, args: &[&str]) -> Result<()> {
-    run_git_for(repo, args, 60).await
-}
-
-/// One `git` command with its own timeout in seconds; a failed one is a conflict.
-async fn run_git_for(repo: &Path, args: &[&str], secs: u64) -> Result<()> {
-    let mut command = tokio::process::Command::new("git");
-    command.args(args).current_dir(repo).kill_on_drop(true);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(secs), command.output())
-        .await
-        .map_err(|_| conflict("git timed out"))?
-        .map_err(|e| internal(format!("cannot run git: {e}")))?;
-    if !output.status.success() {
-        return Err(conflict(String::from_utf8_lossy(&output.stderr).trim()));
-    }
-    Ok(())
-}
-
-/// Rebases the PR branch onto its base locally and force-pushes it, since Cloud has no
-/// server-side rebase. The rebase runs in a temporary detached worktree, never in the board
-/// repo's own checkout (a rebase there would detach its HEAD and fail on uncommitted
-/// changes); a conflict aborts the rebase and nothing is left behind.
-async fn bb_rebase(state: &AppState, workspace: &Workspace, item: &Workitem) -> Result<()> {
-    if !stage_of(state, workspace, item)?.watches_prs() || !item.pr.starts_with("http") {
-        return Err(conflict("only a workitem in the PR stage with a PR link can be changed on Bitbucket"));
-    }
-    let repo = pr_repo_of(state, workspace, item)?;
-    let view = crate::review::bb_view(state, workspace, &repo, &item.pr).await.map_err(conflict)?;
-    let Some(source) = view.source else { return Err(conflict("no source branch")) };
-    let Some(destination) = view.destination else { return Err(conflict("no destination branch")) };
-    run_git(&repo, &["fetch", "origin", &destination.branch.name, &source.branch.name]).await?;
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let worktree = std::env::temp_dir().join(format!("wi-rebase-{}-{nanos}", std::process::id()));
-    // A full fresh checkout can take minutes on a large repo or with LFS filters, so this
-    // step gets its own timeout; the other git calls stay at the 60 s default.
-    run_git_for(&repo, &["worktree", "add", "--detach", worktree.to_str().unwrap(), &format!("origin/{}", source.branch.name)], 600).await?;
-    let mut result = run_git(&worktree, &["rebase", &format!("origin/{}", destination.branch.name)]).await;
-    if result.is_err() {
-        let _ = run_git(&worktree, &["rebase", "--abort"]).await;
-    }
-    if result.is_ok() {
-        result = run_git(&worktree, &["push", "--force-with-lease", "origin", &format!("HEAD:{}", source.branch.name)]).await;
-    }
-    if run_git(&repo, &["worktree", "remove", "--force", worktree.to_str().unwrap()]).await.is_err() {
-        let _ = tokio::fs::remove_dir_all(&worktree).await;
-        let _ = run_git(&repo, &["worktree", "prune"]).await;
-    }
-    result?;
-    crate::watch::forget_workspace(state, workspace, "pr-status");
-    crate::watch::forget(state, workspace, &item.board, &item.stage);
-    state.wake.notify_one();
-    Ok(())
-}
-
-/// Squash-merges the PR with `gh`. Moving the item to `done` is left to the dispatcher's
-/// review pass: the same path also covers a merge queue that lands the PR later.
+/// Squash-merges the PR. Moving the item to `done` is left to the dispatcher's review pass: the
+/// same path also covers a merge queue that lands the PR later.
 pub async fn merge(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (workspace, _, item) = find(&state, &workspace, &dir)?;
-    if crate::review::bb_parts(&item.pr).is_some() {
-        let (ws, slug, number) = crate::review::bb_parts(&item.pr).unwrap();
-        bb_pr(&state, &workspace, &item, &["pr", "merge", &number, "--strategy", "squash", "--workspace", &ws, "--repo", &slug]).await?;
-    } else {
-        gh_pr(&state, &workspace, &item, &["merge", "--squash"]).await?;
-    }
+    pr_action(&state, &workspace, &dir, "merge", std::time::Duration::from_secs(90)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Rebases the PR's remote branch onto its base branch on GitHub (`gh pr update-branch
-/// --rebase`), so no local checkout is touched. GitHub refuses when the rebase conflicts.
+/// Rebases the PR branch onto its base: server side on GitHub, which refuses when the rebase
+/// conflicts; in a temporary worktree of the board repo on Bitbucket, whose fresh checkout may
+/// take up to 600 s on a large repo.
 pub async fn rebase(State(state): State<Shared>, UrlPath((workspace, dir)): UrlPath<(String, String)>) -> Result<StatusCode> {
-    let (workspace, _, item) = find(&state, &workspace, &dir)?;
-    if crate::review::bb_parts(&item.pr).is_some() {
-        bb_rebase(&state, &workspace, &item).await?;
-    } else {
-        gh_pr(&state, &workspace, &item, &["update-branch", "--rebase"]).await?;
-    }
+    pr_action(&state, &workspace, &dir, "rebase", std::time::Duration::from_secs(780)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

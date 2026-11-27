@@ -17,7 +17,7 @@ This is destructive. The workitem file is not in git, so it cannot be recovered.
    - **Session:** `tmux has-session -t =wi-<dir>` succeeds: an agent is working on it. Say so and stop unless the user insists.
    - **Worktree:** the one `git worktree list` shows ending in `/<repo-name>-<dir>` (`<workspace>/.worktrees/`, or next to the repo for older items). Note if it has uncommitted changes (`git -C <path> status --short`).
    - **Branch:** the branch checked out in that worktree, or the `pr:` head branch.
-   - **PR:** the `pr:` URL and its state (`gh pr view <n> --json state --jq .state`).
+   - **PR:** the `pr:` URL and its state (`python3 ~/.claude/skills/workitem-pipeline/bin/workitem-pr state <workitem>`).
    - **Children and dependents:** other workitems whose frontmatter has `parent: <dir>` (`grep -l '^parent: <dir>$' <workspace>/*/workitem.md`) or names `<dir>` in `depends_on:`. They are not deleted. Remove the dangling `parent:` line, and `<dir>` from `depends_on:`, in each of them after the folder is deleted, and report it.
 3. Show the user this list, and the item's `stage`. If `stage` is `in_development` or `in_review`, or the PR is open, or the worktree has uncommitted changes, say that clearly first.
 4. Ask what to remove, with the workitem folder as the default:

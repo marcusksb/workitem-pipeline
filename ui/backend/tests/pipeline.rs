@@ -117,22 +117,18 @@ fn world() -> World {
     let d = dir.path().display();
     fs::write(dir.path().join("gh_graphql.py"), GH_GRAPHQL).unwrap();
     let script = format!(
-        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ] || [ \"$2\" = /user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
+        "#!/bin/bash\nif [ \"$1 $2\" = 'auth token' ]; then [ \"$4\" = work-bot ] && echo tok-123 && exit 0; echo 'no account' >&2; exit 1\nelif [ \"$1 $2\" = 'api graphql' ]; then exec python3 {d}/gh_graphql.py {d} \"$4\"\nelif [ \"$1\" = api ]; then\n  if [ \"$2\" = user ] || [ \"$2\" = /user ]; then echo '{{\"login\":\"me\"}}'; else cat {d}/inline.json 2>/dev/null || echo '[]'; fi\nelif [ \"$1 $2\" = 'pr merge' ]; then echo \"$GH_TOKEN\" > {d}/merge-token; cat {d}/pr.json\nelif [ -f {d}/pr-once.json ]; then cat {d}/pr-once.json; rm {d}/pr-once.json\nelse cat {d}/pr.json; fi\n"
     );
     fs::write(&gh, script).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
 
     let bkt = dir.path().join("bkt");
-    // `bkt pr view` reads bb-view.json for a Bitbucket PR when a test wrote one, else pr.json
-    // (the gh fixture shape); `context list` is the settings probe, contexts.json per test.
+    // `bkt api /user` is the settings probe's credential check (it fails silently when a test
+    // wrote user-fails), any other `bkt api` reads bb-pull.json (the Cloud REST pull request);
+    // `context list` is the settings probe, contexts.json per test.
     let bkt_script = format!(
-        "#!/bin/bash\necho \"$@\" >> {}/.stub-log\nif [ \"$1 $2\" = 'pr view' ]; then if [ -f {}/bb-view.json ]; then cat {}/bb-view.json; else cat {}/pr.json; fi\nelif [ \"$1 $2\" = 'pr comments' ]; then cat {}/comments.json\nelif [ \"$1 $2\" = 'context list' ]; then cat {}/contexts.json 2>/dev/null || echo '{{\"contexts\":[]}}'\nfi\n",
+        "#!/bin/bash\necho \"$@\" >> {}/.stub-log\nif [ \"$1 $2\" = 'api /user' ]; then [ -f {d}/user-fails ] && exit 1; echo '{{\"nickname\":\"me\"}}'\nelif [ \"$1\" = api ]; then cat {d}/bb-pull.json\nelif [ \"$1 $2\" = 'context list' ]; then cat {d}/contexts.json 2>/dev/null || echo '{{\"contexts\":[]}}'\nfi\n",
         repo.display(),
-        d,
-        d,
-        d,
-        d,
-        d
     );
     fs::write(&bkt, bkt_script).unwrap();
     fs::set_permissions(&bkt, fs::Permissions::from_mode(0o755)).unwrap();
@@ -952,7 +948,7 @@ async fn deleting_a_board_removes_its_items_and_files() {
     assert!(!runs.contains("app/side/") && runs.contains("app/default/analyze/0"), "{runs}");
 }
 
-const PR: &str = "pr: https://github.com/app/pull/7\n";
+const PR: &str = "pr: https://github.com/o/app/pull/7\n";
 
 #[tokio::test]
 async fn review_shows_pr_status_and_leaves_green_ci_alone() {
@@ -1038,7 +1034,23 @@ async fn merge_squashes_a_bitbucket_pr_with_bkt() {
     let (status, _) = post(&w, "/api/workitems/app/T-27-bbmerge/merge", "").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let log = stub_log(&w.repo);
-    assert!(log.iter().any(|l| l.contains("pr merge 1 --strategy squash --workspace ws --repo slug")), "{log:?}");
+    assert!(log.iter().any(|l| l == "pr merge 1 --workspace ws --repo slug --strategy squash"), "{log:?}");
+}
+
+#[tokio::test]
+async fn pr_actions_reach_the_host_with_the_workspace_token_and_context() {
+    let w = world();
+    fs::write(w.ws.join("workspace.toml"), "github_account = \"work-bot\"\nbkt_context = \"work\"\n").unwrap();
+    write_item(&w.ws, "T-29-gh", "in_review", PR);
+    set_pr(&w, "OPEN", "APPROVED", "MERGEABLE", "SUCCESS");
+    let (status, body) = post(&w, "/api/workitems/app/T-29-gh/merge", "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(fs::read_to_string(w.dir.path().join("merge-token")).unwrap(), "tok-123\n", "gh got the account's token");
+    write_item(&w.ws, "T-29-bb", "in_review", BB_PR);
+    let (status, body) = post(&w, "/api/workitems/app/T-29-bb/merge", "").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let log = stub_log(&w.repo);
+    assert!(log.iter().any(|l| l == "pr merge 1 --workspace ws --repo slug --strategy squash --context work"), "{log:?}");
 }
 
 #[tokio::test]
@@ -1047,10 +1059,9 @@ async fn rebase_of_a_bitbucket_pr_runs_in_a_temp_worktree() {
     bb_repo(&w);
     // The board repo's own checkout is dirty: a rebase there would fail or detach its HEAD.
     fs::write(w.repo.join("dirty"), "uncommitted").unwrap();
-    fs::write(w.dir.path().join("bb-view.json"),
-              serde_json::json!({"workspace": "ws", "repo": "slug", "pull_request": {
-                  "description": "", "updated_on": "2026-11-01",
-                  "source": {"branch": {"name": "feature"}}, "destination": {"branch": {"name": "main"}}}})
+    fs::write(w.dir.path().join("bb-pull.json"),
+              serde_json::json!({"id": 1, "description": "", "updated_on": "2026-11-01",
+                  "source": {"branch": {"name": "feature"}}, "destination": {"branch": {"name": "main"}}})
                   .to_string())
         .unwrap();
     write_item(&w.ws, "T-28-bbrebase", "in_review", BB_PR);
@@ -1063,7 +1074,7 @@ async fn rebase_of_a_bitbucket_pr_runs_in_a_temp_worktree() {
                "feature was rebased onto main");
     assert!(!git_text(&["worktree", "list"], &w.repo).contains("wi-rebase"), "no temp worktree left behind");
     let log = stub_log(&w.repo);
-    assert!(log.iter().any(|l| l.contains("pr view 1 --json")), "{log:?}");
+    assert!(log.iter().any(|l| l.starts_with("api /repositories/ws/slug/pullrequests/1 --json")), "{log:?}");
     assert!(!log.iter().any(|l| l.contains("merge")), "no bkt merge on a rebase: {log:?}");
 
     // A conflict aborts the rebase, leaves the remote branch alone and no worktree behind.
@@ -1097,8 +1108,8 @@ async fn review_starts_a_fixer_on_red_ci_and_leaves_a_blocked_one_waiting() {
     let items = get(&w, "/api/workitems").await;
     assert!(items.contains(r#""approval":"review_required","approved_by_me":false,"merge":"mergeable","ci":"failing""#), "{items}");
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
-    assert!(prompts.contains("CI is failing on https://github.com/app/pull/7"), "{prompts}");
-    assert!(prompts.contains("gh run view <run> --log-failed"), "the bundled workitem-fix-ci steps: {prompts}");
+    assert!(prompts.contains("CI is failing on https://github.com/o/app/pull/7"), "{prompts}");
+    assert!(prompts.contains("workitem-pr failed-log <workitem file>"), "the bundled workitem-fix-ci steps: {prompts}");
 
     settle_pr(&w).await;
     settle_pr(&w).await;
@@ -1127,7 +1138,7 @@ async fn review_starts_one_fixer_per_changes_requested_review() {
     settle_pr(&w).await;
     eventually("fixer ran", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
-    assert!(prompts.contains("a review requesting changes on https://github.com/app/pull/7"), "the comments fixer takes it: {prompts}");
+    assert!(prompts.contains("a review requesting changes on https://github.com/o/app/pull/7"), "the comments fixer takes it: {prompts}");
 
     for _ in 0..3 {
         settle_pr(&w).await;
@@ -1174,7 +1185,7 @@ async fn review_starts_one_fixer_per_batch_of_new_comments() {
     settle_pr(&w).await;
     eventually("a new inline comment starts a fixer", || stub_log(&w.repo).len() == 1).await;
     let prompts = fs::read_dir(w.dir.path().join("logs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect::<String>();
-    assert!(prompts.contains("New review comments or a review requesting changes on https://github.com/app/pull/7"), "{prompts}");
+    assert!(prompts.contains("New review comments or a review requesting changes on https://github.com/o/app/pull/7"), "{prompts}");
     assert!(prompts.contains("Unsure whether a comment or suggestion is right"), "the fixer asks instead of guessing: {prompts}");
     passes().await;
     assert_eq!(stub_log(&w.repo).len(), 1, "the same comment starts no second fixer");
@@ -2213,6 +2224,13 @@ async fn a_bkt_context_is_checked_against_bkt() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(body.contains("bkt context gone is not set up"), "{body}");
     assert!(!fs::read_to_string(w.ws.join("workspace.toml")).unwrap().contains("gone"), "nothing was written");
+    // A listed context whose credentials fail is refused too, with a message even without stderr.
+    fs::write(w.dir.path().join("user-fails"), "").unwrap();
+    fs::write(w.dir.path().join("contexts.json"), r#"{"contexts":[{"name":"work"},{"name":"work2"}]}"#).unwrap();
+    let (status, body) = put(&w, "/api/workspaces/app", r#"{"bkt_context":"work2"}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.contains("bkt context work2 has no working credentials: bkt exited with"), "{body}");
+    fs::remove_file(w.dir.path().join("user-fails")).unwrap();
     // Clearing an already-saved context does not probe.
     let (status, _) = put(&w, "/api/workspaces/app", r#"{"bkt_context":""}"#).await;
     assert_eq!(status, StatusCode::OK);

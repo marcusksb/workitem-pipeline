@@ -41,7 +41,8 @@ pub async fn context_for(state: &AppState, context: &str) -> Result<(), String> 
         .map_err(|_| unauthenticated("bkt timed out"))?
         .map_err(|e| unauthenticated(&format!("cannot run bkt: {e}")))?;
     if !output.status.success() {
-        return Err(unauthenticated(String::from_utf8_lossy(&output.stderr).trim()));
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(unauthenticated(&if detail.is_empty() { format!("bkt exited with {}", output.status) } else { detail }));
     }
     Ok(())
 }
