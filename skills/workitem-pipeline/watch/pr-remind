@@ -4,7 +4,8 @@
   pr-remind [--dry-run]
 
 Reads the facts watch/pr-status wrote. An item is reminded when all of these hold:
-  pr_state open, pr_draft false, pr_merge mergeable, pr_ci_required passing, pr_approval not
+  pr_state open, pr_draft false, pr_merge mergeable or blocked (a missing review blocks it),
+  pr_ci_required passing, pr_approval not
   approved; 2 business days (Mon-Fri) since pr_activity_at; pr_reminded_at missing or older than
   pr_activity_at (one reminder per quiet period); now is Mon-Fri 09:00-17:00 local time.
 Then it asks the PR's host who to mention (`bin/workitem_pr.py`, decision 83): on GitHub
@@ -47,10 +48,12 @@ def business_time(start, end):
 
 def not_due(fields, now):
     """Why the item gets no reminder now, or None when it does. `now` is local and aware."""
-    expected = {"pr_state": "open", "pr_draft": "false", "pr_merge": "mergeable", "pr_ci_required": "passing"}
+    expected = {"pr_state": "open", "pr_draft": "false", "pr_ci_required": "passing"}
     for key, value in expected.items():
         if fields.get(key) != value:
             return f"{key} is {fields.get(key) or 'unset'}"
+    if fields.get("pr_merge") not in ("mergeable", "blocked"):
+        return f"pr_merge is {fields.get('pr_merge') or 'unset'}"
     if fields.get("pr_approval") == "approved":
         return "approved"
     if not fields.get("pr_activity_at"):

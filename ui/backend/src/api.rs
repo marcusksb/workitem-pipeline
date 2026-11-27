@@ -74,10 +74,6 @@ fn workspace_infos(state: &AppState, workspaces: &[Workspace]) -> Vec<WorkspaceI
     workspaces.iter().map(info).collect()
 }
 
-pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
-    Json(workspace_infos(&state, &state.store.workspaces()))
-}
-
 #[derive(Deserialize)]
 pub struct NewWorkspace {
     name: String,
@@ -308,10 +304,6 @@ pub(crate) fn stage_problems(state: &AppState, workspace: &Workspace, board: &st
         .collect()
 }
 
-pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
-    Json(boards(&state, &state.store.workspaces()))
-}
-
 /// What the board lets a human do with an item in its current stage, so the UI never needs to
 /// know stage names.
 #[derive(Serialize, Default)]
@@ -322,13 +314,31 @@ pub struct Roles {
     pr_watch: bool,
     /// An approved item here can be started.
     develops: bool,
+    /// The stage's actions whose `when` the item matches now (decision 87).
+    actions: Vec<ActionView>,
+}
+
+/// A stage action as a button: `POST .../action/{id}` runs it. `starts_session`: a `skill`
+/// action, refused while the item has a session, so the panel disables it then.
+#[derive(Serialize)]
+pub struct ActionView {
+    id: String,
+    label: String,
+    confirm: Option<String>,
+    starts_session: bool,
 }
 
 fn roles_of(board: Option<&Pipeline>, item: &Workitem) -> Roles {
     let Some(stage) = board.and_then(|b| b.stage(&item.stage)) else {
         return Roles::default();
     };
-    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops() }
+    let actions = stage
+        .actions
+        .iter()
+        .filter(|a| a.matches(&item.fields))
+        .map(|a| ActionView { id: a.label.clone(), label: a.label.clone(), confirm: a.confirm.clone(), starts_session: a.skill.is_some() })
+        .collect();
+    Roles { gate: stage.gate.clone(), pr_watch: stage.watches_prs(), develops: stage.develops(), actions }
 }
 
 #[derive(Serialize)]
@@ -389,11 +399,6 @@ async fn items(state: &AppState, workspaces: &[Workspace], sessions: &[tmux::Ses
         }
     });
     futures_util::future::join_all(per_workspace).await.into_iter().flatten().collect()
-}
-
-pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    Json(items(&state, &state.store.workspaces(), &sessions).await)
 }
 
 #[derive(Serialize)]
@@ -469,12 +474,6 @@ fn agent_sessions(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &H
                 .collect::<Vec<_>>()
         })
         .collect()
-}
-
-pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    Json(agent_sessions(&state.store.workspaces(), &sessions, &dead))
 }
 
 /// Everything the board polls, from one list of workspaces and one look at tmux, so its parts
@@ -608,11 +607,13 @@ type Resolution = (String, Result<Found, String>);
 
 /// The files a stage runs, resolved the way the dispatcher resolves them: its watch scripts, the
 /// handler skill (a `builtin:` one has none) and on a PR stage the fixer skills. The stage dialog
-/// shows them and the board lists the ones that do not resolve, so both agree (decision 84).
+/// shows them and the board lists the ones that do not resolve, so both agree (decision 84). The
+/// board also lists its actions' skills and scripts that do not resolve, resolved as a click does.
 struct StageFiles {
     scripts: Vec<Resolution>,
     handler: Option<Resolution>,
     fixers: Vec<Resolution>,
+    actions: Vec<Resolution>,
 }
 
 impl StageFiles {
@@ -625,11 +626,22 @@ impl StageFiles {
                 true => launch::Fixer::ALL.iter().map(|f| skill(f.skill())).collect(),
                 false => Vec::new(),
             },
+            actions: stage
+                .actions
+                .iter()
+                .map(|a| match (&a.skill, &a.script) {
+                    (Some(name), _) => skill(name),
+                    (None, script) => {
+                        let name = script.as_deref().unwrap_or_default();
+                        (name.to_string(), crate::watch::resolve_action(state, workspace, board, name))
+                    }
+                })
+                .collect(),
         }
     }
 
     fn problems(self) -> Vec<String> {
-        self.handler.into_iter().chain(self.fixers).chain(self.scripts).filter_map(|(_, found)| found.err()).collect()
+        self.handler.into_iter().chain(self.fixers).chain(self.scripts).chain(self.actions).filter_map(|(_, found)| found.err()).collect()
     }
 }
 

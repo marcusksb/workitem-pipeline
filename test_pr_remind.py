@@ -27,6 +27,7 @@ READY = {"pr_state": "open", "pr_draft": "false", "pr_merge": "mergeable", "pr_c
 class DueTest(unittest.TestCase):
     def test_two_business_days_of_quiet(self):
         self.assertIsNone(pr.not_due(READY, at("Fri 2026-11-06 10:00")))
+        self.assertIsNone(pr.not_due({**READY, "pr_merge": "blocked"}, at("Fri 2026-11-06 10:00")), "a missing review blocks it")
         self.assertIn("active", pr.not_due(READY, at("Fri 2026-11-06 09:59")))
 
     def test_the_weekend_does_not_count(self):

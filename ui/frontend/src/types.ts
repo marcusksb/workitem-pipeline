@@ -1,6 +1,10 @@
 /** A column where a human decides: approving moves the item to `approve_to`, rejecting to `reject_to`. */
 export type Gate = { label: string; approve_to: string; reject_to: string };
 
+/** A button the item's stage offers it now (decision 87); `id` is what `api.runAction` sends.
+ * `starts_session`: it runs a skill as the item's session, so it cannot start while one runs. */
+export type StageAction = { id: string; label: string; confirm: string | null; starts_session: boolean };
+
 export type StageConfig = {
   name: string;
   label: string | null;
@@ -35,7 +39,7 @@ export type Review = {
   approval: "approved" | "changes_requested" | "review_required" | "none";
   /** My latest verdict on the PR is an approval. */
   approved_by_me: boolean;
-  merge: "mergeable" | "conflicting" | "unknown";
+  merge: "mergeable" | "blocked" | "conflicting" | "unknown";
   ci: "passing" | "failing" | "pending" | "none";
   /** Names of the red checks. */
   failed: string[];
@@ -67,6 +71,8 @@ export type Item = {
   gate: Gate | null;
   pr_watch: boolean;
   develops: boolean;
+  /** The stage's actions whose conditions the item matches, already filtered by the backend. */
+  actions: StageAction[];
   review: Review | null;
   /** Branch checked out in the item's worktree; null without a worktree. */
   branch: string | null;

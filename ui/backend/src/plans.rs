@@ -161,12 +161,6 @@ pub fn all(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &HashSet<
     workspaces.iter().flat_map(|workspace| list(workspace, &live_sessions(sessions, dead, workspace))).collect()
 }
 
-pub async fn list_plans(State(state): State<Shared>) -> Json<Vec<Plan>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    Json(all(&state.store.workspaces(), &sessions, &dead))
-}
-
 #[derive(Serialize)]
 pub struct Detail {
     #[serde(flatten)]
