@@ -879,6 +879,8 @@ async fn remove_is_finished_when_the_request_returns() {
     git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"], &w.repo);
     let worktree = w.repo.parent().unwrap().join("repo-T-11-busy");
     git(&["worktree", "add", "-q", "-b", "wt", worktree.to_str().unwrap()], &w.repo);
+    // A dirty worktree goes too: git refuses it without `--force`.
+    fs::write(worktree.join("untracked.txt"), "local change").unwrap();
 
     let (status, _) = post(&w, "/api/workitems/app/T-11-busy/remove", "").await;
     assert_eq!(status, StatusCode::OK);

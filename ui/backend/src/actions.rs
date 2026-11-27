@@ -430,8 +430,9 @@ pub async fn remove(
     Ok(Json(Removed { worktree_left }))
 }
 
-/// Stops the item's session, drops its worktree (never `--force`), then deletes its folder.
-/// Branch and PR stay. Returns why git refused the worktree, if it did. The caller holds `busy`.
+/// Stops the item's session, drops its worktree (always `--force`: uncommitted and
+/// untracked files go with it), then deletes its folder. Branch and PR stay (decision 82).
+/// Returns why git refused the worktree, if it did. The caller holds `busy`.
 async fn remove_item(state: &AppState, workspace: &Workspace, path: &Path, item: &Workitem) -> Result<Option<String>> {
     let dir = &item.dir;
     // Only this workspace's session; a same-named session from another workspace is not ours.
@@ -454,7 +455,7 @@ async fn remove_item(state: &AppState, workspace: &Workspace, path: &Path, item:
             let _ = tokio::process::Command::new(&teardown).current_dir(&worktree).output().await;
         }
         let out = tokio::process::Command::new("git")
-            .args(["worktree", "remove"])
+            .args(["worktree", "remove", "--force"])
             .arg(&worktree)
             .current_dir(repo)
             .output()
