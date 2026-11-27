@@ -14,7 +14,7 @@ export const APPROVAL: Record<Review["approval"], Slot> = {
 };
 
 export const MERGE: Record<Review["merge"], Slot> = {
-  mergeable: { glyph: <IconGitMerge />, tone: "good", label: "ready to merge" },
+  mergeable: { glyph: <IconGitMerge />, tone: "good", label: "no conflicts" },
   blocked: { glyph: <IconGitMerge />, tone: "wait", label: "no conflicts, merge blocked" },
   conflicting: { glyph: <IconGitMerge />, tone: "bad", label: "merge conflict" },
   unknown: { glyph: <IconGitMerge />, tone: "wait", label: "merge unknown" },

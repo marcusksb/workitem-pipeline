@@ -46,6 +46,12 @@ pub fn resolve(state: &AppState, workspace: &Workspace, board: &str, name: &str)
     locate::find(&places, Path::new(name)).ok_or_else(|| format!("watch script '{name}' not found in {}", locate::looked(&places)))
 }
 
+/// The stage action script `name` on `board`, from the `actions/` folders in the order of `resolve`.
+pub fn resolve_action(state: &AppState, workspace: &Workspace, board: &str, name: &str) -> Result<Found, String> {
+    let places = locate::places(workspace, board, "actions", state.skills_dir.join("workitem-pipeline/actions"));
+    locate::find(&places, Path::new(name)).ok_or_else(|| format!("action script '{name}' not found in {}", locate::looked(&places)))
+}
+
 /// The watchers of `workspace.toml`, plus `pr-status` when it does not list it and a board needs
 /// its PRs read: `pr-review` only reacts to what `pr-status` wrote.
 pub fn workspace_watchers(state: &AppState, workspace: &Workspace) -> Vec<Watch> {
@@ -296,8 +302,7 @@ impl Job {
 /// `args`, but the one item as a JSON object on stdin. The script comes from the `actions/` folders,
 /// resolved like `resolve`. A failed run's error is its stderr.
 pub async fn run_action(state: &AppState, workspace: &Workspace, repo: Option<&Path>, stage: &Stage, item: &Workitem, script: &str, args: &[String]) -> Result<(), String> {
-    let places = locate::places(workspace, &item.board, "actions", state.skills_dir.join("workitem-pipeline/actions"));
-    let found = locate::find(&places, Path::new(script)).ok_or_else(|| format!("action script '{script}' not found in {}", locate::looked(&places)))?;
+    let found = resolve_action(state, workspace, &item.board, script)?;
     let token = crate::github::token(state, workspace).await?;
     let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
     let mut job = Job::new(state, workspace, Some(&item.board), repo, Some(stage), args, found.path, &[item], &sessions).with_token(token.as_deref());

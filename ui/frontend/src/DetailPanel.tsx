@@ -221,7 +221,7 @@ export function DetailPanel({ item, items, pipelines, onSelect, tab: routeTab, o
           </Properties>
           {isBlocked(live) && <BlockedBar item={live} runner={runner} onStartAgent={live.session ? undefined : startAgent} />}
           {live.gate && <GateBar item={live} gate={live.gate} runner={runner} onDiscuss={live.session ? undefined : discuss} />}
-          <StageActions item={live} onDone={() => void reload()} />
+          <StageActions item={live} onDone={() => void reload()} onSession={() => mounted.current && onTab("terminal")} />
           {runner.error && <ErrorText>{runner.error}</ErrorText>}
           {error && <ErrorText>{error}</ErrorText>}
         </div>

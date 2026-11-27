@@ -626,11 +626,13 @@ type Resolution = (String, Result<Found, String>);
 
 /// The files a stage runs, resolved the way the dispatcher resolves them: its watch scripts, the
 /// handler skill (a `builtin:` one has none) and on a PR stage the fixer skills. The stage dialog
-/// shows them and the board lists the ones that do not resolve, so both agree (decision 84).
+/// shows them and the board lists the ones that do not resolve, so both agree (decision 84). The
+/// board also lists its actions' skills and scripts that do not resolve, resolved as a click does.
 struct StageFiles {
     scripts: Vec<Resolution>,
     handler: Option<Resolution>,
     fixers: Vec<Resolution>,
+    actions: Vec<Resolution>,
 }
 
 impl StageFiles {
@@ -643,11 +645,22 @@ impl StageFiles {
                 true => launch::Fixer::ALL.iter().map(|f| skill(f.skill())).collect(),
                 false => Vec::new(),
             },
+            actions: stage
+                .actions
+                .iter()
+                .map(|a| match (&a.skill, &a.script) {
+                    (Some(name), _) => skill(name),
+                    (None, script) => {
+                        let name = script.as_deref().unwrap_or_default();
+                        (name.to_string(), crate::watch::resolve_action(state, workspace, board, name))
+                    }
+                })
+                .collect(),
         }
     }
 
     fn problems(self) -> Vec<String> {
-        self.handler.into_iter().chain(self.fixers).chain(self.scripts).filter_map(|(_, found)| found.err()).collect()
+        self.handler.into_iter().chain(self.fixers).chain(self.scripts).chain(self.actions).filter_map(|(_, found)| found.err()).collect()
     }
 }
 
