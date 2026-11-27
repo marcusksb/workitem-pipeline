@@ -80,6 +80,11 @@ pub fn is_agent_session(name: &str) -> bool {
     !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// A `wi-new-*` session that fixes a board's problems rather than creating workitems.
+pub fn is_fix_session(name: &str) -> bool {
+    name.starts_with("wi-new-fix-") && is_agent_session(name)
+}
+
 /// Names of sessions whose pane has exited (`remain-on-exit` keeps them around).
 pub async fn dead_sessions(socket: Option<&str>) -> HashSet<String> {
     let output = command(socket)

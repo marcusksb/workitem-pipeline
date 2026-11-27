@@ -706,6 +706,34 @@ When the workitem files are written, your last action is tmux kill-session -t {s
     ))
 }
 
+/// Prompt of a session that fixes board `board`: its file is invalid (`error`), or stages run
+/// files that do not resolve (`problems`, per stage).
+pub fn fix_board_prompt(state: &AppState, workspace: &Workspace, board: &str, error: Option<&str>, problems: &[(String, Vec<String>)], session: &str) -> String {
+    let mut found = String::new();
+    if let Some(error) = error {
+        found.push_str(&format!("- The board file is invalid, the last valid version is in use: {error}\n"));
+    }
+    for (stage, messages) in problems {
+        for message in messages {
+            found.push_str(&format!("- Stage {stage}: {message}\n"));
+        }
+    }
+    format!(
+        "Fix the configuration of board {board} of the workitem workspace {dir}. Its file is {file}.\n\
+The web UI reports:\n{found}\n\
+Skills and watch scripts resolve from the board's folder (boards/{board}/skills, boards/{board}/watch), then the workspace's \
+(skills, watch), then the bundled folder {bundled} (its workitem-pipeline/watch for scripts). The bundled skills are usually \
+symlinks that install.sh of the workitem-pipeline repo creates; a missing one there means it was not re-run.\n\
+Find the cause of each problem and fix it: create or link the missing file, or correct the name in the board file. \
+Do not change workitems. When the right fix is unclear (a typo or a skill still to write), explain the options here and ask.\n\
+The web UI re-checks the board every few seconds, so the problems disappear from the board once fixed.\n\
+When everything is fixed, say what you changed, then your last action is tmux kill-session -t {session}.",
+        dir = workspace.dir.display(),
+        file = crate::pipeline::board_path(workspace, board).display(),
+        bundled = state.skills_dir.display(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

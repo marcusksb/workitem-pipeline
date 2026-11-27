@@ -23,8 +23,9 @@ export type BoardSettings = { label: string; entry: string; order: string[]; iss
 /**
  * A board of a workspace: `pipeline` is the newest valid file; `error` says why the file on disk is not in use.
  * `watched` are the stages with a watcher, `paused` the ones whose watchers are paused.
+ * `problems` lists, per stage, the files it runs that do not resolve (handler, fixer skills, watch scripts); only stages with any.
  */
-export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[] };
+export type BoardInfo = { name: string; pipeline: Pipeline | null; error: string | null; watched: string[]; paused: string[]; problems: Record<string, string[]> };
 
 /** Boards of every workspace, by workspace name, by board name. */
 export type Pipelines = Record<string, BoardInfo[]>;
@@ -119,7 +120,8 @@ export type AgentSettings = { agent: Agent | null; kinds: { kind: AgentKind; ins
 export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; github_account?: string; bkt_context?: string };
 
 /** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
-export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };
+/** `purpose`: `create` writes workitems, `fix` fixes a board's problems (decision 85). */
+export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean; purpose: "create" | "fix" };
 
 /** `GET /api/state`: everything the board polls, read in one go so the parts agree. */
 export type UiState = { workspaces: Workspace[]; pipelines: Pipelines; items: Item[]; sessions: AgentSession[]; plans: Plan[] };

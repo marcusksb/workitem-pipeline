@@ -3,7 +3,7 @@ import { CreateToast, killsOnClose, nextCreateToasts } from "./createToasts";
 import { item } from "./testFixtures";
 import { AgentSession } from "./types";
 
-const session = (over: Partial<AgentSession> = {}): AgentSession => ({ workspace: "app", name: "wi-new-1", waiting: false, dead: false, ...over });
+const session = (over: Partial<AgentSession> = {}): AgentSession => ({ workspace: "app", name: "wi-new-1", waiting: false, dead: false, purpose: "create", ...over });
 const states = (toasts: CreateToast[]) => toasts.map((t) => t.state);
 
 describe("nextCreateToasts", () => {
