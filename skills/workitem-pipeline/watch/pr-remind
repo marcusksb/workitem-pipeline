@@ -7,38 +7,28 @@ Reads the facts watch/pr-status wrote. An item is reminded when all of these hol
   pr_state open, pr_draft false, pr_merge mergeable, pr_ci_required passing, pr_approval not
   approved; 2 business days (Mon-Fri) since pr_activity_at; pr_reminded_at missing or older than
   pr_activity_at (one reminder per quiet period); now is Mon-Fri 09:00-17:00 local time.
-Then it asks the host who to mention: GitHub gets requested reviewers who have not reviewed and
-earlier reviewers who commented or requested changes (a requested team only when no person is
-pending); Bitbucket gets the pending reviewers of `bkt pr view --json` (reviewers who have not
-approved — Cloud has no changes-requested verdict). It posts a PR comment marked REMIND_MARKER,
+Then it asks the PR's host who to mention (`bin/workitem_pr.py`, decision 83): on GitHub
+requested reviewers who have not reviewed and earlier reviewers who commented or requested
+changes (a requested team only when no person is pending), on Bitbucket the reviewers who have
+not approved (Cloud has no changes-requested verdict). It posts a PR comment marked REMIND_MARKER,
 which pr-status does not count as activity, and sets pr_reminded_at. With nobody to mention it
 blocks the item instead, so the board alerts, and sets pr_reminded_at. A failed post is logged
 and tried again on the next run. --dry-run prints what it would do, and why the other items are
 not due, and writes nothing.
 """
-import json, os, subprocess, sys
+import json, os, sys
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 sys.dont_write_bytecode = True
 # The helpers sit next to workitem-move, which the backend names.
 sys.path.insert(0, os.path.dirname(os.environ["WORKITEM_MOVE"]) if "WORKITEM_MOVE" in os.environ
                 else os.path.join(os.path.dirname(os.path.realpath(__file__)), "../bin"))
 from workitem_fields import read_fields, set_fields  # noqa: E402
+from workitem_pr import ERRORS, parse, provider  # noqa: E402
 
 REMIND_MARKER = "<!-- pr-remind -->"
 QUIET = timedelta(days=2)
 HOURS = range(9, 17)
-MENTION_QUERY = """query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
-    author { login }
-    reviewRequests(first: 50) { nodes { requestedReviewer {
-      __typename ... on User { login } ... on Team { combinedSlug } } } }
-    latestReviews(first: 50) { nodes { state author { __typename login } } }
-  } }
-}"""
-
-
 def parse_time(text):
     # Python before 3.11 (macOS /usr/bin/python3 is 3.9) does not accept GitHub's trailing "Z".
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -75,101 +65,9 @@ def not_due(fields, now):
     return None
 
 
-def is_bot(author):
-    return author.get("__typename") == "Bot" or (author.get("login") or "").endswith("[bot]")
-
-
-def mentions_of(pull):
-    """@-mentions for the PR (GraphQL pullRequest, see MENTION_QUERY): pending people, then
-    earlier reviewers who did not approve; the requested teams only when that is nobody."""
-    me = (pull.get("author") or {}).get("login")
-    requested = [n["requestedReviewer"] for n in pull["reviewRequests"]["nodes"] if n.get("requestedReviewer")]
-    people = {r["login"]: "" for r in requested if r["__typename"] == "User"}
-    for review in pull["latestReviews"]["nodes"]:
-        author = review.get("author")
-        if not author or is_bot(author) or author["login"] == me:
-            continue
-        if review["state"] == "CHANGES_REQUESTED":
-            people[author["login"]] = " (re-review after your feedback)"
-        elif review["state"] == "COMMENTED":
-            people.setdefault(author["login"], "")
-    if people:
-        return [f"@{login}{note}" for login, note in people.items()]
-    return [f"@{r['combinedSlug']}" for r in requested if r["__typename"] == "Team"]
-
-
 def comment_of(mentions):
     return (f"{REMIND_MARKER}\n{' '.join(mentions)} friendly nudge: required CI is green, "
             "it only needs a review. Thanks!")
-
-
-def gh(args):
-    result = subprocess.run([os.environ.get("WORKITEM_GH", "gh"), *args], capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"gh exited with {result.returncode}")
-    return result.stdout
-
-
-def bkt(args):
-    """The output of one bkt call; RuntimeError with bkt's message on failure."""
-    argv = [os.environ.get("WORKITEM_BKT", "bkt"), *args]
-    if os.environ.get("WORKITEM_BKT_CONTEXT"):
-        argv += ["--context", os.environ["WORKITEM_BKT_CONTEXT"]]
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f"bkt exited with {result.returncode}")
-    return result.stdout
-
-
-def bb_parts(pr):
-    """The workspace, slug and number of a bitbucket.org pull-requests link, else None. Any
-    suffix after the number (/diff) is ignored, so a link copied from the browser works."""
-    if urlparse(pr).hostname != "bitbucket.org":
-        return None
-    segments = [s for s in urlparse(pr).path.split("/") if s]
-    try:
-        i = segments.index("pull-requests")
-        return segments[i - 2], segments[i - 1], str(int(segments[i + 1]))
-    except (IndexError, ValueError):
-        return None
-
-
-def bb_mention(user):
-    """A mention the Cloud API notifies: @{account id}, the uuid without its braces as a
-    fallback. A plain @nickname in an API comment notifies nobody."""
-    id = (user or {}).get("account_id") or ((user or {}).get("uuid") or "").strip("{}")
-    return f"@{{{id}}}" if id else ""
-
-
-def bb_mentions(pr):
-    """The pending reviewers of a Cloud PR (`bkt pr view --json`, the PR under pull_request):
-    reviewers who have not approved. Cloud has no changes-requested verdict, so there is no
-    re-review note."""
-    parts = bb_parts(pr)
-    if parts is None:
-        raise RuntimeError(f"{pr} is not a bitbucket.org pull-requests link")
-    ws, slug, number = parts
-    pull = json.loads(bkt(["pr", "view", number, "--json", "--workspace", ws, "--repo", slug]))
-    pull = pull.get("pull_request") or {}
-    approved = {(p.get("user") or {}).get("uuid") for p in pull.get("participants") or [] if p.get("approved")}
-    who = []
-    for r in pull.get("reviewers") or []:
-        user = r.get("user") or r
-        if user.get("uuid") in approved:
-            continue
-        mention = bb_mention(user)
-        if mention and mention not in who:
-            who.append(mention)
-    return who
-
-
-def mentions(pr):
-    if urlparse(pr).hostname == "bitbucket.org":
-        return bb_mentions(pr)
-    owner, repo, _, number = pr.rstrip("/").split("/")[-4:]
-    data = json.loads(gh(["api", "graphql", "-f", f"query={MENTION_QUERY}", "-f", f"owner={owner}",
-                          "-f", f"repo={repo}", "-F", f"number={number}"]))
-    return mentions_of(data["data"]["repository"]["pullRequest"])
 
 
 def stamp(now):
@@ -191,15 +89,17 @@ class Reminder:
             if self.dry_run:
                 print(f"{name}: skip, {reason}")
             return
+        link = parse(pr)
+        if link is None:
+            print(f"cannot remind on the PR of {name}: {pr} is not a pull request link", file=sys.stderr)
+            return
+        host = provider(link, self.root)
         try:
-            who = mentions(pr)
-        except (RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
+            who = host.mentions(link)
+        except (*ERRORS, ValueError, KeyError, TypeError) as e:
             print(f"cannot read the reviewers of {name}: {e}", file=sys.stderr)
             return
-        if urlparse(pr).hostname == "bitbucket.org":
-            _, _, number = bb_parts(pr)
-        else:
-            number = pr.rstrip("/").rsplit("/", 1)[-1]
+        number = link.number
         updates = {"pr_reminded_at": stamp(self.now)}
         if not who:
             if (fields.get("agent_status") or "ok") == "ok":
@@ -213,12 +113,8 @@ class Reminder:
                 print(f"{name}: would post on PR #{number}:\n{body}")
                 return
             try:
-                if urlparse(pr).hostname == "bitbucket.org":
-                    ws, slug, number = bb_parts(pr)
-                    bkt(["pr", "comment", number, "--workspace", ws, "--repo", slug, "--text", body])
-                else:
-                    gh(["pr", "comment", pr, "--body", body])
-            except (RuntimeError, subprocess.TimeoutExpired) as e:
+                host.comment(link, body)
+            except ERRORS as e:
                 print(f"cannot post the reminder on PR #{number} of {name}: {e}", file=sys.stderr)
                 return
         set_fields(path, updates)

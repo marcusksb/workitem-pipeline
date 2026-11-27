@@ -4,7 +4,7 @@ description: Fixer for a workitem whose PR has failing CI. Finds the failure, fi
 ---
 
 1. Work in the workitem's worktree on the PR branch (git worktree add it if missing).
-2. Find the failure: gh pr checks <pr>, then gh run view <run> --log-failed.
+2. Find the failure: `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-pr checks <workitem file>` lists the checks, `python3 ~/.claude/skills/workitem-pipeline/bin/workitem-pr failed-log <workitem file>` prints the failed steps' log (GitHub or Bitbucket alike; on Bitbucket the log is behind the check's link).
 3. Fix the cause in code, run the affected tests locally, check your diff against the repo's CLAUDE.md/AGENTS.md rules for the files you changed and the learnings below, commit and push. No force push, no rebase.
 4. Pushed a fix: set agent_status: ok and stop.
 5. Cannot fix it (flaky or infrastructure failure, failure not caused by this PR, needs a decision or a secret): set agent_status: blocked: <one line reason>, explain here and wait.

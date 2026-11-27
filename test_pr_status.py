@@ -142,7 +142,7 @@ class CommentsTest(unittest.TestCase):
 
 GH_STUB = """#!/usr/bin/env python3
 import json, os, re, sys
-query = sys.argv[4].split("=", 1)[1]
+query = next(a for a in sys.argv if a.startswith("query=")).split("=", 1)[1]
 data = json.load(open(os.environ["STUB_PR"]))
 kind = "threads" if "reviewThreads" in query else "pull"
 open(os.environ["STUB_PR"] + ".calls", "a").write(kind + "\\n")

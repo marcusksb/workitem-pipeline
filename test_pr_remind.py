@@ -67,27 +67,11 @@ def pull(requested=(), reviews=()):
             "latestReviews": {"nodes": [{"state": s, "author": a} for a, s in reviews]}}
 
 
-class MentionsTest(unittest.TestCase):
-    def test_pending_people_and_reviewers_who_did_not_approve(self):
-        mentions = pr.mentions_of(pull(
-            requested=[user("alice"), {"__typename": "Team", "combinedSlug": "org/fe"}],
-            reviews=[(user("bob"), "COMMENTED"), (user("carol"), "CHANGES_REQUESTED"), (user("dave"), "APPROVED"),
-                     ({"__typename": "Bot", "login": "cursor"}, "COMMENTED"), (user("me"), "COMMENTED")]))
-        self.assertEqual(mentions, ["@alice", "@bob", "@carol (re-review after your feedback)"])
-
-    def test_a_re_requested_reviewer_who_asked_for_changes_is_named_once(self):
-        mentions = pr.mentions_of(pull(requested=[user("carol")], reviews=[(user("carol"), "CHANGES_REQUESTED")]))
-        self.assertEqual(mentions, ["@carol (re-review after your feedback)"])
-
-    def test_the_team_only_when_no_person_is_pending(self):
-        team = {"__typename": "Team", "combinedSlug": "org/fe"}
-        self.assertEqual(pr.mentions_of(pull(requested=[team], reviews=[(user("dave"), "APPROVED")])), ["@org/fe"])
-        self.assertEqual(pr.mentions_of(pull()), [])
-
-
 GH_STUB = """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+if args[-2:] == ["--body-file", "-"]:
+    args.append(sys.stdin.read())
 data = json.load(open(os.environ["STUB"]))
 open(os.environ["STUB"] + ".calls", "a").write(json.dumps(args) + "\\n")
 if args[:2] == ["api", "graphql"]:
@@ -198,7 +182,7 @@ args = sys.argv[1:]
 with open(os.environ["STUB_BKT_CALLS"], "a") as f:
     f.write(json.dumps(args) + "\\n")
 data = json.load(open(os.environ["STUB_BKT"]))
-if args[:2] == ["pr", "view"]:
+if args[:2] == ["api", "/repositories/ws/slug/pullrequests/1"]:
     print(json.dumps(data["view"]))
 elif args[:2] == ["pr", "comment"]:
     if data.get("post_fails"):
@@ -208,9 +192,8 @@ elif args[:2] == ["pr", "comment"]:
 
 
 def bb_view(reviewers=(), participants=()):
-    """`bkt pr view --json`: the PR under pull_request, next to workspace and repo."""
-    return {"workspace": "ws", "repo": "slug", "pull_request": {"participants": list(participants),
-                                                               "reviewers": list(reviewers)}}
+    """The Cloud REST pull request, as `bkt api` returns it."""
+    return {"id": 1, "participants": list(participants), "reviewers": list(reviewers)}
 
 
 def bb_user(uuid, nickname, account_id=None):
@@ -276,7 +259,7 @@ class BitbucketReminderTest(unittest.TestCase):
         self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice", account_id="aid-alice"), bb_reviewer("u2", "bob", account_id="aid-bob")],
                               participants=[{"user": bb_user("u2", "bob", account_id="aid-bob"), "approved": True}]))
         self.run_script()
-        self.assertIn("pr view", " ".join(self.calls()[0]), "the reviewers come from bkt pr view")
+        self.assertEqual(self.calls()[0][:2], ["api", "/repositories/ws/slug/pullrequests/1"], "the reviewers come from the REST pull")
         posts = [c for c in self.calls() if c[:2] == ["pr", "comment"]]
         self.assertEqual(len(posts), 1)
         self.assertEqual(posts[0][-1], pr.comment_of(["@{aid-alice}"]), "the mention carries the account id")
@@ -299,7 +282,7 @@ class BitbucketReminderTest(unittest.TestCase):
         self.run_script(link="https://bitbucket.org/ws/slug/pull-requests/1/diff")
         f = self.fields()
         self.assertEqual(f["agent_status"], "blocked: PR #1 is ready but has no reviewer to remind",
-                         "the number comes from bb_parts, not the last path segment")
+                         "the number comes from the parsed link, not the last path segment")
 
     def test_a_failed_post_is_retried_on_the_next_run(self):
         self.stub_bkt(bb_view(reviewers=[bb_reviewer("u1", "alice")]), post_fails=True)

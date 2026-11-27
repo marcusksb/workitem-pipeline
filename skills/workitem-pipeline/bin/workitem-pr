@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""The PR of a workitem, on whichever host its `pr:` link names (decision 83). Skills and the
+backend never call gh or bkt for a PR themselves.
+
+  workitem-pr conversation <workitem> [--json]
+  workitem-pr checks <workitem> [--json]
+  workitem-pr failed-log <workitem>
+  workitem-pr base <workitem>
+  workitem-pr state <workitem>
+  workitem-pr comment <workitem> --body-file <file>
+  workitem-pr reply <workitem> <comment id> --body-file <file>
+  workitem-pr ready <workitem>
+  workitem-pr add-reviewer <workitem> <reviewer>...
+  workitem-pr merge <workitem>
+  workitem-pr rebase <workitem>
+
+<workitem> is the item's folder or its workitem.md; the script finds the PR (`pr:`), the
+workspace (`github_account`, `bkt_context`) and the board's repo itself. `conversation` prints
+the description and every comment, review and inline comment, newest first, each under
+`## <kind> by <author>` with a `Posted <time> · id <id>` line (and the file of an inline one);
+the id is what `reply` takes and what `pr_unseen_comments` lists. `--json` prints
+`{"body", "notes": [{kind, id, author, body, at, state, path}]}` instead (the backend's PR tab).
+`checks` prints `name<TAB>state<TAB>link` per check, state one of pass, fail, pending, skipping,
+cancel. `failed-log` prints the failed steps' log of every red check (on Bitbucket its link).
+`base` prints the base branch, `state` open, merged or closed. `reply` answers an inline comment
+in its thread (any comment on Bitbucket); on GitHub a PR-level comment or review gets a new PR
+comment. `merge` squash-merges. `rebase` rebases the PR branch onto its base: on GitHub server
+side, on Bitbucket in a temporary worktree of the board repo, pushed with --force-with-lease.
+
+Exit 2 is a bad input or setup (no PR link, an unreadable --body-file, an account that is not
+logged in); a host error exits 1. Both print a message on stderr.
+"""
+import json, os, sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import workitem_pr as prs  # noqa: E402
+import workitem_tracker as tracker  # noqa: E402
+from workitem_fields import read_fields  # noqa: E402
+
+
+def die(message, code=2):
+    print(f"workitem-pr: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+class Item:
+    """The PR of a workitem and the provider that reaches it."""
+
+    def __init__(self, target):
+        path = Path(target)
+        path = path / "workitem.md" if path.is_dir() else path
+        if not path.is_file():
+            die(f"{target} is not a workitem")
+        self.path = path.resolve()
+        self.workspace = self.path.parent.parent
+        self.fields = read_fields(self.path)
+        url = self.fields.get("pr", "")
+        if not url.startswith("http"):
+            die(f"{self.path.parent.name} has no PR link")
+        self.pr = prs.pr_of(url)
+        self.host = prs.provider(self.pr, self.workspace)
+
+    def repo(self):
+        board = self.fields.get("board")
+        repo = tracker.board(self.workspace, board).get("repo") if board else None
+        if not repo:
+            die(f"board {board} has no repo, so no PRs")
+        return os.path.expanduser(repo)
+
+
+def take(args, name):
+    """The value of `--name <value>`, removed from args."""
+    if name not in args or args.index(name) + 1 >= len(args):
+        die(f"{name} is missing")
+    i = args.index(name)
+    value = args[i + 1]
+    del args[i:i + 2]
+    return value
+
+
+def switch(args, name):
+    present = name in args
+    if present:
+        args.remove(name)
+    return present
+
+
+def body_of(args):
+    body_file = take(args, "--body-file")
+    try:
+        body = Path(body_file).read_text()
+    except OSError as e:
+        die(f"cannot read --body-file: {e}")
+    if not body.strip():
+        die(f"--body-file {body_file} is empty")
+    return body
+
+
+def one(args, usage):
+    if len(args) != 1:
+        die(usage)
+    return Item(args[0])
+
+
+def conversation(args):
+    as_json = switch(args, "--json")
+    item = one(args, "conversation takes <workitem> [--json]")
+    found = item.host.conversation(item.pr)
+    if as_json:
+        print(json.dumps(found))
+        return
+    print(f"# {item.pr.url}\n\n{found['body'].strip() or '(no description)'}")
+    for n in found["notes"]:
+        verdict = f" ({n['state'].lower().replace('_', ' ')})" if n["state"] else ""
+        where = f" · {n['path']}" if n["path"] else ""
+        print(f"\n## {n['kind']} by {n['author']}{verdict}\n\nPosted {n['at']} · id {n['id']}{where}\n\n{n['body'].strip()}")
+
+
+def checks(args):
+    as_json = switch(args, "--json")
+    item = one(args, "checks takes <workitem> [--json]")
+    found = item.host.checks(item.pr)
+    if as_json:
+        print(json.dumps(found))
+        return
+    for c in found:
+        print("\t".join([c["name"], c["state"], c["link"]]))
+
+
+def failed_log(args):
+    item = one(args, "failed-log takes <workitem>")
+    print(item.host.failed_log(item.pr) or "no failed checks")
+
+
+def base(args):
+    item = one(args, "base takes <workitem>")
+    print(item.host.base(item.pr))
+
+
+def state(args):
+    item = one(args, "state takes <workitem>")
+    print(item.host.state(item.pr))
+
+
+def comment(args):
+    body = body_of(args)
+    item = one(args, "comment takes <workitem> --body-file <file>")
+    item.host.comment(item.pr, body)
+    print(f"commented on {item.pr.url}")
+
+
+def reply(args):
+    body = body_of(args)
+    if len(args) != 2:
+        die("reply takes <workitem> <comment id> --body-file <file>")
+    item = Item(args[0])
+    item.host.reply(item.pr, args[1], body)
+    print(f"replied to {args[1]} on {item.pr.url}")
+
+
+def ready(args):
+    item = one(args, "ready takes <workitem>")
+    item.host.ready(item.pr)
+    print(f"{item.pr.url} is ready for review")
+
+
+def add_reviewer(args):
+    if len(args) < 2:
+        die("add-reviewer takes <workitem> <reviewer>...")
+    item = Item(args[0])
+    item.host.add_reviewers(item.pr, args[1:])
+    print(f"asked {', '.join(args[1:])} to review {item.pr.url}")
+
+
+def merge(args):
+    item = one(args, "merge takes <workitem>")
+    item.host.merge(item.pr)
+    print(f"merged {item.pr.url}")
+
+
+def rebase(args):
+    item = one(args, "rebase takes <workitem>")
+    item.host.rebase(item.pr, item.repo())
+    print(f"rebased {item.pr.url}")
+
+
+COMMANDS = {"conversation": conversation, "checks": checks, "failed-log": failed_log, "base": base, "state": state,
+            "comment": comment, "reply": reply, "ready": ready, "add-reviewer": add_reviewer, "merge": merge, "rebase": rebase}
+
+if __name__ == "__main__":
+    command, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 2 else (None, [])
+    if command not in COMMANDS:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+    try:
+        COMMANDS[command](rest)
+    except tracker.Problem as e:
+        die(str(e))
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as e:
+        die(str(e) or type(e).__name__, 1)

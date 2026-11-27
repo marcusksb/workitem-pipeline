@@ -76,7 +76,10 @@ def gh_env(workspace):
     env = dict(os.environ)
     account = settings(workspace).get("github_account") if workspace else None
     if account and not env.get("GH_TOKEN"):
-        result = subprocess.run([gh_path(), "auth", "token", "--user", account], capture_output=True, text=True, timeout=TIMEOUT)
+        try:
+            result = subprocess.run([gh_path(), "auth", "token", "--user", account], capture_output=True, text=True, timeout=TIMEOUT)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            raise Problem(f"cannot read the token of GitHub account {account}: {e}")
         if result.returncode != 0 or not result.stdout.strip():
             raise Problem(f"GitHub account {account} is not logged in: run gh auth login")
         env["GH_TOKEN"] = result.stdout.strip()
