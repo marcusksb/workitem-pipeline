@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import { frontmatterFields } from "./boardState";
 import { IssueStatusChip } from "./IssueStatusChip";
@@ -28,17 +28,25 @@ function Value({ name, value, category }: { name: string; value: string; categor
   return <>{value}</>;
 }
 
+type Props = { item: Item; content: string; onSaved: () => void; onDirtyChange: (dirty: boolean) => void };
+
 /** The frontmatter of a workitem as labelled fields; Edit turns the values into inputs. Only
  * the changed fields are saved, so an agent's edit to another field is never overwritten. */
-export function Info({ item, content, onSaved }: { item: Item; content: string; onSaved: () => void }) {
+export function Info({ item, content, onSaved, onDirtyChange }: Props) {
   const fields = frontmatterFields(content);
   const category = fields.find(([name]) => name === "issue_status_category")?.[1] ?? "";
   const [draft, setDraft] = useState<Record<string, string>>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const changed = draft ? Object.fromEntries(fields.filter(([name, value]) => name in draft && draft[name] !== value).map(([name]) => [name, draft[name]])) : {};
+  const dirty = Object.keys(changed).length > 0;
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+  // The editor may go away while App still thinks it is dirty.
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
   if (fields.length === 0) return <Muted className="italic">No frontmatter.</Muted>;
 
-  const changed = draft ? Object.fromEntries(fields.filter(([name, value]) => name in draft && draft[name] !== value).map(([name]) => [name, draft[name]])) : {};
   const close = () => {
     setDraft(undefined);
     setError(undefined);
@@ -57,11 +65,20 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
   };
 
   return (
-    <>
+    <div
+      className="contents"
+      onKeyDown={(e) => {
+        // Escape drops the draft instead of closing the panel; unlike Cancel, it asks when fields changed.
+        if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || !draft) return;
+        e.stopPropagation();
+        // A save is not interruptible, like the disabled Cancel button.
+        if (!busy && (!dirty || confirm("Discard your changes?"))) close();
+      }}
+    >
       <ActionBar>
         {draft ? (
           <>
-            <Button variant="primary" disabled={busy || Object.keys(changed).length === 0} onClick={() => void save()}>
+            <Button variant="primary" disabled={busy || !dirty} onClick={() => void save()}>
               <IconCheck />
               Save
             </Button>
@@ -88,7 +105,7 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
                   className="h-7 px-1.5"
                   value={draft[name] ?? value}
                   onChange={(e) => setDraft({ ...draft, [name]: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && Object.keys(changed).length > 0 && void save()}
+                  onKeyDown={(e) => e.key === "Enter" && dirty && void save()}
                   spellCheck={false}
                 />
               ) : (
@@ -98,6 +115,6 @@ export function Info({ item, content, onSaved }: { item: Item; content: string; 
           </div>
         ))}
       </dl>
-    </>
+    </div>
   );
 }
