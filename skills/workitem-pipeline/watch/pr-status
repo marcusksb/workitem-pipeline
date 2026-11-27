@@ -18,7 +18,10 @@ can be reopened, so it is still read), it writes these frontmatter keys, only wh
   pr_ci_fix           the same without checks whose name contains an --ignore word (the CI fixer)
   pr_ci_failed        names of the red checks
   pr_ci_required      passing | failing | pending | none, over the required checks only (pr-remind)
-  pr_merge            mergeable | conflicting | unknown
+  pr_merge            mergeable (the host would merge it now: no conflict, and the branch
+                      rules' required reviews and checks are met) | blocked (no conflict, but a
+                      rule, a draft or a base it is behind holds it) | conflicting | unknown. On
+                      Bitbucket only conflicts are known: mergeable means no conflict
   pr_approval         approved | changes_requested | review_required | none
   pr_approved_by_me   true | false
   pr_draft            true | false
@@ -131,17 +134,30 @@ def approved_by(raw, me):
     return bool(verdicts) and verdicts[-1] == "APPROVED"
 
 
+def merge_of(raw):
+    """`mergeable` says only whether the branch conflicts; GitHub's `mergeStateStatus` adds the
+    branch rules. UNSTABLE (only optional checks red) and HAS_HOOKS still merge. Bitbucket nodes
+    carry no `mergeStateStatus`, so there no conflict is mergeable."""
+    if raw.get("mergeable") == "CONFLICTING":
+        return "conflicting"
+    if raw.get("mergeable") != "MERGEABLE":
+        return "unknown"
+    state = raw.get("mergeStateStatus")
+    if state in ("BLOCKED", "BEHIND", "DRAFT"):
+        return "blocked"
+    return "unknown" if state == "UNKNOWN" else "mergeable"
+
+
 def facts_of(raw, me, ignore):
     """The frontmatter values of an open PR, comments aside."""
     checks = raw.get("statusCheckRollup")
     approval = {"APPROVED": "approved", "CHANGES_REQUESTED": "changes_requested", "REVIEW_REQUIRED": "review_required"}
-    merge = {"MERGEABLE": "mergeable", "CONFLICTING": "conflicting"}
     return {
         "pr_state": "open",
         "pr_ci": ci_of(checks),
         "pr_ci_fix": ci_of(checks, ignore),
         "pr_ci_failed": ",".join(failed_checks(checks)),
-        "pr_merge": merge.get(raw.get("mergeable"), "unknown"),
+        "pr_merge": merge_of(raw),
         "pr_approval": approval.get(raw.get("reviewDecision"), "none"),
         "pr_approved_by_me": "true" if approved_by(raw, me) else "false",
         "pr_draft": "true" if raw.get("isDraft") else "false",

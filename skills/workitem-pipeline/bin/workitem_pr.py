@@ -139,7 +139,7 @@ def note(kind, id, author, body, at, state=None, path=None):
 # --- GitHub ----------------------------------------------------------------------------------
 
 # NUMBER is the PR's number; isRequired needs it.
-PULL_FIELDS = """number state isDraft mergeable reviewDecision headRefOid createdAt updatedAt
+PULL_FIELDS = """number state isDraft mergeable mergeStateStatus reviewDecision headRefOid createdAt updatedAt
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { contexts(first: 100) { nodes {
     ... on CheckRun { name status conclusion startedAt completedAt isRequired(pullRequestNumber: NUMBER)
                       checkSuite { workflowRun { workflow { name } } } }
@@ -248,7 +248,8 @@ class GitHub:
         """GitHub says UNKNOWN while it computes mergeability; asking again a moment later helps."""
         pulls, me = self.read_nodes(urls, PULL_FIELDS)
         for _ in range(UNKNOWN_RETRIES):
-            computing = [u for u, n in pulls.items() if isinstance(n, dict) and n["state"] == "OPEN" and n["mergeable"] == "UNKNOWN"]
+            computing = [u for u, n in pulls.items() if isinstance(n, dict) and n["state"] == "OPEN"
+                         and "UNKNOWN" in (n["mergeable"], n.get("mergeStateStatus"))]
             if not computing:
                 break
             time.sleep(UNKNOWN_RETRY_WAIT)
