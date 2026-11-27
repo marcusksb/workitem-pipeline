@@ -1,4 +1,4 @@
-import { Agent, AgentSession, AgentSettings, BoardSettings, Detail, FileEntry, Item, Learnings, Pipelines, Plan, PlanDetail, PrConversation, Workspace, WorkspaceChange, StageSettings, StageSource, UiState } from "./types";
+import { Agent, AgentSession, AgentSettings, BoardSettings, Detail, FileEntry, Item, Learnings, Plan, PlanDetail, PrConversation, Workspace, WorkspaceChange, StageSettings, StageSource, UiState } from "./types";
 
 type Launched = { session: string };
 
@@ -28,7 +28,6 @@ export const api = {
   login: (token: string) => request<void>("POST", "/api/login", { token }),
   me: () => request<void>("GET", "/api/me"),
   state: () => request<UiState>("GET", "/api/state"),
-  workspaces: () => request<Workspace[]>("GET", "/api/workspaces"),
   addWorkspace: (name: string) => request<Workspace>("POST", "/api/workspaces", { name }),
   updateWorkspace: (name: string, change: WorkspaceChange) => request<Workspace>("PUT", `/api/workspaces/${segment(name)}`, change),
   agentSettings: () => request<AgentSettings>("GET", "/api/agent"),
@@ -39,7 +38,6 @@ export const api = {
     request<void>("PUT", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}`, settings),
   deleteBoard: (workspace: string, board: string) =>
     request<{ removed: number; worktrees_left: string[] }>("DELETE", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}`),
-  pipelines: () => request<Pipelines>("GET", "/api/pipelines"),
   stageSource: (workspace: string, board: string, stage: string) =>
     request<StageSource>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/stages/${segment(stage)}/source`),
   updateStage: (workspace: string, board: string, stage: string, settings: StageSettings) =>
@@ -50,13 +48,11 @@ export const api = {
     request<Learnings>("GET", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/learnings`),
   saveLearnings: (workspace: string, board: string, base: string, content: string) =>
     request<void>("PUT", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/learnings`, { base, content }),
-  items: () => request<Item[]>("GET", "/api/workitems"),
   detail: (workspace: string, dir: string) =>
     request<Detail>("GET", `/api/workitems/${segment(workspace)}/${segment(dir)}`),
   files: (item: Item) => request<FileEntry[]>("GET", `${itemUrl(item)}/files`),
   reveal: (item: Item, path: string) => request<void>("POST", `${itemUrl(item)}/reveal`, { path }),
   prConversation: (item: Item) => request<PrConversation>("GET", `${itemUrl(item)}/pr`),
-  sessions: () => request<AgentSession[]>("GET", "/api/sessions"),
   killAgentSession: (session: AgentSession) => request<void>("DELETE", `/api/sessions/${segment(session.workspace)}/${segment(session.name)}`),
   approve: (item: Item) => request<void>("POST", `${itemUrl(item)}/approve`),
   editBrief: (item: Item, base: string, body: string) => request<void>("POST", `${itemUrl(item)}/brief`, { base, body }),
@@ -72,7 +68,6 @@ export const api = {
   create: (workspace: string, input: string, board: string) =>
     request<Launched>("POST", `/api/workspaces/${segment(workspace)}/create`, { input, board }),
   fixBoard: (workspace: string, board: string) => request<Launched>("POST", `/api/workspaces/${segment(workspace)}/boards/${segment(board)}/fix`),
-  plans: () => request<Plan[]>("GET", "/api/plans"),
   plan: (workspace: string, id: string) => request<PlanDetail>("GET", planUrl(workspace, id)),
   createPlan: (workspace: string, input: string) =>
     request<{ id: string }>("POST", `/api/workspaces/${segment(workspace)}/plans`, { input }),

@@ -402,10 +402,20 @@ describe("agentLine", () => {
     expect(agentLine(item({ agent_status: "blocked: which flag?" }))).toEqual({ label: "Blocked", tone: "bad" });
     expect(agentLine(item({ agent_status: "blocked", gate }))?.label).toBe("Blocked");
     expect(agentLine(item({ agent_status: "working" }))).toBeUndefined();
-    expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "idle" });
+    expect(agentLine(item({ agent_status: "waiting: deploy" }))).toEqual({ label: "Waiting · deploy", tone: "idle" });
     expect(agentLine(item({ gate }))).toEqual({ label: "Needs approval", tone: "gate" });
     expect(agentLine(item({ gate, approved: true }))).toBeUndefined();
     expect(agentLine(item({}))).toBeUndefined();
+  });
+
+  it("shows waiting on CI as the CI icon, and nothing while the PR's CI icon spins", () => {
+    const review: Review = { state: "open", approval: "none", approved_by_me: false, merge: "mergeable", ci: "pending", failed: [] };
+    expect(agentLine(item({ agent_status: "waiting: CI on PR #4" }))).toEqual({ label: "Waiting · CI on PR #4", tone: "wait", ci: true });
+    expect(agentLine(item({ agent_status: "waiting: ci" }))?.ci).toBe(true);
+    expect(agentLine(item({ agent_status: "waiting: CI on d0a7d9b84d", review }))).toBeUndefined();
+    expect(agentLine(item({ agent_status: "waiting: CI on d0a7d9b84d", review: { ...review, ci: "passing" } }))?.ci).toBe(true);
+    expect(agentLine(item({ agent_status: "waiting: CIRCLE" }))).toEqual({ label: "Waiting · CIRCLE", tone: "idle" });
+    expect(agentLine(item({ agent_status: "waiting: deploy after CI" }))?.ci).toBeUndefined();
   });
 });
 

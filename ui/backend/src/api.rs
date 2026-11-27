@@ -74,10 +74,6 @@ fn workspace_infos(state: &AppState, workspaces: &[Workspace]) -> Vec<WorkspaceI
     workspaces.iter().map(info).collect()
 }
 
-pub async fn list_workspaces(State(state): State<Shared>) -> Json<Vec<WorkspaceInfo>> {
-    Json(workspace_infos(&state, &state.store.workspaces()))
-}
-
 #[derive(Deserialize)]
 pub struct NewWorkspace {
     name: String,
@@ -308,10 +304,6 @@ pub(crate) fn stage_problems(state: &AppState, workspace: &Workspace, board: &st
         .collect()
 }
 
-pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
-    Json(boards(&state, &state.store.workspaces()))
-}
-
 /// What the board lets a human do with an item in its current stage, so the UI never needs to
 /// know stage names.
 #[derive(Serialize, Default)]
@@ -322,7 +314,7 @@ pub struct Roles {
     pr_watch: bool,
     /// An approved item here can be started.
     develops: bool,
-    /// The stage's actions whose `when` the item matches now (decision 86).
+    /// The stage's actions whose `when` the item matches now (decision 87).
     actions: Vec<ActionView>,
 }
 
@@ -409,11 +401,6 @@ async fn items(state: &AppState, workspaces: &[Workspace], sessions: &[tmux::Ses
     futures_util::future::join_all(per_workspace).await.into_iter().flatten().collect()
 }
 
-pub async fn list_items(State(state): State<Shared>) -> Json<Vec<Item>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    Json(items(&state, &state.store.workspaces(), &sessions).await)
-}
-
 #[derive(Serialize)]
 pub struct Detail {
     #[serde(flatten)]
@@ -487,12 +474,6 @@ fn agent_sessions(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &H
                 .collect::<Vec<_>>()
         })
         .collect()
-}
-
-pub async fn list_sessions(State(state): State<Shared>) -> Json<Vec<AgentSession>> {
-    let sessions = tmux::sessions(state.tmux_socket.as_deref()).await;
-    let dead = tmux::dead_sessions(state.tmux_socket.as_deref()).await;
-    Json(agent_sessions(&state.store.workspaces(), &sessions, &dead))
 }
 
 /// Everything the board polls, from one list of workspaces and one look at tmux, so its parts

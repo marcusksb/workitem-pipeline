@@ -41,7 +41,7 @@ export function StageActionBar({ item, runner: { busy, message, error, run }, on
   );
 }
 
-/** The actions the item's stage offers it now (decision 86); the backend decides which, and checks again on a click.
+/** The actions the item's stage offers it now (decision 87); the backend decides which, and checks again on a click.
  * The bar stays while it has something to report, so an action that changed which ones match still shows its outcome. */
 export function StageActions({ item, onDone, onSession }: { item: Item; onDone: () => void; onSession: () => void }) {
   const runner = useRun(onDone);

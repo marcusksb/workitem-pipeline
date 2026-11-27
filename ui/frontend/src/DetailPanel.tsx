@@ -125,7 +125,7 @@ function Properties({ item, pipelines, onBoard, children }: { item: Item; pipeli
       </Badge>
       <IssueBadge item={item} />
       <PrStatus item={item} />
-      {!isBlocked(item) && <AgentStatus item={{ agent_status: item.agent_status, gate: null, approved: item.approved }} />}
+      {!isBlocked(item) && <AgentStatus item={{ agent_status: item.agent_status, gate: null, approved: item.approved, review: item.review }} />}
       {children}
     </div>
   );

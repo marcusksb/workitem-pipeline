@@ -374,7 +374,7 @@ async fn launch_item_session(
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))
 }
 
-/// Runs a stage action (decision 86) of the item, if its stage still offers it: the item may
+/// Runs a stage action (decision 87) of the item, if its stage still offers it: the item may
 /// have moved, or its frontmatter changed, since the panel showed the button. A `skill` starts as
 /// the item's session like `run_handler`; a `script` runs once and then the workspace's `pr-status`
 /// and the stage's watchers are made due and the dispatcher woken, so the next pass reads what it

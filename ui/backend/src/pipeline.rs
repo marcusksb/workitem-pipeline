@@ -141,7 +141,7 @@ pub struct Stage {
     #[serde(default, skip_serializing)]
     #[allow(dead_code)]
     on_enter: HashMap<String, String>,
-    /// Buttons of the detail panel for the items here whose frontmatter matches (decision 86).
+    /// Buttons of the detail panel for the items here whose frontmatter matches (decision 87).
     #[serde(default, skip_serializing)]
     pub actions: Vec<Action>,
 }
@@ -576,7 +576,7 @@ impl AppState {
     }
 
     /// Deletes `boards/<name>.json`, the board's `boards/<name>/` folder (skills, watchers,
-    /// learnings) and its last valid file, so `/api/pipelines` stops serving it.
+    /// learnings) and its last valid file, so `/api/state` stops serving it.
     pub fn delete_board(&self, workspace: &Workspace, name: &str) -> Result<(), String> {
         if !valid_board_name(name) {
             return Err(format!("'{name}' is not a board name"));
