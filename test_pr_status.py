@@ -95,6 +95,18 @@ class FactsTest(unittest.TestCase):
         facts = pr.facts_of({"state": "OPEN", "mergeable": "UNKNOWN", "reviewDecision": ""}, "me", IGNORE)
         self.assertEqual((facts["pr_approval"], facts["pr_merge"], facts["pr_ci"]), ("none", "unknown", "none"))
 
+    def test_merge_follows_the_branch_rules_on_github(self):
+        def merge(mergeable, state=None):
+            raw = {"state": "OPEN", "mergeable": mergeable, "reviewDecision": ""}
+            return pr.facts_of({**raw, "mergeStateStatus": state} if state else raw, "me", IGNORE)["pr_merge"]
+        for state in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+            self.assertEqual(merge("MERGEABLE", state), "mergeable", state)
+        for state in ("BLOCKED", "BEHIND", "DRAFT"):
+            self.assertEqual(merge("MERGEABLE", state), "blocked", state)
+        self.assertEqual(merge("MERGEABLE", "UNKNOWN"), "unknown")
+        self.assertEqual(merge("CONFLICTING", "DIRTY"), "conflicting")
+        self.assertEqual(merge("MERGEABLE"), "mergeable", "Bitbucket knows conflicts only")
+
     def test_approved_by_me_follows_my_latest_verdict(self):
         def reviews(*pairs):
             return {"reviews": [{"id": "x", "state": state, "author": {"login": who}} for who, state in pairs]}

@@ -22,6 +22,7 @@ export const item = (over: Partial<Item>): Item => ({
   gate: null,
   pr_watch: false,
   develops: false,
+  actions: [],
   review: null,
   branch: null,
   unpushed: null,

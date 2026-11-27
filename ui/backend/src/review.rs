@@ -28,6 +28,7 @@ pub enum Approval {
 #[serde(rename_all = "snake_case")]
 pub enum Merge {
     Mergeable,
+    Blocked,
     Conflicting,
     Unknown,
 }
@@ -76,6 +77,7 @@ impl PrStatus {
             approved_by_me: get("pr_approved_by_me") == "true",
             merge: match get("pr_merge") {
                 "mergeable" => Merge::Mergeable,
+                "blocked" => Merge::Blocked,
                 "conflicting" => Merge::Conflicting,
                 _ => Merge::Unknown,
             },
@@ -177,5 +179,7 @@ mod tests {
         );
         let merged = PrStatus::from_fields(&fields(&[("pr_state", "merged"), ("pr_ci", "odd")])).unwrap();
         assert_eq!((merged.state, merged.ci, merged.merge, merged.failed.len()), (State::Merged, Ci::None, Merge::Unknown, 0));
+        let blocked = PrStatus::from_fields(&fields(&[("pr_state", "open"), ("pr_merge", "blocked")])).unwrap();
+        assert_eq!(blocked.merge, Merge::Blocked);
     }
 }
