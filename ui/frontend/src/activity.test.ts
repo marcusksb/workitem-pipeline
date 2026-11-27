@@ -4,7 +4,7 @@ import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
 const flow: Pipelines = {
-  app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [] }],
+  app: [{ name: "default", pipeline: { repo: "/r/app", order: [], entry: "todo", stages: [{ ...stage("todo"), next: ["done"] }, stage("done")] }, error: null, watched: [], paused: [], problems: {} }],
 };
 
 const review = (over: Partial<Review> = {}): Review => ({ state: "open", approval: "review_required", approved_by_me: false, merge: "mergeable", ci: "pending", failed: [], ...over });

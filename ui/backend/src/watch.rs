@@ -291,7 +291,7 @@ impl Job {
     }
 }
 
-/// Runs the stage action `script` (decision 84) once for `item`, like a watcher of its stage: in
+/// Runs the stage action `script` (decision 86) once for `item`, like a watcher of its stage: in
 /// the board's repo (the workspace folder without one), with the same env vars, `GH_TOKEN` and
 /// `args`, but the one item as a JSON object on stdin. The script comes from the `actions/` folders,
 /// resolved like `resolve`. A failed run's error is its stderr.

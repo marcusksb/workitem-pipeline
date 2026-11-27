@@ -100,6 +100,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/agent", get(api::default_agent).put(api::set_default_agent))
         .route("/api/workspaces/{workspace}/boards", post(api::add_board))
         .route("/api/workspaces/{workspace}/boards/{board}", put(api::update_board).delete(actions::delete_board))
+        .route("/api/workspaces/{workspace}/boards/{board}/fix", post(actions::fix_board))
         .route("/api/pipelines", get(api::pipelines))
         .route("/api/workspaces/{workspace}/boards/{board}/stages/{stage}", put(api::update_stage))
         .route("/api/workspaces/{workspace}/boards/{board}/stages/{stage}/source", get(api::stage_source))

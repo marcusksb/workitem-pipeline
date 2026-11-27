@@ -141,7 +141,7 @@ pub struct Stage {
     #[serde(default, skip_serializing)]
     #[allow(dead_code)]
     on_enter: HashMap<String, String>,
-    /// Buttons of the detail panel for the items here whose frontmatter matches (decision 84).
+    /// Buttons of the detail panel for the items here whose frontmatter matches (decision 86).
     #[serde(default, skip_serializing)]
     pub actions: Vec<Action>,
 }
@@ -431,7 +431,7 @@ pub struct Cached {
     error: Option<String>,
 }
 
-fn board_path(workspace: &Workspace, board: &str) -> PathBuf {
+pub(crate) fn board_path(workspace: &Workspace, board: &str) -> PathBuf {
     workspace.dir.join("boards").join(format!("{board}.json"))
 }
 

@@ -25,7 +25,7 @@ export function StageActionBar({ item, runner: { busy, message, error, run } }: 
   );
 }
 
-/** The actions the item's stage offers it now (decision 84); the backend decides which, and checks again on a click. */
+/** The actions the item's stage offers it now (decision 86); the backend decides which, and checks again on a click. */
 export function StageActions({ item, onDone }: { item: Item; onDone: () => void }) {
   const runner = useRun(onDone);
   return item.actions.length > 0 ? <StageActionBar item={item} runner={runner} /> : null;
