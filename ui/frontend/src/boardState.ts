@@ -75,6 +75,36 @@ export function stageProblems(pipelines: Pipelines | undefined, workspaces: stri
   );
 }
 
+/** One problem of a board: its file (`stage` absent) or a stage's file that does not resolve. `title` is the gist, `detail` the rest of
+ * the message, `places` the folders a resolver looked in (then `detail` is empty). */
+export type BoardProblem = { stage?: { name: string; label: string }; title: string; detail: string; places: string[] };
+
+/** A workspace's problems with board `board`: an invalid file and unresolved stage files. */
+export type BoardProblems = { workspace: string; problems: BoardProblem[] };
+
+/** Splits a resolver message like `handler 'x' not found: no x/SKILL.md in /a, /b` into its gist and the folders it looked in. */
+export function splitProblem(message: string): { title: string; detail: string; places: string[] } {
+  const found = /^(.*? not found)(?::\s*|\s+)(.+)$/s.exec(message);
+  if (!found) return { title: message, detail: "", places: [] };
+  const looked = /^(?:.* )?in (.+)$/s.exec(found[2]);
+  return looked ? { title: found[1], detail: "", places: looked[1].split(", ") } : { title: found[1], detail: found[2], places: [] };
+}
+
+/** The workspaces of `workspaces` whose board `board` has problems, stages in column order with their `columns` labels. */
+export function boardProblems(pipelines: Pipelines | undefined, workspaces: string[], board: string, columns: { name: string; label: string }[]): BoardProblems[] {
+  return workspaces.flatMap((workspace) => {
+    const info = boardOfWorkspace(pipelines, workspace, board);
+    if (!info) return [];
+    const file: BoardProblem[] = info.error ? [{ title: info.pipeline ? "Board file not in use, showing the last valid one" : "No valid board file yet", detail: info.error, places: [] }] : [];
+    const stages = Object.entries(info.problems).sort(([a], [b]) => columns.findIndex((c) => c.name === a) - columns.findIndex((c) => c.name === b));
+    const problems = [
+      ...file,
+      ...stages.flatMap(([name, messages]) => messages.map((message) => ({ stage: { name, label: columns.find((c) => c.name === name)?.label ?? name }, ...splitProblem(message) }))),
+    ];
+    return problems.length ? [{ workspace, problems }] : [];
+  });
+}
+
 /** Board names of `workspaces`, by name. */
 export function boardNames(pipelines: Pipelines | undefined, workspaces: string[]): string[] {
   const names = new Set<string>();

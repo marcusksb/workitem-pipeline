@@ -270,7 +270,7 @@ pub struct BoardInfo {
     /// Stages whose watchers are paused.
     paused: Vec<String>,
     /// Per stage, the files it runs that do not resolve (handler, fixer skills, watch scripts);
-    /// only stages with problems (decision 83).
+    /// only stages with problems (decision 84).
     problems: HashMap<String, Vec<String>>,
     #[serde(flatten)]
     resolved: Resolved,
@@ -281,17 +281,25 @@ fn boards(state: &AppState, workspaces: &[Workspace]) -> HashMap<String, Vec<Boa
     let boards = |workspace: &Workspace| {
         let info = |name: String| {
             let resolved = state.pipeline(workspace, &name);
-            let stages = resolved.pipeline.iter().flat_map(|p| &p.stages);
-            let watched = stages.clone().filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
-            let problems = stages
-                .map(|s| (s.name.clone(), StageFiles::of(state, workspace, &name, s).problems()))
-                .filter(|(_, problems)| !problems.is_empty())
-                .collect();
+            let watched = resolved.pipeline.iter().flat_map(|p| &p.stages).filter(|s| !s.watch.is_empty()).map(|s| s.name.clone()).collect();
+            let problems = stage_problems(state, workspace, &name, &resolved).into_iter().collect();
             BoardInfo { watched, paused: crate::watch::paused_stages(state, workspace, &name), problems, resolved, name }
         };
         state.board_names(workspace).into_iter().map(info).collect()
     };
     workspaces.iter().map(|workspace| (workspace.name.clone(), boards(workspace))).collect()
+}
+
+/// Per stage of `resolved` (board `board`), the files it runs that do not resolve, in stage
+/// order; only stages with problems.
+pub(crate) fn stage_problems(state: &AppState, workspace: &Workspace, board: &str, resolved: &Resolved) -> Vec<(String, Vec<String>)> {
+    resolved
+        .pipeline
+        .iter()
+        .flat_map(|p| &p.stages)
+        .map(|s| (s.name.clone(), StageFiles::of(state, workspace, board, s).problems()))
+        .filter(|(_, problems)| !problems.is_empty())
+        .collect()
 }
 
 pub async fn pipelines(State(state): State<Shared>) -> Json<HashMap<String, Vec<BoardInfo>>> {
@@ -433,6 +441,8 @@ pub struct AgentSession {
     waiting: bool,
     /// The agent exited and `remain-on-exit` keeps the pane: it ended without killing its session.
     dead: bool,
+    /// `create` (a workitem-create session) or `fix` (fixes a board's problems, decision 85).
+    purpose: &'static str,
 }
 
 /// `wi-new-*` sessions of the configured workspaces, running or dead.
@@ -443,7 +453,13 @@ fn agent_sessions(workspaces: &[Workspace], sessions: &[tmux::Session], dead: &H
             sessions
                 .iter()
                 .filter(|s| tmux::is_agent_session(&s.name) && tmux::named(sessions, workspace, &s.name).is_some())
-                .map(|s| AgentSession { workspace: workspace.name.clone(), name: s.name.clone(), waiting: s.waiting, dead: dead.contains(&s.name) })
+                .map(|s| AgentSession {
+                    workspace: workspace.name.clone(),
+                    name: s.name.clone(),
+                    waiting: s.waiting,
+                    dead: dead.contains(&s.name),
+                    purpose: if tmux::is_fix_session(&s.name) { "fix" } else { "create" },
+                })
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -586,7 +602,7 @@ type Resolution = (String, Result<Found, String>);
 
 /// The files a stage runs, resolved the way the dispatcher resolves them: its watch scripts, the
 /// handler skill (a `builtin:` one has none) and on a PR stage the fixer skills. The stage dialog
-/// shows them and the board lists the ones that do not resolve, so both agree (decision 83).
+/// shows them and the board lists the ones that do not resolve, so both agree (decision 84).
 struct StageFiles {
     scripts: Vec<Resolution>,
     handler: Option<Resolution>,

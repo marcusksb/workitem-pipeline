@@ -2013,6 +2013,33 @@ async fn stage_source_shows_the_files_the_dispatcher_resolves() {
 }
 
 #[tokio::test]
+async fn fix_board_starts_an_agent_with_the_board_problems() {
+    let w = world();
+    let (status, body) = post(&w, "/api/workspaces/app/boards/default/fix", "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "every file of the bundled board resolves: {body}");
+    let (status, _) = post(&w, "/api/workspaces/app/boards/nope/fix", "").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    fs::create_dir_all(w.ws.join("boards")).unwrap();
+    fs::write(w.ws.join("boards/research.json"), board(&w, r#"[{"name":"qa","handler":"nope","auto":true}]"#)).unwrap();
+    let (status, body) = post(&w, "/api/workspaces/app/boards/research/fix", "").await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let session = serde_json::from_str::<serde_json::Value>(&body).unwrap()["session"].as_str().unwrap().to_string();
+    assert!(session.starts_with("wi-new-fix-"), "{session}");
+
+    let sessions: serde_json::Value = serde_json::from_str(&get(&w, "/api/sessions").await).unwrap();
+    let listed = sessions.as_array().unwrap().iter().find(|s| s["name"] == session.as_str()).cloned().unwrap();
+    assert_eq!(listed["purpose"], "fix");
+
+    let logs = w.dir.path().join("logs");
+    let fix_log = || fs::read_dir(&logs).unwrap().filter_map(Result::ok).map(|e| fs::read_to_string(e.path()).unwrap_or_default()).find(|t| t.contains("Fix the configuration of board research"));
+    eventually("stub recorded the fix prompt", || fix_log().is_some()).await;
+    let log = fix_log().unwrap();
+    assert!(log.contains("- Stage qa: handler 'nope' not found"), "{log}");
+    assert!(log.contains(&format!("tmux kill-session -t {session}")), "{log}");
+}
+
+#[tokio::test]
 async fn files_tab_lists_and_serves_the_workitem_folder_sandboxed() {
     let w = world();
     write_item(&w.ws, "T-1-files", "analyze", "");

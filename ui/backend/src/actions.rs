@@ -528,9 +528,36 @@ pub async fn create(
         Some(board) => return Err(ApiError(StatusCode::BAD_REQUEST, format!("the workspace has no board '{board}'"))),
         None => boards.first().cloned().ok_or_else(|| conflict("add a board to the workspace first"))?,
     };
-    let id: [u8; 3] = rand::rng().random();
-    let session = format!("wi-new-{}", id.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let session = agent_session_name("wi-new-");
     let prompt = launch::create_prompt(&state, &workspace, &session, body.input.trim(), &board).map_err(conflict)?;
+    let _busy = state.busy.lock().await;
+    launch::spawn(&state, &session, &workspace, Scope::Workspace, &prompt).await.map_err(conflict)?;
+    Ok((StatusCode::ACCEPTED, Json(Launched { session })))
+}
+
+/// A fresh `<prefix><hex id>` session name.
+fn agent_session_name(prefix: &str) -> String {
+    let id: [u8; 3] = rand::rng().random();
+    format!("{prefix}{}", id.iter().map(|b| format!("{b:02x}")).collect::<String>())
+}
+
+/// Starts an agent that fixes what the board banner shows (decision 85): an invalid board file
+/// and stage files that do not resolve, as the backend sees them now.
+pub async fn fix_board(
+    State(state): State<Shared>,
+    UrlPath((workspace, board)): UrlPath<(String, String)>,
+) -> Result<(StatusCode, Json<Launched>)> {
+    let workspace = state.store.workspace(&workspace).ok_or(ApiError::not_found("workspace"))?;
+    if !state.board_names(&workspace).contains(&board) {
+        return Err(ApiError::not_found("board"));
+    }
+    let resolved = state.pipeline(&workspace, &board);
+    let problems = crate::api::stage_problems(&state, &workspace, &board, &resolved);
+    if resolved.error.is_none() && problems.is_empty() {
+        return Err(conflict("the board has no problems to fix"));
+    }
+    let session = agent_session_name("wi-new-fix-");
+    let prompt = launch::fix_board_prompt(&state, &workspace, &board, resolved.error.as_deref(), &problems, &session);
     let _busy = state.busy.lock().await;
     launch::spawn(&state, &session, &workspace, Scope::Workspace, &prompt).await.map_err(conflict)?;
     Ok((StatusCode::ACCEPTED, Json(Launched { session })))

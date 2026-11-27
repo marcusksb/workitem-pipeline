@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentLine, alertsFor, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, stageProblems, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { agentLine, alertsFor, cardChildren, orderFor, blockedByBoard, boardColors, itemsByBoard, blockedKey, boardNames, byStage, columnsFor, isBlocked, issueDone, newlyMatching, readyToMerge, isWaiting, issueCategory, newlyBlocked, waitingFor, pauseState, stageProblems, boardProblems, splitProblem, boardLabel, openDependencies, repoName, highlight, searchActions, searchItems, shownBoard, frontmatterFields, stripFrontmatter, toggleTask, treeOrder, UNKNOWN_STAGE } from "./boardState";
 import { item, stage } from "./testFixtures";
 import { Pipelines, Review } from "./types";
 
@@ -54,6 +54,40 @@ describe("stageProblems", () => {
   it("is empty for a stage without problems or an unknown board", () => {
     expect(stageProblems(some, ["app", "lib"], "default", "todo")).toEqual([]);
     expect(stageProblems(some, ["app"], "nope", "doing")).toEqual([]);
+  });
+});
+
+describe("splitProblem", () => {
+  it("splits a resolver message into its gist and where it looked", () => {
+    expect(splitProblem("handler 'x' not found: no x/SKILL.md in /a, /b")).toEqual({ title: "handler 'x' not found", detail: "", places: ["/a", "/b"] });
+    expect(splitProblem("watch script 'y' not found in /a, /b")).toEqual({ title: "watch script 'y' not found", detail: "", places: ["/a", "/b"] });
+    expect(splitProblem("'X' is not a handler name")).toEqual({ title: "'X' is not a handler name", detail: "", places: [] });
+  });
+});
+
+describe("boardProblems", () => {
+  const columns = [
+    { name: "todo", label: "To do" },
+    { name: "doing", label: "Doing" },
+  ];
+  it("lists the board file first, then stage problems in column order with their labels", () => {
+    const pipelines: Pipelines = {
+      app: [{ ...board("default", "todo", "doing"), error: "bad json", problems: { doing: ["handler 'x' not found: no x/SKILL.md in /a"], todo: ["watch script 'y' not found in /b"] } }],
+    };
+    expect(boardProblems(pipelines, ["app"], "default", columns)).toEqual([
+      {
+        workspace: "app",
+        problems: [
+          { title: "Board file not in use, showing the last valid one", detail: "bad json", places: [] },
+          { stage: { name: "todo", label: "To do" }, title: "watch script 'y' not found", detail: "", places: ["/b"] },
+          { stage: { name: "doing", label: "Doing" }, title: "handler 'x' not found", detail: "", places: ["/a"] },
+        ],
+      },
+    ]);
+  });
+  it("leaves out workspaces whose board has no problems", () => {
+    expect(boardProblems({ app: [board("default", "todo")] }, ["app"], "default", columns)).toEqual([]);
+    expect(boardProblems({ app: [board("default", "todo")] }, ["app"], "nope", columns)).toEqual([]);
   });
 });
 

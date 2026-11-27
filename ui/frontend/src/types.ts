@@ -118,7 +118,8 @@ export type AgentSettings = { agent: Agent | null; kinds: { kind: AgentKind; ins
 export type WorkspaceChange = { agent?: Agent | null; issue_tracker?: string; github_account?: string };
 
 /** A `wi-new-*` create session. `waiting`: the agent waits for an answer. `dead`: it exited without killing its session. */
-export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean };
+/** `purpose`: `create` writes workitems, `fix` fixes a board's problems (decision 85). */
+export type AgentSession = { workspace: string; name: string; waiting: boolean; dead: boolean; purpose: "create" | "fix" };
 
 /** `GET /api/state`: everything the board polls, read in one go so the parts agree. */
 export type UiState = { workspaces: Workspace[]; pipelines: Pipelines; items: Item[]; sessions: AgentSession[]; plans: Plan[] };

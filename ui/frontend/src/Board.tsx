@@ -2,7 +2,8 @@ import { FormEvent, ReactNode, useState } from "react";
 
 import { api } from "./api";
 import { AgentStatus } from "./AgentStatus";
-import { boardNames, boardOfWorkspace, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, stageProblems, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { boardNames, boardProblems, byStage, cardChildren, stageTitle, columnsFor, isBlocked, isWaiting, isWorking, itemKey, KIND_ICONS, needsApproval, boardLabel, openDependencies, orderFor, pauseState, stageProblems, treeOrder, UNKNOWN_STAGE } from "./boardState";
+import { BoardProblemsPanel } from "./BoardProblems";
 import { Choice, Dialog, DialogForm } from "./Dialog";
 import { FollowUpsChip } from "./FollowUpsChip";
 import { LinkBadges } from "./LinkBadges";
@@ -12,7 +13,7 @@ import { ErrorText, Muted } from "./parts";
 import { StageSource } from "./StageSource";
 import { STAGE_DOT } from "./tone";
 import type { View } from "./TopBar";
-import { Item, Pipelines } from "./types";
+import { AgentSession, Item, Pipelines } from "./types";
 import { Tab } from "./url";
 import { useRun } from "./useRun";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,8 @@ type Props = {
   selected: string | null;
   onSelect: (item: Item, tab?: Tab) => void;
   showWorkspace: boolean;
+  /** Agent sessions without a workitem; a running board fix replaces the fix button. */
+  sessions: AgentSession[] | undefined;
   /** Called after items were removed or a column was paused. */
   onChanged: () => void;
 };
@@ -239,22 +242,13 @@ function Column({ name, label, final, items, board, pause, problems, onInspect, 
   );
 }
 
-export function Board({ items, pipelines, workspaces, board, view, selected, onSelect, showWorkspace, onChanged }: Props) {
+export function Board({ items, pipelines, workspaces, board, view, selected, onSelect, showWorkspace, sessions, onChanged }: Props) {
   const names = boardNames(pipelines, workspaces);
   const active = board && names.includes(board) ? board : (names[0] ?? "");
   const columns = byStage(items, pipelines, active);
   const shown = columnsFor(pipelines, workspaces, active);
   if (pipelines && columns[UNKNOWN_STAGE].length) shown.push({ name: UNKNOWN_STAGE, label: UNKNOWN_STAGE, final: false });
-  const broken = workspaces.flatMap((name) => {
-    const found = pipelines?.[name]?.find((b) => b.name === active);
-    return found?.error ? [{ workspace: name, pipeline: found.pipeline, error: found.error }] : [];
-  });
-  const problems = workspaces.flatMap((workspace) =>
-    Object.entries(boardOfWorkspace(pipelines, workspace, active)?.problems ?? {}).flatMap(([stage, messages]) => {
-      const label = shown.find((c) => c.name === stage)?.label ?? stage;
-      return messages.map((message) => `${workspace}: stage "${label}": ${message}`);
-    }),
-  );
+  const problems = boardProblems(pipelines, workspaces, active, shown);
   const [inspected, setInspected] = useState<{ name: string; label: string }>();
   const card = (item: Item, depth = 0, where?: string) => {
     const parent = item.parent ? items.find((p) => p.workspace === item.workspace && p.dir === item.parent) : undefined;
@@ -275,15 +269,8 @@ export function Board({ items, pipelines, workspaces, board, view, selected, onS
   };
   return (
     <>
-      {broken.map(({ workspace, pipeline, error }) => (
-        <ErrorText className="mb-2" key={workspace}>
-          {workspace}: board "{active}" file not in use, {pipeline ? "showing the last valid one" : "no valid board yet"}. {error}
-        </ErrorText>
-      ))}
-      {problems.map((problem) => (
-        <ErrorText className="mb-2" key={problem}>
-          {problem}
-        </ErrorText>
+      {problems.map((found) => (
+        <BoardProblemsPanel key={found.workspace} found={found} board={active} boardLabel={boardLabel(pipelines, found.workspace, active)} sessions={sessions ?? []} showWorkspace={workspaces.length > 1} />
       ))}
       <div
         data-view={view}

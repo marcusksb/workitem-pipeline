@@ -157,6 +157,7 @@ const CREATE_TONES = { running: "", waiting: "tone-wait", created: "tone-good", 
 function CreateToastView({ toast, leaving, onDismiss, onOpen }: { toast: CreateToast; leaving: boolean; onDismiss: () => void; onOpen: (item: Item) => void }) {
   const { session, state, items } = toast;
   const live = state === "running" || state === "waiting";
+  const fixes = session.purpose === "fix";
   const terminal = (
     <a className="toast-link" href={`/?terminal=${encodeURIComponent(agentTerminal(session.workspace, session.name))}`} target="_blank" rel="noreferrer">
       Open terminal ↗
@@ -167,9 +168,9 @@ function CreateToastView({ toast, leaving, onDismiss, onOpen }: { toast: CreateT
       <div className="toast-inner">
         {state === "running" ? <span className="toast-spinner" aria-hidden /> : <span className="toast-icon" aria-hidden>{state === "waiting" ? "✋" : state === "created" ? "✨" : "💤"}</span>}
         <div className="toast-body">
-          {state === "running" && <span className="toast-text">Creating workitem…</span>}
+          {state === "running" && <span className="toast-text">{fixes ? "Fixing board…" : "Creating workitem…"}</span>}
           {state === "waiting" && <span className="toast-text">Needs your answer</span>}
-          {state === "ended" && <span className="toast-text">Ended without a workitem</span>}
+          {state === "ended" && <span className="toast-text">{fixes ? "Board fix ended" : "Ended without a workitem"}</span>}
           {state === "created" ? (
             <ul className="toast-list">
               {items.map((item) => (
